@@ -5,11 +5,15 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
+from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.packing import PackingRecord
 from app.models.nc import NCRecord
 from app.models.audit import AuditLog
 from app.models.user import User
-from app.schemas.production import MovePartsRequest, MovementResponse
+from app.schemas.production import (
+    MovePartsRequest, MovementResponse,
+    RecordStageProductionRequest, ProductionEntryResponse
+)
 from app.services.oms_integration_service import (
     OMSIntegrationService,
     match_route_stage,
@@ -180,9 +184,12 @@ class ProductionService:
         to_wip.ent_qty += req.quantity_moved
 
         # 7. Quality Gate: Rejections at FI create NC and NEVER enter Packing/BSR!
-        # If moving to Packing / BSR, update PackingRecord
-        is_packing_target = matched_to.upper() in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR") or matched_from.upper() == "FI"
-        if is_packing_target:
+        # If moving from manufacturing/inspection into Packing / BSR, update PackingRecord
+        is_entering_packing = (
+            matched_from.upper() not in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH")
+            and matched_to.upper() in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH")
+        )
+        if is_entering_packing:
             packing_rec = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).with_for_update().first()
             if not packing_rec:
                 packing_rec = PackingRecord(
@@ -285,4 +292,131 @@ class ProductionService:
             current_stage=wo.current_stage,
             timestamp=now,
             message=f"Successfully moved {req.quantity_moved} pieces from {matched_from} to {matched_to} for {wo.wo_number}."
+        )
+
+    @staticmethod
+    def record_stage_production(db: Session, req: RecordStageProductionRequest, current_user: Optional[User] = None) -> ProductionEntryResponse:
+        now = datetime.now()
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).with_for_update().first()
+        if not wo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Work Order '{req.wo_number}' not found."
+            )
+        if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot record production for Work Order '{req.wo_number}' with status '{wo.status.value}'."
+            )
+        
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        route_stages = [r.stage for r in routes]
+        matched_stage = match_route_stage(req.stage, route_stages)
+        if not matched_stage:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stage '{req.stage}' is not part of the route for WO '{req.wo_number}'. Valid route: {' -> '.join(route_stages)}"
+            )
+        
+        total_proc = req.good_qty + req.rejected_quantity
+        if total_proc <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Good quantity and rejected quantity cannot both be zero."
+            )
+
+        wip = db.query(StageWIP).filter(
+            StageWIP.work_order_id == wo.id,
+            StageWIP.stage == matched_stage
+        ).with_for_update().first()
+
+        if not wip:
+            init_ent = wo.physical_wo_qty if route_stages and route_stages[0] == matched_stage else 0
+            wip = StageWIP(
+                work_order_id=wo.id,
+                stage=matched_stage,
+                ent_qty=init_ent,
+                ok_qty=0,
+                inproc_qty=init_ent,
+                onhand_qty=0,
+                rejected_qty=0,
+                available_wip=init_ent
+            )
+            db.add(wip)
+            db.flush()
+
+        if total_proc > wip.available_wip:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot process {total_proc} pieces ({req.good_qty} Good + {req.rejected_quantity} Rej). Only {wip.available_wip} pieces are available at stage '{matched_stage}'."
+            )
+
+        wip.ok_qty += req.good_qty
+        wip.rejected_qty += req.rejected_quantity
+
+        # Record ProductionUpdate log
+        entry = ProductionUpdate(
+            work_order_id=wo.id,
+            stage=matched_stage,
+            machine=req.machine_id,
+            operator_id=current_user.id if current_user else None,
+            shift=req.shift or "Shift A",
+            good_qty=req.good_qty,
+            reject_qty=req.rejected_quantity,
+            status=ProductionStatus.COMPLETED,
+            remarks=req.remarks
+        )
+        db.add(entry)
+
+        # Log NC if rejected
+        if req.rejected_quantity > 0:
+            nc_count = db.query(NCRecord).count()
+            nc_num = f"NC-{nc_count + 1:05d}"
+            nc_record = NCRecord(
+                nc_number=nc_num,
+                work_order_id=wo.id,
+                stage=matched_stage,
+                defect_code=req.defect_code or "DEF-POROSITY",
+                qty=req.rejected_quantity,
+                root_cause=req.remarks or f"Stage production rejection at {matched_stage}",
+                disposition="Scrap",
+                responsibility="Production",
+                status="Open"
+            )
+            db.add(nc_record)
+
+        # Recompute OMS state
+        OMSIntegrationService.recompute_work_order(db, wo)
+
+        # Audit Log
+        audit = AuditLog(
+            user_id=current_user.id if current_user else None,
+            user_name=current_user.full_name if current_user else "Floor Operator",
+            action="STAGE_PRODUCTION_ENTRY",
+            entity="WorkOrder",
+            entity_id=wo.wo_number,
+            old_value=f"Stage: {matched_stage}, Prev OK: {wip.ok_qty - req.good_qty}, Prev Rej: {wip.rejected_qty - req.rejected_quantity}",
+            new_value=f"Completed Good: {req.good_qty}, Rej: {req.rejected_quantity}, Total OK: {wip.ok_qty}",
+            details=f"Production Entry on Machine {req.machine_id or 'Cell'} by {req.operator_name or 'Operator'}"
+        )
+        db.add(audit)
+
+        db.commit()
+        db.refresh(wip)
+        db.refresh(wo)
+
+        return ProductionEntryResponse(
+            success=True,
+            entry_id=str(entry.id),
+            client_request_id=req.client_request_id,
+            wo_number=wo.wo_number,
+            stage=matched_stage,
+            good_qty=req.good_qty,
+            rejected_quantity=req.rejected_quantity,
+            stage_ok_total=wip.ok_qty,
+            stage_rejection_total=wip.rejected_qty,
+            stage_onhand_available=wip.onhand_qty,
+            stage_inproc_remaining=wip.inproc_qty,
+            timestamp=now,
+            message=f"Successfully recorded stage production for {wo.wo_number} at {matched_stage}: {req.good_qty} Good, {req.rejected_quantity} Rejected."
         )

@@ -7,6 +7,7 @@ from app.models.user import User, UserRole
 from app.models.production_movement import ProductionMovement
 from app.schemas.production import (
     MovePartsRequest, MovementResponse, MovementListItem,
+    RecordStageProductionRequest, ProductionEntryResponse,
     WIPMatrixResponse, PlantReconciliationResponse
 )
 from app.services.production_service import ProductionService
@@ -14,6 +15,15 @@ from app.services.work_order_service import WorkOrderService
 from app.services.oms_integration_service import OMSIntegrationService
 
 router = APIRouter(prefix="/api/v1/production", tags=["production"])
+
+@router.post("/entry", response_model=ProductionEntryResponse)
+def record_stage_production(
+    payload: RecordStageProductionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Record production completion (Good Qty & Rejection Qty) at a stage without immediately moving material."""
+    return ProductionService.record_stage_production(db, payload, current_user=user)
 
 @router.post("/move", response_model=MovementResponse)
 def move_parts(

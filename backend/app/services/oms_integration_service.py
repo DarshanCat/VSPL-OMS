@@ -267,7 +267,7 @@ class OMSIntegrationService:
             lp_w = wip_map.get(last_prod)
             prod_done = lp_w is not None and (lp_w.ok_qty > 0 or lp_w.rejected_qty > 0)
 
-        if (pr and pr.dispatched_qty > 0 and pr.ready_for_dispatch_qty == 0 and pr.pending_qty == 0) or wo.status == WOStatus.DISPATCHED:
+        if (pr and pr.dispatched_qty > 0 and pr.ready_for_dispatch_qty == 0 and pr.pending_qty == 0) or str(wo.status).lower() in ("dispatched", "wostatus.dispatched"):
             wo.status = WOStatus.DISPATCHED
             wo.current_stage = "Completed"
         elif prod_done or cur in ("DISPATCH", "Completed"):

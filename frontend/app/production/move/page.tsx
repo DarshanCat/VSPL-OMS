@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ArrowRightLeft,
   Search,
@@ -14,7 +14,9 @@ import {
   ChevronRight,
   TrendingUp,
   BrainCircuit,
-  Sparkles
+  Sparkles,
+  ClipboardList,
+  CheckSquare
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -23,6 +25,7 @@ import {
   getWorkOrders,
   getWorkOrderTracking,
   moveParts,
+  recordStageProduction,
   predictDelay,
   predictRejection
 } from "@/lib/api";
@@ -56,6 +59,9 @@ export default function MovePartsPage() {
   const [availableWOs, setAvailableWOs] = useState<any[]>([]);
   const [searchError, setSearchError] = useState("");
 
+  // Operation Mode: "MOVE" (Physical transfer) or "ENTRY" (Record stage completion)
+  const [operationMode, setOperationMode] = useState<"MOVE" | "ENTRY">("MOVE");
+
   // Form State
   const [quantityToMove, setQuantityToMove] = useState<number | "">("");
   const [rejectedQty, setRejectedQty] = useState<number>(0);
@@ -67,10 +73,21 @@ export default function MovePartsPage() {
 
   // Submission & Result Modal
   const [submitting, setSubmitting] = useState(false);
-  const [moveResult, setMoveResult] = useState<any>(null);
+  const [resultData, setResultData] = useState<any>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [formError, setFormError] = useState("");
+
+  // Tally-Style Keyboard Enter Navigation Refs
+  const inputSearchRef = useRef<HTMLInputElement>(null);
+  const inputGoodQtyRef = useRef<HTMLInputElement>(null);
+  const inputRejQtyRef = useRef<HTMLInputElement>(null);
+  const selectDefectRef = useRef<HTMLSelectElement>(null);
+  const selectMachineRef = useRef<HTMLSelectElement>(null);
+  const selectShiftRef = useRef<HTMLSelectElement>(null);
+  const inputOperatorRef = useRef<HTMLInputElement>(null);
+  const inputRemarksRef = useRef<HTMLInputElement>(null);
+  const btnSubmitRef = useRef<HTMLButtonElement>(null);
 
   // Fetch quick selectable active WOs from backend on load
   useEffect(() => {
@@ -93,33 +110,26 @@ export default function MovePartsPage() {
     if (!woNum || !woNum.trim()) return;
     const targetWO = woNum.trim();
 
-    // 1. Immediately synchronize search input and reset states
     setSearchTerm(targetWO);
     setLoading(true);
     setSearchError("");
     setFormError("");
-    setMoveResult(null);
-
-    // 2. Logging for end-to-end data flow inspection
-    console.log("[MoveParts] Quick Select clicked WO ID:", targetWO);
-    console.log("[MoveParts] Search input value:", targetWO);
-    console.log("[MoveParts] API request URL:", `/api/v1/work-orders/${encodeURIComponent(targetWO)}/tracking`);
+    setResultData(null);
 
     try {
       const data = await getWorkOrderTracking(targetWO);
-      console.log("[MoveParts] API response:", data);
-
       setWoData(data);
       setSearchTerm(data.wo_number);
+
       // Preset default move qty to available WIP
       setQuantityToMove(data.available_wip > 0 ? data.available_wip : "");
       setRejectedQty(0);
       
-      // Preset machine based on next stage
+      // Preset machine based on current/next stage
       const matchingMach = MACHINES.find((m) => m.stage === data.current_stage);
       if (matchingMach) setSelectedMachine(matchingMach.id);
 
-      // 3. Fetch asynchronous ML Predictions for this Work Order
+      // Asynchronously fetch ML risk insights
       predictDelay(data.wo_number)
         .then((pred) => setMlDelayPred(pred))
         .catch(() => setMlDelayPred(null));
@@ -127,6 +137,9 @@ export default function MovePartsPage() {
       predictRejection({ wo_number: data.wo_number, target_stage: data.current_stage })
         .then((pred) => setMlRejPred(pred))
         .catch(() => setMlRejPred(null));
+
+      // Auto focus Good Qty field on successful load
+      setTimeout(() => inputGoodQtyRef.current?.focus(), 150);
 
     } catch (err: any) {
       console.error("[MoveParts] API lookup error:", err);
@@ -145,7 +158,33 @@ export default function MovePartsPage() {
     }
   };
 
-  const handleMoveSubmit = async (e: React.FormEvent) => {
+  // Tally-Style Enter Key Handler
+  const handleKeyDownEnter = (e: React.KeyboardEvent, nextTarget: "rejQty" | "defect" | "machine" | "shift" | "operator" | "remarks" | "submit") => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (nextTarget === "rejQty") {
+        inputRejQtyRef.current?.focus();
+      } else if (nextTarget === "defect") {
+        if (rejectedQty > 0) {
+          selectDefectRef.current?.focus();
+        } else {
+          selectMachineRef.current?.focus();
+        }
+      } else if (nextTarget === "machine") {
+        selectMachineRef.current?.focus();
+      } else if (nextTarget === "shift") {
+        selectShiftRef.current?.focus();
+      } else if (nextTarget === "operator") {
+        inputOperatorRef.current?.focus();
+      } else if (nextTarget === "remarks") {
+        inputRemarksRef.current?.focus();
+      } else if (nextTarget === "submit") {
+        btnSubmitRef.current?.focus();
+      }
+    }
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!woData) return;
 
@@ -153,47 +192,92 @@ export default function MovePartsPage() {
     const rejQtyNum = Number(rejectedQty);
 
     if (moveQtyNum <= 0 && rejQtyNum <= 0) {
-      setFormError("Please enter a valid quantity to move or reject (> 0).");
+      setFormError("Please enter a valid quantity (> 0).");
       return;
     }
 
     if (moveQtyNum + rejQtyNum > woData.available_wip) {
       setFormError(
-        `Cannot move ${moveQtyNum} (with ${rejQtyNum} rejected). Only ${woData.available_wip} pieces are available at stage ${woData.current_stage}.`
+        `Cannot process ${moveQtyNum + rejQtyNum} pieces (${moveQtyNum} Good + ${rejQtyNum} Rejected). Only ${woData.available_wip} pieces are available at stage ${woData.current_stage}.`
       );
-      return;
-    }
-
-    if (!woData.next_allowed_stage) {
-      setFormError("Work Order is already at the final stage or closed.");
       return;
     }
 
     setSubmitting(true);
     setFormError("");
 
-    try {
-      const clientReqId = `REQ-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const res = await moveParts({
-        wo_number: woData.wo_number,
-        from_stage: woData.current_stage,
-        to_stage: woData.next_allowed_stage,
-        quantity_moved: moveQtyNum,
-        rejected_quantity: rejQtyNum,
-        machine_id: selectedMachine,
-        operator_name: operatorName,
-        shift: shift,
-        defect_code: rejQtyNum > 0 ? defectCode : undefined,
-        remarks: remarks || undefined,
-        client_request_id: clientReqId
-      });
+    const clientReqId = `REQ-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-      setMoveResult(res);
+    try {
+      if (operationMode === "MOVE") {
+        if (!woData.next_allowed_stage) {
+          setFormError("Work Order is already at the final stage or completed.");
+          setSubmitting(false);
+          return;
+        }
+
+        const res = await moveParts({
+          wo_number: woData.wo_number,
+          from_stage: woData.current_stage,
+          to_stage: woData.next_allowed_stage,
+          quantity_moved: moveQtyNum,
+          rejected_quantity: rejQtyNum,
+          machine_id: selectedMachine,
+          operator_name: operatorName,
+          shift: shift,
+          defect_code: rejQtyNum > 0 ? defectCode : undefined,
+          remarks: remarks || undefined,
+          client_request_id: clientReqId
+        });
+
+        setResultData({
+          type: "MOVE",
+          title: "Part Movement Recorded",
+          movement_id: res.movement_id,
+          wo_number: res.wo_number,
+          from_stage: res.from_stage,
+          to_stage: res.to_stage,
+          quantity_moved: res.quantity_moved,
+          rejected_quantity: res.rejected_quantity,
+          available_wip_remaining: res.available_wip_remaining,
+          to_stage_available_wip: res.to_stage_available_wip,
+          message: res.message
+        });
+      } else {
+        // Record Stage Production Entry (Processing at stage without immediate transfer)
+        const res = await recordStageProduction({
+          wo_number: woData.wo_number,
+          stage: woData.current_stage,
+          good_qty: moveQtyNum,
+          rejected_quantity: rejQtyNum,
+          machine_id: selectedMachine,
+          operator_name: operatorName,
+          shift: shift,
+          defect_code: rejQtyNum > 0 ? defectCode : undefined,
+          remarks: remarks || undefined,
+          client_request_id: clientReqId
+        });
+
+        setResultData({
+          type: "ENTRY",
+          title: "Stage Production Result Recorded",
+          movement_id: res.entry_id,
+          wo_number: res.wo_number,
+          stage: res.stage,
+          good_qty: res.good_qty,
+          rejected_quantity: res.rejected_quantity,
+          stage_ok_total: res.stage_ok_total,
+          stage_rejection_total: res.stage_rejection_total,
+          stage_onhand_available: res.stage_onhand_available,
+          stage_inproc_remaining: res.stage_inproc_remaining,
+          message: res.message
+        });
+      }
+
       setShowSuccessModal(true);
-      // Reload WO tracking data to update UI
       lookupWO(woData.wo_number);
     } catch (err: any) {
-      setFormError(err?.response?.data?.detail || "Movement failed. Please check validation rules.");
+      setFormError(err?.response?.data?.detail || "Operation failed. Please check validation rules.");
     } finally {
       setSubmitting(false);
     }
@@ -209,24 +293,52 @@ export default function MovePartsPage() {
               <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
                 Shop Floor Execution
               </span>
-              <span className="text-xs text-zinc-400">Physical Part Movement & Verification</span>
+              <span className="text-xs text-zinc-400">Tally-Style Keyboard Operation • OMS Authoritative</span>
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-              Shop Floor Move & Quality Verification
+              Production Entry & Stage Movement
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Record physical batch transfers with authoritative OMS balance, stage-isolated rejection tracking, and ML delay risk intelligence.
+              Record stage-specific OK/rejection results and physical transfers with strict route adherence and zero cumulative distortion.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowQRModal(true)}
-            className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-          >
-            <QrCode className="h-4 w-4 text-blue-600" />
-            <span>Scan QR / Barcode</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Mode Toggle */}
+            <div className="inline-flex rounded-xl bg-zinc-100 dark:bg-zinc-800 p-1 border border-zinc-200 dark:border-zinc-700 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setOperationMode("MOVE")}
+                className={`rounded-lg px-3 py-1.5 transition-all cursor-pointer ${
+                  operationMode === "MOVE"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                }`}
+              >
+                Move & Transfer
+              </button>
+              <button
+                type="button"
+                onClick={() => setOperationMode("ENTRY")}
+                className={`rounded-lg px-3 py-1.5 transition-all cursor-pointer ${
+                  operationMode === "ENTRY"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                }`}
+              >
+                Record Stage Entry
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowQRModal(true)}
+              className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <QrCode className="h-4 w-4 text-blue-600" />
+              <span>Scan QR</span>
+            </button>
+          </div>
         </div>
 
         {/* Search / Lookup Bar */}
@@ -241,10 +353,11 @@ export default function MovePartsPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
               <input
+                ref={inputSearchRef}
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Enter Work Order Number (e.g. WO-1001, WO-1008)..."
+                placeholder="Enter Work Order Number (e.g. WO-1001, WO-1008)... [Press Enter to find]"
                 className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 pl-10 pr-4 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono font-bold"
               />
             </div>
@@ -289,7 +402,7 @@ export default function MovePartsPage() {
         {/* Work Order Card & Move Form */}
         {woData && (
           <div className="space-y-6">
-            {/* Section 19: Operator Summary & Stage-Wise OMS Breakdown Cards */}
+            {/* Operator Summary Header */}
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800">
                 <div>
@@ -305,7 +418,7 @@ export default function MovePartsPage() {
                     </span>
                   </div>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Customer: <span className="font-semibold text-zinc-800 dark:text-zinc-200">{woData.customer_name}</span> | PO: <span className="font-mono">{woData.customer_po}</span> | Released Qty: <span className="font-bold text-zinc-900 dark:text-zinc-100">{woData.physical_wo_qty} pcs</span>
+                    Customer: <span className="font-semibold text-zinc-800 dark:text-zinc-200">{woData.customer_name}</span> | PO: <span className="font-mono">{woData.customer_po}</span> | Planned Qty: <span className="font-bold text-zinc-900 dark:text-zinc-100">{woData.physical_wo_qty} pcs</span>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -318,66 +431,77 @@ export default function MovePartsPage() {
                 </div>
               </div>
 
-              {/* Stage-wise Breakdown Grid (Target, OK Completed, Rejection, Live Status) */}
+              {/* PART 20: LIVE STAGE BOARD (STAGE | TARGET | OK | REJECT | STATUS) */}
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                  Stage-wise Manufacturing Results (OMS Deterministic Engine):
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
-                  {woData.timeline && woData.timeline.map((stgItem: any) => {
-                    const isCur = stgItem.stage === woData.current_stage;
-                    return (
-                      <div
-                        key={stgItem.stage}
-                        className={`rounded-xl p-3 border text-center transition-all ${
-                          isCur
-                            ? "border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/20"
-                            : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-[10px] font-bold text-zinc-400 mb-1">
-                          <span>STAGE</span>
-                          <span className={`px-1.5 py-0.2 rounded font-mono ${isCur ? "bg-blue-600 text-white" : "bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"}`}>
-                            {stgItem.stage}
-                          </span>
-                        </div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                    <ClipboardList className="h-3.5 w-3.5 text-blue-500" />
+                    <span>Live Stage Board (Authoritative OMS State — No Cumulative Distortion):</span>
+                  </span>
+                  <span className="text-[10px] text-zinc-400">
+                    Route: {woData.timeline.map((s: any) => s.stage).join(" ➔ ")}
+                  </span>
+                </div>
 
-                        {/* Large Metric Display */}
-                        <div className="space-y-1 my-1.5">
-                          <div className="text-left">
-                            <span className="text-[9px] text-zinc-400 uppercase font-semibold">Target</span>
-                            <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 font-mono">
+                <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-50 dark:bg-zinc-950/80 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 uppercase text-[10px] font-bold">
+                      <tr>
+                        <th className="py-2.5 px-3">Stage</th>
+                        <th className="py-2.5 px-3 text-right">Target Qty</th>
+                        <th className="py-2.5 px-3 text-right text-emerald-600">OK Completed</th>
+                        <th className="py-2.5 px-3 text-right text-rose-600">Rejection</th>
+                        <th className="py-2.5 px-3 text-right text-blue-600">Live Available WIP</th>
+                        <th className="py-2.5 px-3">Live Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
+                      {woData.timeline && woData.timeline.map((stgItem: any) => {
+                        const isCur = stgItem.stage === woData.current_stage;
+                        return (
+                          <tr
+                            key={stgItem.stage}
+                            className={`transition-colors ${
+                              isCur
+                                ? "bg-blue-50/50 dark:bg-blue-950/30 font-bold"
+                                : "hover:bg-zinc-50/40 dark:hover:bg-zinc-800/30"
+                            }`}
+                          >
+                            <td className="py-2.5 px-3 font-mono font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                              {isCur && <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />}
+                              <span>{stgItem.stage}</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
                               {stgItem.target_qty}
-                            </p>
-                          </div>
-                          <div className="text-left">
-                            <span className="text-[9px] text-zinc-400 uppercase font-semibold">OK Completed</span>
-                            <p className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                               {stgItem.ok_completed_qty}
-                            </p>
-                          </div>
-                          <div className="text-left">
-                            <span className="text-[9px] text-zinc-400 uppercase font-semibold">Rejection</span>
-                            <p className="text-xs font-extrabold text-rose-600 dark:text-rose-400 font-mono">
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
                               {stgItem.rejected_qty}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="pt-1.5 border-t border-zinc-200 dark:border-zinc-800 text-[10px]">
-                          <span className={`font-semibold ${
-                            stgItem.is_completed
-                              ? "text-emerald-600"
-                              : isCur
-                              ? "text-blue-600 font-bold"
-                              : "text-zinc-400"
-                          }`}>
-                            {stgItem.is_completed ? "Completed" : (isCur ? "Active (Live)" : "Pending")}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-600 dark:text-blue-400">
+                              {stgItem.on_hand_wip}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <Badge
+                                variant={
+                                  stgItem.is_completed
+                                    ? "green"
+                                    : isCur
+                                    ? "blue"
+                                    : "gray"
+                                }
+                                size="sm"
+                              >
+                                {stgItem.is_completed ? "COMPLETED" : (isCur ? "IN PROCESS" : "WAITING")}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -395,7 +519,7 @@ export default function MovePartsPage() {
                           <span>Delay Risk: <strong className="text-white">{mlDelayPred.delay_probability_pct}% ({mlDelayPred.risk_level})</strong> | Est Completion: <strong className="text-white">{mlDelayPred.expected_completion_date}</strong>. </span>
                         )}
                         {mlRejPred?.predicted_rejection_rate_pct !== undefined && (
-                          <span>Predicted Quality Scrap at {mlRejPred.stage}: <strong className="text-white">{mlRejPred.predicted_rejection_rate_pct}% ({mlRejPred.expected_rejection_qty} pcs)</strong>.</span>
+                          <span>Predicted Scrap at {mlRejPred.stage}: <strong className="text-white">{mlRejPred.predicted_rejection_rate_pct}% ({mlRejPred.expected_rejection_qty} pcs)</strong>.</span>
                         )}
                       </p>
                     </div>
@@ -407,47 +531,62 @@ export default function MovePartsPage() {
               )}
             </div>
 
-            {/* Transfer Execution Form */}
+            {/* PART 18 & 19: OPERATOR TALLY-STYLE KEYBOARD ENTRY FORM */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Current Buffer Info */}
+              {/* Left Live Status Box */}
               <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-4">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                  Live Buffer Execution
+                  Current Execution State
                 </span>
                 
                 <div className="rounded-xl bg-blue-50 dark:bg-blue-950/40 p-4 border border-blue-200 dark:border-blue-900/40 space-y-2">
-                  <p className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Current Stage</p>
+                  <p className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Active Stage</p>
                   <p className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 font-mono">
                     Stage {woData.current_stage}
                   </p>
                   <p className="text-xs font-bold text-emerald-600">
-                    {woData.available_wip} pieces available to move
+                    {woData.available_wip} pieces available at {woData.current_stage}
                   </p>
                 </div>
 
-                <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/60 p-4 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                  <p className="text-[10px] uppercase font-bold text-zinc-400">Next Route Stage</p>
-                  <p className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 font-mono">
-                    Stage {woData.next_allowed_stage || "Completed"}
-                  </p>
-                  <p className="text-[11px] text-zinc-400">
-                    Route Locked & Enforced by OMS
-                  </p>
+                {operationMode === "MOVE" ? (
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/60 p-4 border border-zinc-200 dark:border-zinc-800 space-y-2">
+                    <p className="text-[10px] uppercase font-bold text-zinc-400">Destination Stage</p>
+                    <p className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-50 font-mono">
+                      Stage {woData.next_allowed_stage || "Completed"}
+                    </p>
+                    <p className="text-[11px] text-zinc-400">
+                      Next route step locked by OMS
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/40 p-4 border border-amber-200 dark:border-amber-900/40 space-y-2">
+                    <p className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">Mode: Stage Entry</p>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                      Good parts processed will be held in <strong>On-Hand at Stage {woData.current_stage}</strong> for later physical movement.
+                    </p>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-800/60 text-[11px] text-zinc-500">
+                  <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-1">⚡ Tally Navigation Tip:</p>
+                  <p>Type values and press <kbd className="px-1.5 py-0.5 bg-white dark:bg-zinc-900 border rounded font-mono text-[10px]">Enter</kbd> to jump between fields seamlessly.</p>
                 </div>
               </div>
 
-              {/* Right Move Execution Form */}
+              {/* Right Entry Form */}
               <div className="lg:col-span-2">
                 <form
-                  onSubmit={handleMoveSubmit}
+                  onSubmit={handleFormSubmit}
                   className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-5"
                 >
                   <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
-                    <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-50">
-                      Stage Transfer Confirmation
+                    <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
+                      <CheckSquare className="h-4 w-4 text-blue-600" />
+                      <span>{operationMode === "MOVE" ? "Stage Transfer Entry" : "Stage Production Result"}</span>
                     </h3>
                     <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono">
-                      Step {woData.current_stage} ➔ {woData.next_allowed_stage}
+                      {operationMode === "MOVE" ? `Transfer ${woData.current_stage} ➔ ${woData.next_allowed_stage}` : `Process @ ${woData.current_stage}`}
                     </span>
                   </div>
 
@@ -461,17 +600,19 @@ export default function MovePartsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
-                        <span>Quantity to Move (Good / OK) *</span>
-                        <span className="text-[11px] text-zinc-400">Max: {woData.available_wip}</span>
+                        <span>{operationMode === "MOVE" ? "Good Qty to Move *" : "Good Qty Completed *"}</span>
+                        <span className="text-[11px] text-zinc-400">Available: {woData.available_wip}</span>
                       </label>
                       <input
+                        ref={inputGoodQtyRef}
                         type="number"
                         required
-                        min={1}
+                        min={0}
                         max={woData.available_wip}
                         value={quantityToMove}
                         onChange={(e) => setQuantityToMove(e.target.value === "" ? "" : Number(e.target.value))}
-                        placeholder="e.g. 500"
+                        onKeyDown={(e) => handleKeyDownEnter(e, "rejQty")}
+                        placeholder="e.g. 50"
                         className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-4 py-2.5 text-base font-extrabold text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                       />
                     </div>
@@ -481,10 +622,12 @@ export default function MovePartsPage() {
                         Rejected Quantity at Stage {woData.current_stage}
                       </label>
                       <input
+                        ref={inputRejQtyRef}
                         type="number"
                         min={0}
                         value={rejectedQty}
                         onChange={(e) => setRejectedQty(Number(e.target.value))}
+                        onKeyDown={(e) => handleKeyDownEnter(e, "defect")}
                         placeholder="0"
                         className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-4 py-2.5 text-base font-bold text-rose-600 dark:text-rose-400 focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono"
                       />
@@ -498,8 +641,10 @@ export default function MovePartsPage() {
                         Select Rejection Defect Code (Auto-logs NC in Quality Tracker) *
                       </label>
                       <select
+                        ref={selectDefectRef}
                         value={defectCode}
                         onChange={(e) => setDefectCode(e.target.value)}
+                        onKeyDown={(e) => handleKeyDownEnter(e, "machine")}
                         className="w-full rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-300 focus:outline-none"
                       >
                         {DEFECT_CODES.map((d) => (
@@ -518,8 +663,10 @@ export default function MovePartsPage() {
                         Machining Cell
                       </label>
                       <select
+                        ref={selectMachineRef}
                         value={selectedMachine}
                         onChange={(e) => setSelectedMachine(e.target.value)}
+                        onKeyDown={(e) => handleKeyDownEnter(e, "shift")}
                         className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 font-medium focus:border-blue-500 focus:outline-none"
                       >
                         {MACHINES.map((m) => (
@@ -532,23 +679,13 @@ export default function MovePartsPage() {
 
                     <div>
                       <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        Operator
-                      </label>
-                      <input
-                        type="text"
-                        value={operatorName}
-                        onChange={(e) => setOperatorName(e.target.value)}
-                        className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                         Shift
                       </label>
                       <select
+                        ref={selectShiftRef}
                         value={shift}
                         onChange={(e) => setShift(e.target.value)}
+                        onKeyDown={(e) => handleKeyDownEnter(e, "operator")}
                         className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 font-medium focus:border-blue-500 focus:outline-none"
                       >
                         <option value="Shift A">Shift A (06:00 - 14:00)</option>
@@ -556,18 +693,34 @@ export default function MovePartsPage() {
                         <option value="Shift C">Shift C (22:00 - 06:00)</option>
                       </select>
                     </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        Operator
+                      </label>
+                      <input
+                        ref={inputOperatorRef}
+                        type="text"
+                        value={operatorName}
+                        onChange={(e) => setOperatorName(e.target.value)}
+                        onKeyDown={(e) => handleKeyDownEnter(e, "remarks")}
+                        className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
                   </div>
 
                   {/* Remarks */}
                   <div>
                     <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      Operation Remarks / Floor Notes
+                      Floor Remarks / Notes
                     </label>
                     <input
+                      ref={inputRemarksRef}
                       type="text"
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="e.g. Partial batch completed, transferred to next bay"
+                      onKeyDown={(e) => handleKeyDownEnter(e, "submit")}
+                      placeholder="e.g. Partial batch completed, transferred to next cell"
                       className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -575,15 +728,18 @@ export default function MovePartsPage() {
                   {/* Action Buttons */}
                   <div className="pt-2">
                     <button
+                      ref={btnSubmitRef}
                       type="submit"
-                      disabled={submitting || woData.available_wip <= 0 || !woData.next_allowed_stage}
+                      disabled={submitting || woData.available_wip <= 0 || (operationMode === "MOVE" && !woData.next_allowed_stage)}
                       className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-500/25 hover:bg-blue-500 focus:outline-none disabled:opacity-50 transition-all cursor-pointer"
                     >
                       <ArrowRightLeft className="h-4 w-4" />
                       <span>
                         {submitting
-                          ? "Validating & Recording Movement..."
-                          : `Confirm & Move to Stage ${woData.next_allowed_stage || "Next"}`}
+                          ? "Validating & Recording..."
+                          : operationMode === "MOVE"
+                          ? `Confirm & Move to Stage ${woData.next_allowed_stage || "Next"}`
+                          : `Save Stage ${woData.current_stage} Production Result`}
                       </span>
                     </button>
                   </div>
@@ -597,15 +753,15 @@ export default function MovePartsPage() {
         <Modal
           isOpen={showSuccessModal}
           onClose={() => setShowSuccessModal(false)}
-          title="Movement Recorded Successfully"
-          subtitle={`Transaction ID: ${moveResult?.movement_id}`}
+          title={resultData?.title || "Transaction Successful"}
+          subtitle={`ID: ${resultData?.movement_id}`}
         >
           <div className="space-y-4">
             <div className="flex items-center justify-center p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50">
               <div className="text-center">
                 <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
                 <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mt-2">
-                  {moveResult?.message}
+                  {resultData?.message}
                 </p>
               </div>
             </div>
@@ -613,24 +769,47 @@ export default function MovePartsPage() {
             <div className="space-y-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5">
               <div className="flex justify-between">
                 <span className="text-zinc-400">Work Order:</span>
-                <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{moveResult?.wo_number}</span>
+                <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{resultData?.wo_number}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Transfer Route:</span>
-                <span className="font-bold text-blue-600">{moveResult?.from_stage} ➔ {moveResult?.to_stage}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Quantity Transferred:</span>
-                <span className="font-bold text-zinc-900 dark:text-zinc-100">{moveResult?.quantity_moved} pcs</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Remaining at {moveResult?.from_stage}:</span>
-                <span className="font-bold text-zinc-900 dark:text-zinc-100">{moveResult?.available_wip_remaining} pcs</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Now Available at {moveResult?.to_stage}:</span>
-                <span className="font-bold text-emerald-600">{moveResult?.to_stage_available_wip} pcs</span>
-              </div>
+              {resultData?.type === "MOVE" ? (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Transfer Route:</span>
+                    <span className="font-bold text-blue-600">{resultData?.from_stage} ➔ {resultData?.to_stage}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Good Quantity Transferred:</span>
+                    <span className="font-bold text-zinc-900 dark:text-zinc-100">{resultData?.quantity_moved} pcs</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Remaining at {resultData?.from_stage}:</span>
+                    <span className="font-bold text-zinc-900 dark:text-zinc-100">{resultData?.available_wip_remaining} pcs</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Now Available at {resultData?.to_stage}:</span>
+                    <span className="font-bold text-emerald-600">{resultData?.to_stage_available_wip} pcs</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Production Stage:</span>
+                    <span className="font-bold text-blue-600">{resultData?.stage}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Good Quantity Processed:</span>
+                    <span className="font-bold text-emerald-600">{resultData?.good_qty} pcs</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Stage Rejection:</span>
+                    <span className="font-bold text-rose-600">{resultData?.rejected_quantity} pcs</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">On-Hand Ready to Transfer:</span>
+                    <span className="font-bold text-blue-600">{resultData?.stage_onhand_available} pcs</span>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

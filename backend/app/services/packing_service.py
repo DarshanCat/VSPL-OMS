@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.work_order import WorkOrder, WOStatus
+from app.models.production_movement import StageWIP
 from app.models.packing import PackingRecord
 from app.models.audit import AuditLog
 from app.models.user import User
@@ -56,13 +57,31 @@ class PackingService:
 
         packing_rec = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
         if not packing_rec:
+            # Check PACKING or FI StageWIP to see how many parts actually arrived
+            pack_wip = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage.in_(["PACKING", "PACKING / BSR", "PACKING/BSR"])
+            ).first()
+            fi_wip = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage.in_(["FI", "FINAL INSPECTION", "FINAL_INSPECTION"])
+            ).first()
+
+            if pack_wip and (pack_wip.ent_qty > 0 or pack_wip.available_wip > 0):
+                actual_available = max(pack_wip.ent_qty, pack_wip.available_wip)
+            elif fi_wip and fi_wip.ok_qty > 0:
+                actual_available = fi_wip.ok_qty
+            else:
+                total_rejections = sum(w.rejected_qty for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all())
+                actual_available = max(0, (wo.physical_wo_qty or 0) - total_rejections)
+
             packing_rec = PackingRecord(
                 work_order_id=wo.id,
-                fi_approved_qty=wo.physical_wo_qty,
-                available_for_packing=wo.physical_wo_qty,
-                received_qty=wo.physical_wo_qty,
+                fi_approved_qty=actual_available,
+                available_for_packing=actual_available,
+                received_qty=actual_available,
                 packed_qty=0,
-                pending_qty=wo.physical_wo_qty,
+                pending_qty=actual_available,
                 ready_for_dispatch_qty=0,
                 status="In-Packing"
             )

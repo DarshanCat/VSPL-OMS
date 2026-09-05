@@ -17,6 +17,33 @@ class MovePartsRequest(BaseModel):
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
     source_type: Optional[str] = Field("SMES_UI", description="Source: SMES_UI | EXCEL_IMPORT | API | SYSTEM")
 
+class RecordStageProductionRequest(BaseModel):
+    wo_number: str = Field(..., description="Work Order Number e.g. WO-1001")
+    stage: str = Field(..., description="Stage where production occurred e.g. F1, F2, F3, SP, FI")
+    good_qty: int = Field(..., ge=0, description="Quantity of good parts completed at this stage")
+    rejected_quantity: int = Field(0, ge=0, description="Quantity of rejected parts at this stage")
+    machine_id: Optional[str] = None
+    operator_name: Optional[str] = None
+    shift: Optional[str] = "Shift A"
+    defect_code: Optional[str] = None
+    remarks: Optional[str] = None
+    client_request_id: Optional[str] = Field(None, description="Idempotency token")
+
+class ProductionEntryResponse(BaseModel):
+    success: bool
+    entry_id: str
+    client_request_id: Optional[str] = None
+    wo_number: str
+    stage: str
+    good_qty: int
+    rejected_quantity: int
+    stage_ok_total: int
+    stage_rejection_total: int
+    stage_onhand_available: int
+    stage_inproc_remaining: int
+    timestamp: datetime
+    message: str
+
 class MovementResponse(BaseModel):
     success: bool
     movement_id: str

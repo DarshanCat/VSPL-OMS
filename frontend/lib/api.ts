@@ -56,6 +56,22 @@ export async function getWorkOrderTracking(woIdentifier: string) {
 }
 
 // Production & WIP
+export async function recordStageProduction(payload: {
+  wo_number: string;
+  stage: string;
+  good_qty: number;
+  rejected_quantity?: number;
+  machine_id?: string;
+  operator_name?: string;
+  shift?: string;
+  defect_code?: string;
+  remarks?: string;
+  client_request_id?: string;
+}) {
+  const { data } = await api.post("/api/v1/production/entry", payload);
+  return data;
+}
+
 export async function moveParts(payload: {
   wo_number: string;
   from_stage: string;
