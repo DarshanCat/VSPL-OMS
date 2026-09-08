@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class MovePartsRequest(BaseModel):
     wo_number: str = Field(..., description="Work Order Number e.g. WO-1001")
+    target_wo_number: Optional[str] = Field(None, description="Target Work Order Number (must match source WO; cross-WO movement rejected)")
     from_stage: str = Field(..., description="Current stage e.g. F1, F2, F3, SP, FI, PACKING, BSR")
     to_stage: str = Field(..., description="Target stage e.g. F2, F3, SP, FI, PACKING, DISPATCH")
     quantity_moved: int = Field(..., gt=0, description="Quantity of good parts to move to next stage")

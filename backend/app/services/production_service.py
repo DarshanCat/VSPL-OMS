@@ -70,6 +70,13 @@ class ProductionService:
                 detail=f"Work Order '{req.wo_number}' not found."
             )
 
+        # STEP 4: Same-WO Validation
+        if req.target_wo_number and req.target_wo_number.strip() != req.wo_number.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stage movement cannot cross Work Orders."
+            )
+
         if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

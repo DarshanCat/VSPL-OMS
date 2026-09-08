@@ -425,3 +425,142 @@ def test_part_41_exact_business_scenario(db):
     assert recon.total_wip == 0
     assert recon.variance == 0
     assert recon.is_balanced is True
+
+
+# =========================================================================
+# 7. PHASE 1: CROSS-WO REJECTION TEST (STEP 4)
+# =========================================================================
+
+def test_cross_wo_movement_rejected(db):
+    cust = db.query(Customer).first()
+    part = db.query(Part).first()
+
+    order = Order(oar_number="OAR-XWO-01", customer_id=cust.id, part_id=part.id, customer_po="PO-XWO", po_qty=100, max_batch_size=50, status=OrderStatus.ACCEPT)
+    db.add(order)
+    db.commit()
+
+    wo_a = WorkOrder(wo_number="WO-A-001", order_id=order.id, physical_wo_qty=50, current_stage="F1", status=WOStatus.RELEASED)
+    wo_b = WorkOrder(wo_number="WO-B-002", order_id=order.id, physical_wo_qty=50, current_stage="F1", status=WOStatus.RELEASED)
+    db.add_all([wo_a, wo_b])
+    db.commit()
+
+    OMSIntegrationService.initialize_wo_stages(db, wo_a, "F1 > F2 > FI > PACKING > DISPATCH")
+    OMSIntegrationService.initialize_wo_stages(db, wo_b, "F1 > F2 > FI > PACKING > DISPATCH")
+    db.commit()
+
+    # Attempt cross-WO movement from WO-A to WO-B
+    with pytest.raises(HTTPException) as exc:
+        ProductionService.move_parts(db, MovePartsRequest(
+            wo_number="WO-A-001",
+            target_wo_number="WO-B-002",
+            from_stage="F1",
+            to_stage="F2",
+            quantity_moved=10
+        ))
+    assert exc.value.status_code == 400
+    assert "Stage movement cannot cross Work Orders." in exc.value.detail
+
+
+# =========================================================================
+# 8. PHASE 1: DYNAMIC NEXT STAGE RESOLUTION (STEP 3)
+# =========================================================================
+
+def test_dynamic_get_next_stage(db):
+    cust = db.query(Customer).first()
+    part = db.query(Part).first()
+
+    order = Order(oar_number="OAR-DNS-01", customer_id=cust.id, part_id=part.id, customer_po="PO-DNS", po_qty=100, max_batch_size=100, status=OrderStatus.ACCEPT)
+    db.add(order)
+    db.commit()
+
+    # WO 1: FI -> BSR -> DISPATCH
+    wo1 = WorkOrder(wo_number="WO-DNS-01", order_id=order.id, physical_wo_qty=100, current_stage="F1", status=WOStatus.RELEASED)
+    db.add(wo1)
+    db.commit()
+    OMSIntegrationService.initialize_wo_stages(db, wo1, "F1 > F2 > SP > FI > BSR > DISPATCH")
+
+    assert OMSIntegrationService.get_next_stage(db, wo1, "F1") == "F2"
+    assert OMSIntegrationService.get_next_stage(db, wo1, "F2") == "SP"
+    assert OMSIntegrationService.get_next_stage(db, wo1, "SP") == "FI"
+    assert OMSIntegrationService.get_next_stage(db, wo1, "FI") == "BSR"
+    assert OMSIntegrationService.get_next_stage(db, wo1, "BSR") == "DISPATCH"
+    assert OMSIntegrationService.get_next_stage(db, wo1, "DISPATCH") is None
+
+    # WO 2: FI -> PACKING -> BSR -> DISPATCH
+    wo2 = WorkOrder(wo_number="WO-DNS-02", order_id=order.id, physical_wo_qty=100, current_stage="F1", status=WOStatus.RELEASED)
+    db.add(wo2)
+    db.commit()
+    OMSIntegrationService.initialize_wo_stages(db, wo2, "F1 > F2 > F3 > SP > FI > PACKING > BSR > DISPATCH")
+
+    assert OMSIntegrationService.get_next_stage(db, wo2, "FI") == "PACKING"
+    assert OMSIntegrationService.get_next_stage(db, wo2, "PACKING") == "BSR"
+    assert OMSIntegrationService.get_next_stage(db, wo2, "BSR") == "DISPATCH"
+
+
+# =========================================================================
+# 9. PHASE 1: AUTHORITATIVE LIVE STAGE STATE (STEP 11)
+# =========================================================================
+
+def test_authoritative_get_current_stage_state(db):
+    cust = db.query(Customer).first()
+    part = db.query(Part).first()
+
+    order = Order(oar_number="OAR-STA-01", customer_id=cust.id, part_id=part.id, customer_po="PO-STA", po_qty=100, max_batch_size=100, status=OrderStatus.ACCEPT)
+    db.add(order)
+    db.commit()
+
+    wo = WorkOrder(wo_number="WO-STA-001", order_id=order.id, physical_wo_qty=100, current_stage="F1", status=WOStatus.RELEASED)
+    db.add(wo)
+    db.commit()
+
+    OMSIntegrationService.initialize_wo_stages(db, wo, "F1 > F2 > FI > PACKING > DISPATCH")
+    db.commit()
+
+    # Move 40 to F2, reject 10 at F1
+    ProductionService.move_parts(db, MovePartsRequest(
+        wo_number="WO-STA-001", from_stage="F1", to_stage="F2", quantity_moved=40, rejected_quantity=10
+    ))
+
+    # Check F1 state
+    f1_state = OMSIntegrationService.get_current_stage_state(db, wo, "F1")
+    assert f1_state["ok_completed_qty"] == 40
+    assert f1_state["rejected_qty"] == 10
+    assert f1_state["in_process_qty"] == 50  # 100 - 40 - 10 = 50
+    assert f1_state["on_hand_qty"] == 0      # 40 OK - 40 Ent(next) = 0
+    assert f1_state["available_wip"] == 50
+    assert f1_state["next_stage"] == "F2"
+
+    # Check F2 state
+    f2_state = OMSIntegrationService.get_current_stage_state(db, wo, "F2")
+    assert f2_state["available_wip"] == 40
+    assert f2_state["in_process_qty"] == 40
+    assert f2_state["ok_completed_qty"] == 0
+    assert f2_state["next_stage"] == "FI"
+
+
+# =========================================================================
+# 10. PHASE 1: ATOMIC STAGE INITIALIZATION (STEP 21)
+# =========================================================================
+
+def test_atomic_stage_initialization(db):
+    cust = db.query(Customer).first()
+    part = db.query(Part).first()
+
+    order = Order(oar_number="OAR-ATM-01", customer_id=cust.id, part_id=part.id, customer_po="PO-ATM", po_qty=80, max_batch_size=80, status=OrderStatus.ACCEPT)
+    db.add(order)
+    db.commit()
+
+    wo = WorkOrder(wo_number="WO-ATM-001", order_id=order.id, physical_wo_qty=80, current_stage="F1", status=WOStatus.RELEASED)
+    db.add(wo)
+    db.commit()
+
+    routes = OMSIntegrationService.initialize_wo_stages(db, wo, "F1 > F2 > SP > FI > PACKING > DISPATCH")
+    assert len(routes) == 6
+    assert [r.stage for r in routes] == ["F1", "F2", "SP", "FI", "PACKING", "DISPATCH"]
+
+    # Verify StageWIP records created simultaneously
+    wips = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()
+    assert len(wips) == 6
+    assert wips[0].ent_qty == 80
+    assert wips[0].available_wip == 80
+    assert all(w.ok_qty == 0 for w in wips)

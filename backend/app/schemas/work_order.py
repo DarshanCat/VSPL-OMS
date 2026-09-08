@@ -28,6 +28,7 @@ class WorkOrderListItem(BaseModel):
     grade: Optional[str] = None
     order_qty: int
     physical_wo_qty: int
+    match_size: Optional[int] = None
     current_stage: str
     next_allowed_stage: Optional[str] = None
     available_wip_at_current_stage: int
@@ -68,6 +69,7 @@ class WorkOrderTrackingDetail(BaseModel):
     grade: Optional[str] = None
     order_qty: int
     physical_wo_qty: int
+    match_size: Optional[int] = None
     current_stage: str
     next_allowed_stage: Optional[str] = None
     available_wip: int
@@ -82,3 +84,12 @@ class WorkOrderTrackingDetail(BaseModel):
     total_rejected: int
     yield_pct: float
     created_at: datetime
+
+class WorkOrderRouteResponse(BaseModel):
+    wo_number: str
+    physical_wo_qty: int
+    match_size: Optional[int] = None
+    current_stage: str
+    route_stages: List[str]
+    next_stage: Optional[str] = None
+    stage_targets: dict

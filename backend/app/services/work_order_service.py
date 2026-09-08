@@ -8,11 +8,16 @@ from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.order import Order, Customer, Part
 from app.models.packing import PackingRecord
-from app.schemas.work_order import WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep
+from app.schemas.work_order import (
+    WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
+    WorkOrderRouteResponse
+)
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
     calculate_delivery_risk,
     calculate_rag_status,
+    calculate_stage_targets,
+    OMSIntegrationService,
     DEFAULT_YIELDS
 )
 
@@ -87,6 +92,7 @@ class WorkOrderService:
                 grade=order.part.grade if (order and order.part) else None,
                 order_qty=order.po_qty if order else wo.physical_wo_qty,
                 physical_wo_qty=wo.physical_wo_qty,
+                match_size=order.max_batch_size if order else None,
                 current_stage=cur_stage,
                 next_allowed_stage=next_stage,
                 available_wip_at_current_stage=avail_wip,
@@ -196,6 +202,7 @@ class WorkOrderService:
             grade=order.part.grade if (order and order.part) else None,
             order_qty=order.po_qty if order else wo.physical_wo_qty,
             physical_wo_qty=wo.physical_wo_qty,
+            match_size=order.max_batch_size if order else None,
             current_stage=cur_stage,
             next_allowed_stage=next_stage,
             available_wip=cur_wip_val,
@@ -211,6 +218,48 @@ class WorkOrderService:
             yield_pct=yield_pct,
             created_at=wo.created_at or datetime.now()
         )
+
+    @staticmethod
+    def get_work_order_route(db: Session, wo_identifier: str) -> Optional[WorkOrderRouteResponse]:
+        ident = wo_identifier.strip()
+        try:
+            uuid_obj = uuid.UUID(ident)
+            wo = db.query(WorkOrder).filter(or_(WorkOrder.wo_number == ident, WorkOrder.id == uuid_obj)).first()
+        except (ValueError, AttributeError):
+            wo = db.query(WorkOrder).filter(WorkOrder.wo_number == ident).first()
+
+        if not wo:
+            return None
+
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        route_stages = [r.stage for r in routes] if routes else STANDARD_STAGES
+        targets = {r.stage: r.stage_target_qty for r in routes} if routes else calculate_stage_targets(wo.physical_wo_qty, route=STANDARD_STAGES)
+        cur_stage = wo.current_stage or route_stages[0]
+        next_stage = OMSIntegrationService.get_next_stage(db, wo, cur_stage)
+
+        return WorkOrderRouteResponse(
+            wo_number=wo.wo_number,
+            physical_wo_qty=wo.physical_wo_qty,
+            match_size=wo.order.max_batch_size if wo.order else None,
+            current_stage=cur_stage,
+            route_stages=route_stages,
+            next_stage=next_stage,
+            stage_targets=targets
+        )
+
+    @staticmethod
+    def get_stage_state(db: Session, wo_identifier: str, stage_name: str) -> Optional[dict]:
+        ident = wo_identifier.strip()
+        try:
+            uuid_obj = uuid.UUID(ident)
+            wo = db.query(WorkOrder).filter(or_(WorkOrder.wo_number == ident, WorkOrder.id == uuid_obj)).first()
+        except (ValueError, AttributeError):
+            wo = db.query(WorkOrder).filter(WorkOrder.wo_number == ident).first()
+
+        if not wo:
+            return None
+
+        return OMSIntegrationService.get_current_stage_state(db, wo, stage_name)
 
     @staticmethod
     def get_wip_matrix(db: Session) -> WIPMatrixResponse:

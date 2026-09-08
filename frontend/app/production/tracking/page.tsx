@@ -166,9 +166,15 @@ export default function WorkOrderTrackingPage() {
                   </div>
 
                   <div>
-                    <span className="text-zinc-400 text-[10px] uppercase font-bold">Planned Qty</span>
+                    <span className="text-zinc-400 text-[10px] uppercase font-bold">WO Quantity</span>
                     <p className="font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">{woData.physical_wo_qty} pcs</p>
-                    <p className="text-[10px] text-zinc-500">Target Order</p>
+                    <p className="text-[10px] text-zinc-500">Released Qty</p>
+                  </div>
+
+                  <div>
+                    <span className="text-zinc-400 text-[10px] uppercase font-bold">Match Size</span>
+                    <p className="font-extrabold text-purple-600 text-sm">{woData.match_size ?? "—"} pcs</p>
+                    <p className="text-[10px] text-zinc-500">Max Batch Size</p>
                   </div>
 
                   <div>

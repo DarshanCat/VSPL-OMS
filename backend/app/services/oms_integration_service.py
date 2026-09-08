@@ -306,6 +306,117 @@ class OMSIntegrationService:
         )
 
     @staticmethod
+    def get_next_stage(db: Session, wo: WorkOrder, current_stage: str) -> Optional[str]:
+        """
+        Authoritative getNextStage(woId, currentStage):
+        Looks up the Work Order's exact configured route (WORoute) and returns the immediate next stage.
+        Never assumes next stage globally.
+        """
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        if not routes:
+            return None
+        route_stages = [r.stage for r in routes]
+        matched = match_route_stage(current_stage, route_stages)
+        if not matched or matched not in route_stages:
+            return None
+        idx = route_stages.index(matched)
+        if idx + 1 < len(route_stages):
+            return route_stages[idx + 1]
+        return None
+
+    @staticmethod
+    def get_current_stage_state(db: Session, wo: WorkOrder, stage_name: str) -> dict:
+        """
+        Authoritative getCurrentStageState(woId, stage):
+        Returns the single source of truth for a stage's live operational state.
+        """
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        route_stages = [r.stage for r in routes] if routes else []
+        matched = match_route_stage(stage_name, route_stages) if route_stages else stage_name
+        
+        route_rec = db.query(WORoute).filter(
+            WORoute.work_order_id == wo.id,
+            WORoute.stage == (matched or stage_name)
+        ).first()
+        
+        wip_rec = db.query(StageWIP).filter(
+            StageWIP.work_order_id == wo.id,
+            StageWIP.stage == (matched or stage_name)
+        ).first()
+
+        target_qty = route_rec.stage_target_qty if route_rec else (wo.physical_wo_qty or 0)
+        ok_qty = wip_rec.ok_qty if wip_rec else 0
+        rej_qty = wip_rec.rejected_qty if wip_rec else 0
+        inproc_qty = wip_rec.inproc_qty if wip_rec else 0
+        onhand_qty = wip_rec.onhand_qty if wip_rec else 0
+        avail_wip = inproc_qty + onhand_qty
+        rag = route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty)
+        next_stage = OMSIntegrationService.get_next_stage(db, wo, matched or stage_name)
+
+        return {
+            "wo_number": wo.wo_number,
+            "stage": matched or stage_name,
+            "target_qty": target_qty,
+            "ok_completed_qty": ok_qty,
+            "rejected_qty": rej_qty,
+            "in_process_qty": inproc_qty,
+            "on_hand_qty": onhand_qty,
+            "available_wip": avail_wip,
+            "stage_status": rag,
+            "is_current_stage": (wo.current_stage == (matched or stage_name)),
+            "next_stage": next_stage
+        }
+
+    @staticmethod
+    def initialize_wo_stages(db: Session, wo: WorkOrder, route_str: Optional[str] = None) -> List[WORoute]:
+        """
+        Atomically initializes all WORoute and StageWIP records for a Work Order within a single transaction.
+        If any error occurs, rollback ensures no partial route remains.
+        """
+        # Delete existing if re-initializing
+        db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete()
+        db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete()
+
+        stage_list = parse_route(route_str) if route_str else ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
+        targets = calculate_stage_targets(wo.physical_wo_qty, route=stage_list)
+
+        created_routes = []
+        for seq, stg in enumerate(stage_list, start=1):
+            is_first = (seq == 1)
+            tgt = targets.get(stg, wo.physical_wo_qty)
+            r = WORoute(
+                work_order_id=wo.id,
+                stage=stg,
+                sequence=seq,
+                stage_target_qty=tgt,
+                cumulative_ent_qty=wo.physical_wo_qty if is_first else 0,
+                cumulative_ok_qty=0,
+                cumulative_rej_qty=0,
+                cumulative_inproc_qty=wo.physical_wo_qty if is_first else 0,
+                cumulative_onhand_qty=0,
+                stage_status="In-Progress" if is_first else "Pending"
+            )
+            db.add(r)
+            created_routes.append(r)
+
+            wip = StageWIP(
+                work_order_id=wo.id,
+                stage=stg,
+                ent_qty=wo.physical_wo_qty if is_first else 0,
+                ok_qty=0,
+                inproc_qty=wo.physical_wo_qty if is_first else 0,
+                onhand_qty=0,
+                rejected_qty=0,
+                available_wip=wo.physical_wo_qty if is_first else 0
+            )
+            db.add(wip)
+
+        wo.current_stage = stage_list[0]
+        wo.status = WOStatus.IN_PRODUCTION
+        db.flush()
+        return created_routes
+
+    @staticmethod
     def reconcile_all_work_orders(db: Session) -> PlantReconciliationResponse:
         """
         Performs full plant-wide quantity reconciliation across all Work Orders.

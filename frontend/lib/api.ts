@@ -55,6 +55,16 @@ export async function getWorkOrderTracking(woIdentifier: string) {
   return data;
 }
 
+export async function getWorkOrderRoute(woIdentifier: string) {
+  const { data } = await api.get(`/api/v1/work-orders/${encodeURIComponent(woIdentifier)}/route`);
+  return data;
+}
+
+export async function getStageState(woIdentifier: string, stageName: string) {
+  const { data } = await api.get(`/api/v1/work-orders/${encodeURIComponent(woIdentifier)}/stage/${encodeURIComponent(stageName)}/state`);
+  return data;
+}
+
 // Production & WIP
 export async function recordStageProduction(payload: {
   wo_number: string;
