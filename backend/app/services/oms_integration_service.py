@@ -25,14 +25,17 @@ DEFAULT_YIELDS: Dict[str, float] = {
 STAGE_DONE = ("Green", "Amber", "Red", "Converted-in", "Completed")
 DISPATCH_DONE = ("Green", "Amber", "Red", "Completed")
 
-def parse_route(route_str: str) -> List[str]:
+def parse_route(route_str: Union[str, List[str]]) -> List[str]:
     """
     Authoritative OMS Route Parser:
     'F1 > F2 > F3 > SP > FI > Packing > Dispatch' -> ['F1', 'F2', 'F3', 'SP', 'FI', 'Packing', 'Dispatch']
     """
     if not route_str:
         return ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
-    parts = [x.strip() for x in route_str.replace(",", ">").replace("->", ">").split(">")]
+    if isinstance(route_str, list):
+        parts = [str(x).strip() for x in route_str]
+    else:
+        parts = [x.strip() for x in route_str.replace(",", ">").replace("->", ">").split(">")]
     stages = [s for s in parts if s and s.upper() != "DISPATCH"]
     return stages + ["DISPATCH"]
 

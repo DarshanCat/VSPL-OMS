@@ -57,6 +57,21 @@ class StageTimelineStep(BaseModel):
     operator: Optional[str] = None
     duration_hours: Optional[float] = None
 
+class TransactionHistoryItem(BaseModel):
+    id: str
+    timestamp: datetime
+    transaction_type: str
+    stage: str
+    to_stage: Optional[str] = None
+    quantity: int
+    rejected_qty: int = 0
+    defect_code: Optional[str] = None
+    machine_id: Optional[str] = None
+    operator_name: Optional[str] = None
+    shift: Optional[str] = None
+    remarks: Optional[str] = None
+    client_request_id: Optional[str] = None
+
 class WorkOrderTrackingDetail(BaseModel):
     id: str
     wo_number: str
@@ -80,6 +95,7 @@ class WorkOrderTrackingDetail(BaseModel):
     delivery_date: Optional[date] = None
     route_string: str
     timeline: List[StageTimelineStep]
+    transactions: List[TransactionHistoryItem] = []
     total_wip_on_hand: int
     total_rejected: int
     yield_pct: float

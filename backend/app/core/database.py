@@ -107,6 +107,10 @@ def auto_migrate_schema():
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS created_by UUID;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
+        # Production updates
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS client_request_id VARCHAR;",
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS operator_name VARCHAR;",
+
         # Stage WIP
         "ALTER TABLE stage_wip ADD COLUMN IF NOT EXISTS ent_qty INTEGER DEFAULT 0;",
         "ALTER TABLE stage_wip ADD COLUMN IF NOT EXISTS ok_qty INTEGER DEFAULT 0;",

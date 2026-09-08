@@ -26,7 +26,8 @@ import {
   Search,
   ChevronRight,
   Factory,
-  Sparkles
+  Sparkles,
+  CheckSquare
 } from "lucide-react";
 import { logout } from "@/lib/api";
 
@@ -64,15 +65,21 @@ const NAV_GROUPS: NavGroup[] = [
     group: "PRODUCTION & WIP",
     items: [
       {
+        name: "Production Entry",
+        href: "/production/entry",
+        icon: <CheckSquare className="h-4 w-4 text-emerald-500" />,
+        badge: "Entry",
+      },
+      {
         name: "Move Parts (Shop Floor)",
         href: "/production/move",
-        icon: <ArrowRightLeft className="h-4 w-4 text-emerald-500" />,
+        icon: <ArrowRightLeft className="h-4 w-4 text-blue-500" />,
         badge: "Floor",
       },
       {
         name: "WO Tracking & Timeline",
         href: "/production/tracking",
-        icon: <Route className="h-4 w-4 text-blue-500" />,
+        icon: <Route className="h-4 w-4 text-purple-500" />,
       },
       {
         name: "Live WIP Matrix",

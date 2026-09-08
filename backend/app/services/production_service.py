@@ -180,10 +180,11 @@ class ProductionService:
             )
 
         # 6. Apply Movement in OMS Flow Counters
-        # At source stage:
-        # OK += quantity_moved (completed good)
-        # Rej += rejected_quantity
-        from_wip.ok_qty += req.quantity_moved
+        # If parts were already completed and sitting On-Hand from prior stage production entry,
+        # we do not double-increment ok_qty. Only increment ok_qty for direct movements where
+        # production was not previously entered.
+        additional_ok = max(req.quantity_moved - from_wip.onhand_qty, 0)
+        from_wip.ok_qty += additional_ok
         from_wip.rejected_qty += req.rejected_quantity
 
         # At destination stage:
@@ -304,6 +305,34 @@ class ProductionService:
     @staticmethod
     def record_stage_production(db: Session, req: RecordStageProductionRequest, current_user: Optional[User] = None) -> ProductionEntryResponse:
         now = datetime.now()
+
+        # 1. Idempotency Check for Production Entry
+        if req.client_request_id:
+            existing_entry = db.query(ProductionUpdate).filter(
+                ProductionUpdate.client_request_id == req.client_request_id.strip()
+            ).first()
+            if existing_entry:
+                wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_entry.work_order_id).first()
+                wip_existing = db.query(StageWIP).filter(
+                    StageWIP.work_order_id == existing_entry.work_order_id,
+                    StageWIP.stage == existing_entry.stage
+                ).first()
+                return ProductionEntryResponse(
+                    success=True,
+                    entry_id=str(existing_entry.id),
+                    client_request_id=existing_entry.client_request_id,
+                    wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                    stage=existing_entry.stage,
+                    good_qty=existing_entry.good_qty,
+                    rejected_quantity=existing_entry.reject_qty,
+                    stage_ok_total=wip_existing.ok_qty if wip_existing else existing_entry.good_qty,
+                    stage_rejection_total=wip_existing.rejected_qty if wip_existing else existing_entry.reject_qty,
+                    stage_onhand_available=wip_existing.onhand_qty if wip_existing else 0,
+                    stage_inproc_remaining=wip_existing.inproc_qty if wip_existing else 0,
+                    timestamp=existing_entry.created_at or now,
+                    message=f"Duplicate production entry detected with token '{req.client_request_id}'. Returning original transaction."
+                )
+
         wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).with_for_update().first()
         if not wo:
             raise HTTPException(
@@ -364,9 +393,11 @@ class ProductionService:
         # Record ProductionUpdate log
         entry = ProductionUpdate(
             work_order_id=wo.id,
+            client_request_id=req.client_request_id.strip() if req.client_request_id else None,
             stage=matched_stage,
             machine=req.machine_id,
             operator_id=current_user.id if current_user else None,
+            operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
             shift=req.shift or "Shift A",
             good_qty=req.good_qty,
             reject_qty=req.rejected_quantity,

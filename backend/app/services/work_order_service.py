@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
+from app.models.production import ProductionUpdate
 from app.models.order import Order, Customer, Part
 from app.models.packing import PackingRecord
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
-    WorkOrderRouteResponse
+    WorkOrderRouteResponse, TransactionHistoryItem
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -190,6 +191,43 @@ class WorkOrderService:
         risk = calculate_delivery_risk(order.delivery_date if order else None, cur_stage, wo.status.value, route_stages)
         cur_wip_val = wip_records.get(cur_stage).available_wip if wip_records.get(cur_stage) else (wo.physical_wo_qty if cur_idx == 0 else 0)
 
+        prod_updates = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).order_by(ProductionUpdate.created_at.desc()).all()
+        
+        tx_list = []
+        for m in movements:
+            tx_list.append(TransactionHistoryItem(
+                id=str(m.id),
+                timestamp=m.created_at or datetime.now(),
+                transaction_type="STAGE_MOVEMENT",
+                stage=m.from_stage,
+                to_stage=m.to_stage,
+                quantity=m.quantity_moved,
+                rejected_qty=m.rejected_quantity or 0,
+                defect_code=None,
+                machine_id=m.machine_id,
+                operator_name=m.operator_name,
+                shift=m.shift,
+                remarks=m.remarks,
+                client_request_id=m.client_request_id
+            ))
+        for p in prod_updates:
+            tx_list.append(TransactionHistoryItem(
+                id=str(p.id),
+                timestamp=p.created_at or datetime.now(),
+                transaction_type="PRODUCTION_ENTRY",
+                stage=p.stage,
+                to_stage=None,
+                quantity=p.good_qty or 0,
+                rejected_qty=p.reject_qty or 0,
+                defect_code=None,
+                machine_id=p.machine,
+                operator_name=p.operator_name,
+                shift=p.shift,
+                remarks=p.remarks,
+                client_request_id=p.client_request_id
+            ))
+        tx_list.sort(key=lambda x: x.timestamp, reverse=True)
+
         return WorkOrderTrackingDetail(
             id=str(wo.id),
             wo_number=wo.wo_number,
@@ -213,6 +251,7 @@ class WorkOrderService:
             delivery_date=order.delivery_date if order else None,
             route_string=" -> ".join(route_stages),
             timeline=timeline_steps,
+            transactions=tx_list,
             total_wip_on_hand=total_wip_held,
             total_rejected=total_rejected,
             yield_pct=yield_pct,
