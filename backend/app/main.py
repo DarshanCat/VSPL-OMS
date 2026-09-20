@@ -1,5 +1,7 @@
+import math
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
@@ -39,6 +41,29 @@ app.state.limiter = limiter
 @app.exception_handler(RateLimitExceeded)
 def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN/Infinity/-Infinity) -- which
+    Pydantic correctly rejects but Python's spec-compliant JSON encoder cannot
+    serialize -- with their string form, so echoing a rejected value back to the
+    client in a validation-error body can never itself crash the response."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+@app.exception_handler(RequestValidationError)
+def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # FastAPI's default handler echoes the rejected input verbatim, which crashes with
+    # an unhandled ValueError when that input is a non-finite float (e.g. a client
+    # sending "quantity_moved": NaN) -- Pydantic already correctly rejects it with a
+    # "finite_number" error; this only makes *reporting* that rejection crash-proof.
+    return JSONResponse(status_code=422, content={"detail": _json_safe(exc.errors())})
 
 
 app.add_middleware(SlowAPIMiddleware)
