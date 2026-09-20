@@ -10,41 +10,48 @@ convenience, not a control.
 
 ## What is actually enforced today
 
+Updated after the security-hardening RBAC remediation (see `docs/OMS_CHANGE_CONTROL.md`
+log for the exact commits). Each gate below reuses an existing role grouping already used
+elsewhere in the codebase — no new permission concept was invented.
+
 | Action | Enforcement |
 |---|---|
 | View production/WIP/dashboard/reports data | Any authenticated user |
-| Create production entry / movement | Any authenticated user (no role restriction) |
-| Packing update | Any authenticated user (no role restriction) |
-| Dispatch | Any authenticated user (no role restriction) |
-| Order intake / WO release / conversion / NC create-update | Any authenticated user (no role restriction) |
+| Create production entry / movement | Any authenticated user (no role restriction — open by design pending a business decision) |
+| Packing update | Any authenticated user (no role restriction — open by design pending a business decision) |
+| Order intake | Any authenticated user (no role restriction — open by design pending a business decision) |
+| NC creation (report a defect) | Any authenticated user — deliberately open; this is normal shop-floor reporting |
+| **WO release** | `ADMIN`, `PLANNER`, `PRODUCTION_MANAGER` only |
+| **Conversion** | `ADMIN`, `PLANNER`, `PRODUCTION_MANAGER` only |
+| **Dispatch (`POST /dispatch/ship`)** | `DISPATCH`, `PRODUCTION_MANAGER`, `ADMIN` only |
+| **NC disposition (`PUT /operations/nc`)** | `ADMIN`, `PRODUCTION_MANAGER`, `QA`, `CEO` only |
 | View audit logs | `ADMIN`, `PRODUCTION_MANAGER`, `QA`, `CEO` only |
 | Create a new user account (`/auth/register`) | `ADMIN` only |
 | Run OMS daily-cycle / download master or report files | `ADMIN`, `PLANNER`, `PRODUCTION_MANAGER` only |
 | Edit/delete a posted production, movement, packing, dispatch, or audit record | **No endpoint exists for this at all** — immutable by construction, not by a role check |
 
-## Honest statement of the gap
+## Honest statement of the remaining gap
 
-There is currently **no business-approved role matrix** restricting who may perform
-production entry, movement, packing, dispatch, order intake, WO release, conversion, or NC
-actions beyond "must be a logged-in user." This is a known, documented limitation (see
-`docs/OMS_RELEASE_BASELINE.md`), not something this document should paper over. Closing it
-requires the business to define the intended matrix (e.g. "only OPERATOR/MACHINE_OPERATOR
-may post production entries," "only DISPATCH may execute dispatch," "only QA may create/
-update NC records") — that is a Class E-adjacent change (it changes who can do what, so it
-needs business sign-off) implemented as a Class B (security/access) fix once the matrix is
-approved.
+Production entry, movement, packing, and order intake still accept any authenticated
+user — this is a known, deliberate scope limit, not an oversight. Closing it further
+(e.g. "only OPERATOR/MACHINE_OPERATOR may post production entries," "only PACKING may post
+packing transactions") requires the business to define the intended matrix first — that is
+a Class E-adjacent change (it changes who can do what, so it needs business sign-off)
+implemented as a Class B (security/access) fix once approved. The four highest-risk gaps
+(release, conversion, dispatch, NC disposition) have already been closed and
+regression-tested (`backend/tests/test_rbac_remediation.py`).
 
 ## Who can view production data
 Any authenticated user, across all roles. There is no per-plant or per-customer data
 partitioning in this system.
 
 ## Who can create transactions
-Any authenticated user, across all roles (see gap above).
+Production entry, movement, packing, order intake, and NC creation: any authenticated
+user (see gap above). WO release, conversion, and dispatch: restricted per the table above.
 
 ## Who can approve/review
-No formal "approval" workflow exists beyond NC status transitions
-(`PUT /api/v1/operations/nc`), which — like the other action endpoints — currently accepts
-any authenticated user.
+NC disposition (`PUT /api/v1/operations/nc`) is restricted to `ADMIN`, `PRODUCTION_MANAGER`,
+`QA`, `CEO`. No other formal "approval" workflow exists in this system.
 
 ## Who can manage masters
 No one, via the API — no master-data write endpoint exists except user-account creation

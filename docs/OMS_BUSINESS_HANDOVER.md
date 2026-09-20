@@ -108,28 +108,40 @@ route shown for the specific WO they are working on, never a general assumption.
 Roles that exist in the system today: `ADMIN`, `CEO`, `PRODUCTION_MANAGER`, `PLANNER`,
 `QA`, `DISPATCH`, `MACHINE_OPERATOR`, `OPERATOR`, `PACKING`, `STORE`, `SALES`.
 
-What is actually enforced by the backend today (verified, not assumed):
+What is actually enforced by the backend today (verified, not assumed — updated after the
+security-hardening RBAC remediation):
 
 - **Operator** (`MACHINE_OPERATOR`/`OPERATOR`): can perform production entry, movement,
-  packing, dispatch, order intake, WO release, conversion, and NC actions — the same as
-  every other authenticated role, because these endpoints currently require only a valid
-  login, not a specific role. Operators **cannot** view audit logs, register new accounts,
-  or run the OMS daily-cycle/download functions.
-- **QA**: can perform the same production-floor actions as any authenticated user, and can
-  additionally view audit logs.
-- **Production Manager**: can perform the same production-floor actions as any
-  authenticated user, can view audit logs, and can run the OMS daily-cycle/download
-  functions.
+  packing, and order intake (still open to any authenticated user), and can report a new
+  NC/defect. Operators **cannot** release a WO, execute a conversion, execute dispatch,
+  disposition/close an NC, view audit logs, register new accounts, or run the OMS
+  daily-cycle/download functions — all of these now return 403 for an operator token.
+- **Planner**: can release a WO and execute a conversion, in addition to the operator
+  actions above.
+- **QA**: can disposition/close an NC record and view audit logs, in addition to the
+  operator actions above.
+- **Dispatch**: can execute dispatch (`POST /api/v1/dispatch/ship`), in addition to the
+  operator actions above.
+- **Production Manager**: can release a WO, execute a conversion, execute dispatch,
+  disposition an NC, view audit logs, and run the OMS daily-cycle/download functions —
+  the broadest operational role short of Admin.
+- **CEO**: can view audit logs and disposition NCs (oversight role), same grouping as QA/
+  Production Manager for those two actions.
 - **Admin**: can do everything above, plus create new user accounts
-  (`POST /api/v1/auth/register`).
+  (`POST /api/v1/auth/register`, now itself admin-only — previously open to anyone).
 
-**Business permission matrix requires formal business-owner confirmation.** The current
-implementation does not restrict floor-execution actions (production entry, movement,
-packing, dispatch) to specific roles — any authenticated user can perform any of them. If
-VSPL's business owners want, for example, only Dispatch staff to execute dispatch, or only
-QA to disposition NC records, that matrix must be formally defined and approved, then
-implemented as a classified change under `docs/OMS_CHANGE_CONTROL.md`. This is not solved
-by a code change made during this handover phase.
+Each gate reuses an existing role grouping already established elsewhere in the codebase
+(e.g. WO release/conversion use the same roles as the OMS planning-cycle endpoints; NC
+disposition uses the same roles as audit-log access) — no new permission concept was
+invented. See `docs/OMS_PRODUCTION_DATA_ACCESS.md` and `docs/OMS_CHANGE_CONTROL.md`'s log
+for the exact commits.
+
+**Still open, by design, pending a business decision:** production entry, movement,
+packing, and order intake accept any authenticated user — there is no dedicated
+"Operator" vs. "Packing" role split enforced for those specific actions. If VSPL's
+business owners want, for example, only staff with the `PACKING` role to post packing
+transactions, that must be formally defined and approved, then implemented as a
+classified change under `docs/OMS_CHANGE_CONTROL.md`.
 
 ## 7. Known Operational Limitations
 
@@ -139,9 +151,9 @@ by a code change made during this handover phase.
    verified in this repository; it must be set up and verified on VSPL's actual production
    infrastructure (managed PostgreSQL backups, or a scheduled `pg_dump`) — see
    `docs/OMS_BACKUP_RECOVERY.md`.
-3. The fine-grained business RBAC matrix (which specific role may perform which
-   floor-execution action) requires formal business-owner confirmation; it is not yet
-   approved or implemented beyond "must be an authenticated user."
+3. Production entry, movement, packing, and order intake remain open to any authenticated
+   role (see §6) pending a formal business decision on whether finer-grained restriction
+   is actually wanted for those specific actions.
 
 These are documented limitations, not software defects — no evidence exists that any of
 them causes incorrect manufacturing data; they are gaps in operational configuration and
@@ -161,7 +173,7 @@ business decision-making, respectively.
 - [ ] Backup restore procedure verified with an actual test restore
 
 ### Application
-- [ ] Correct release deployed (`oms-v1.0.0`, commit `4837c934bca71594eae207d65ccbcd4b8d5ca1b2`)
+- [ ] Correct release deployed (`oms-v1.0.0`, commit `3cb9c41beb9904a61b020d922d9fd96579bc7b86`)
 - [ ] Backend healthy
 - [ ] Frontend healthy
 - [ ] Health endpoint returns 200

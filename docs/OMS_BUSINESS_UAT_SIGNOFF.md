@@ -1,7 +1,7 @@
 # OMS BUSINESS UAT SIGN-OFF
 
 This document records formal business acceptance of the OMS release (`oms-v1.0.0`,
-commit `4837c934bca71594eae207d65ccbcd4b8d5ca1b2`). Engineering verification (automated
+commit `3cb9c41beb9904a61b020d922d9fd96579bc7b86`). Engineering verification (automated
 tests, rehearsal smoke testing) is already complete and documented across `docs/`; this
 sign-off is the separate, required business acceptance step and must be completed by the
 actual named business owners — it is not satisfied by engineering testing alone.

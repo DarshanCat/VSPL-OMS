@@ -12,7 +12,7 @@ SQLAlchemy, and no DC (Delivery Challan) functionality exist in this system.
 
 ## Backend Version
 - Git tag: `oms-v1.0.0`
-- Commit: `4837c934bca71594eae207d65ccbcd4b8d5ca1b2`
+- Commit: `3cb9c41beb9904a61b020d922d9fd96579bc7b86`
 - Framework: FastAPI, SQLAlchemy 2.x, Pydantic v2
 - Entry point: `backend/app/main.py` (`app`)
 
@@ -46,10 +46,12 @@ SQLAlchemy, and no DC (Delivery Challan) functionality exist in this system.
 See `backend/.env.example` and `frontend/.env.example` for the full, current variable names.
 
 ## Current Known Limitations
-- No business-defined RBAC matrix exists for production/packing/dispatch endpoints beyond
-  "must be an authenticated user" — any authenticated role can currently perform these
-  floor-execution actions. Closing this requires a business decision on the intended role
-  matrix, not an engineering guess.
+- WO release, conversion, dispatch, and NC disposition are now role-restricted (security
+  hardening, see `docs/OMS_CHANGE_CONTROL.md` log). Production entry, movement, packing,
+  and order intake remain open to any authenticated role beyond "must be authenticated" —
+  closing this further requires a business decision on the intended role matrix, not an
+  engineering guess. See `docs/OMS_PRODUCTION_DATA_ACCESS.md` for the current, exact
+  enforcement table.
 - No unit-of-measure (e.g. KG↔PCS) conversion-factor master exists. The only "Conversion"
   feature is a WO-to-WO quantity split, which is already immutable per transaction.
 - `celery` and `redis` are present as dependencies/config but nothing in the application
