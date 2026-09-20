@@ -89,6 +89,10 @@ def test_dispatch_credits_only_terminal_stage_with_split_packing_bsr(db_session)
     PackingService.update_packing(db_session, PackingUpdateRequest(
         wo_number=wo_num, packed_quantity=qty
     ))
+    # This route requires material to actually clear BSR (a distinct stage) before dispatch.
+    ProductionService.move_parts(db_session, MovePartsRequest(
+        wo_number=wo_num, from_stage="PACKING", to_stage="BSR", quantity_moved=qty
+    ))
 
     pre_wips = {w.stage: (w.ok_qty, w.moved_out_qty) for w in db_session.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
 
@@ -109,6 +113,39 @@ def test_dispatch_credits_only_terminal_stage_with_split_packing_bsr(db_session)
             before_ok, before_moved = pre_wips[stage]
             assert wips[stage].ok_qty == before_ok, f"{stage} ok_qty was incorrectly credited by dispatch"
             assert wips[stage].moved_out_qty == before_moved, f"{stage} moved_out_qty was incorrectly credited by dispatch"
+
+
+def test_dispatch_blocked_until_material_actually_clears_bsr(db_session):
+    """
+    Found during go-live rehearsal: on a route with a distinct BSR stage, packing alone
+    credited PackingRecord.ready_for_dispatch_qty, letting dispatch succeed even though the
+    material was never actually moved from PACKING into BSR. BSR must be a real gate, not
+    decorative, whenever it appears in the WO's route.
+    """
+    qty = 50
+    wo_num = _release_wo_with_split_packing_bsr(db_session, "WO-UAT-BSR-GATE", qty)
+    for frm, to in [("F1", "F2"), ("F2", "F3"), ("F3", "FI"), ("FI", "PACKING")]:
+        ProductionService.move_parts(db_session, MovePartsRequest(
+            wo_number=wo_num, from_stage=frm, to_stage=to, quantity_moved=qty
+        ))
+    PackingService.update_packing(db_session, PackingUpdateRequest(wo_number=wo_num, packed_quantity=qty))
+
+    # No PACKING -> BSR movement has happened yet: dispatch must be rejected.
+    with pytest.raises(HTTPException) as exc:
+        DispatchService.execute_dispatch(db_session, DispatchRequest(
+            wo_number=wo_num, invoice_number="INV-BSR-GATE-BAD", dispatched_quantity=qty
+        ))
+    assert exc.value.status_code == 400
+    assert "BSR" in exc.value.detail
+
+    # Move into BSR: dispatch is now allowed.
+    ProductionService.move_parts(db_session, MovePartsRequest(
+        wo_number=wo_num, from_stage="PACKING", to_stage="BSR", quantity_moved=qty
+    ))
+    disp = DispatchService.execute_dispatch(db_session, DispatchRequest(
+        wo_number=wo_num, invoice_number="INV-BSR-GATE-OK", dispatched_quantity=qty
+    ))
+    assert disp.success is True
 
 
 def test_packing_idempotency_duplicate_client_request_id(db_session):
@@ -149,6 +186,10 @@ def test_dispatch_idempotency_duplicate_client_request_id(db_session):
             wo_number=wo_num, from_stage=frm, to_stage=to, quantity_moved=qty
         ))
     PackingService.update_packing(db_session, PackingUpdateRequest(wo_number=wo_num, packed_quantity=qty))
+    # This route requires material to actually clear BSR (a distinct stage) before dispatch.
+    ProductionService.move_parts(db_session, MovePartsRequest(
+        wo_number=wo_num, from_stage="PACKING", to_stage="BSR", quantity_moved=qty
+    ))
 
     token = "DISP-IDEMP-TOKEN-1"
     d1 = DispatchService.execute_dispatch(db_session, DispatchRequest(

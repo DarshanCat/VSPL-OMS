@@ -85,6 +85,34 @@ class DispatchService:
                 detail=f"Cannot dispatch {req.dispatched_quantity} pieces. Only {ready_qty} pieces are ready for dispatch after Packing / BSR for WO '{req.wo_number}'."
             )
 
+        # If this WO's route defines BSR as its own distinct stage (separate from PACKING),
+        # the packing action alone does not clear material for dispatch — it must also have
+        # actually been moved into BSR (the documented Packing -> BSR -> Dispatch flow).
+        # `PackingRecord.ready_for_dispatch_qty` is credited as soon as packing is recorded
+        # regardless of route, so routes with a separate BSR stage need this additional gate
+        # against the quantity actually entered into the BSR stage (StageWIP.ent_qty), matching
+        # the existing Packing->BSR movement semantics (no separate BSR "production entry" is
+        # part of the documented flow).
+        route_stage_names_upper = [
+            r.stage.upper() for r in db.query(WORoute).filter(WORoute.work_order_id == wo.id).all()
+        ]
+        if "PACKING" in route_stage_names_upper and "BSR" in route_stage_names_upper:
+            bsr_wip = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage == "BSR"
+            ).first()
+            bsr_entered_qty = bsr_wip.ent_qty if bsr_wip else 0
+            already_dispatched = packing_rec.dispatched_qty
+            if already_dispatched + req.dispatched_quantity > bsr_entered_qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot dispatch {req.dispatched_quantity} pieces for WO '{req.wo_number}': "
+                        f"this route requires material to be moved into BSR before dispatch. Only "
+                        f"{max(bsr_entered_qty - already_dispatched, 0)} pieces have entered BSR."
+                    )
+                )
+
         # Update packing record
         packing_rec.ready_for_dispatch_qty -= req.dispatched_quantity
         packing_rec.dispatched_qty += req.dispatched_quantity
