@@ -239,11 +239,14 @@ def analyze_bottlenecks(
     user: User = Depends(get_current_user)
 ):
     """Detect and score stage bottleneck risks across the plant."""
-    wips = db.query(StageWIP).all()
-    stage_wips = {}
-    for w in wips:
-        stg = w.stage.upper()
-        stage_wips[stg] = stage_wips.get(stg, 0) + w.available_wip
+    # DB-side aggregation instead of loading every StageWIP row into Python -- same
+    # grouping key (uppercased stage) and same sum, computed by the database.
+    rows = (
+        db.query(func.upper(StageWIP.stage).label("stage"), func.sum(StageWIP.available_wip).label("total"))
+        .group_by(func.upper(StageWIP.stage))
+        .all()
+    )
+    stage_wips = {r.stage: (r.total or 0) for r in rows}
 
     if not stage_wips:
         for s in STANDARD_STAGES:
@@ -266,14 +269,20 @@ def get_production_forecast(
     user: User = Depends(get_current_user)
 ):
     """Generate statistical production forecast for the next N days."""
-    # Build historical daily outputs from movement records
-    movements = db.query(ProductionMovement).all()
-    daily_map = {}
-    for m in movements:
-        day_str = m.created_at.strftime("%Y-%m-%d") if m.created_at else date.today().isoformat()
-        daily_map[day_str] = daily_map.get(day_str, 0) + m.quantity_moved
-
-    daily_values = list(daily_map.values())
+    # Build historical daily outputs from movement records via DB-side aggregation
+    # (GROUP BY day, SUM quantity) instead of loading the entire, ever-growing movement
+    # ledger into Python. Same grouping key and same sum as before, in chronological
+    # order (the model expects a time-ordered series).
+    daily_rows = (
+        db.query(
+            func.coalesce(func.date(ProductionMovement.created_at), date.today().isoformat()).label("day"),
+            func.sum(ProductionMovement.quantity_moved).label("total"),
+        )
+        .group_by("day")
+        .order_by("day")
+        .all()
+    )
+    daily_values = [int(r.total or 0) for r in daily_rows]
     if len(daily_values) < 2:
         base_val = daily_values[0] if daily_values else 150.0
         daily_values = [base_val * 0.85, base_val * 0.95, base_val, base_val * 1.05, base_val * 1.1]
@@ -297,12 +306,15 @@ def scan_manufacturing_anomalies(
 ):
     """Scan recent production movements and WIP buffers for statistical anomalies."""
     samples, meta = build_historical_movement_dataset(db, min_samples=1)
-    
-    wips = db.query(StageWIP).all()
-    stage_wips = {}
-    for w in wips:
-        stg = w.stage.upper()
-        stage_wips[stg] = stage_wips.get(stg, 0) + w.available_wip
+
+    # DB-side aggregation instead of loading every StageWIP row into Python -- same
+    # grouping key (uppercased stage) and same sum, computed by the database.
+    rows = (
+        db.query(func.upper(StageWIP.stage).label("stage"), func.sum(StageWIP.available_wip).label("total"))
+        .group_by(func.upper(StageWIP.stage))
+        .all()
+    )
+    stage_wips = {r.stage: (r.total or 0) for r in rows}
 
     scan_res = AnomalyDetectionModel.scan_movement_anomalies(samples, stage_wips)
 

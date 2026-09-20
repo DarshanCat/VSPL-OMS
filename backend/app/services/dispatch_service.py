@@ -219,8 +219,11 @@ class DispatchService:
         )
 
     @staticmethod
-    def get_dispatch_history(db: Session) -> List[DispatchHistoryItem]:
-        records = db.query(Dispatch).join(WorkOrder).order_by(Dispatch.dispatch_date.desc()).all()
+    def get_dispatch_history(db: Session, limit: int = 200, offset: int = 0) -> List[DispatchHistoryItem]:
+        records = (
+            db.query(Dispatch).join(WorkOrder).order_by(Dispatch.dispatch_date.desc())
+            .offset(offset).limit(limit).all()
+        )
         results = []
         for d in records:
             wo = d.work_order

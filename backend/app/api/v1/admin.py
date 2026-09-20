@@ -54,11 +54,13 @@ class AuditLogOut(BaseModel):
 
 @router.get("/customers", response_model=List[CustomerOut])
 def list_customers(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.query(Customer).order_by(Customer.customer_code).all()
+    # Master-data table, naturally small (bounded by real customer count) -- a generous
+    # cap here is defense-in-depth, not real-world pagination the UI needs today.
+    return db.query(Customer).order_by(Customer.customer_code).limit(5000).all()
 
 @router.get("/parts", response_model=List[PartOut])
 def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.query(Part).order_by(Part.part_number).all()
+    return db.query(Part).order_by(Part.part_number).limit(5000).all()
 
 @router.get("/machines", response_model=List[MachineOut])
 def list_machines(user: User = Depends(get_current_user)):

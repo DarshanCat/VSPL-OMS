@@ -196,7 +196,16 @@ def build_historical_movement_dataset(db: Session, min_samples: int = 5) -> Tupl
     Extract a clean tabular dataset from production movements for ML training / evaluation.
     Filters out invalid records.
     """
-    movements = db.query(ProductionMovement).order_by(ProductionMovement.created_at.asc()).all()
+    # Bounded to the most recent MAX_MOVEMENT_SAMPLES movements: this dataset feeds
+    # anomaly/trend/forecast models that are only ever meant to reflect recent plant
+    # behavior, so windowing to recent history (rather than loading the entire,
+    # ever-growing ledger on every analytics call) does not change model semantics --
+    # it only avoids re-scoring movements from years ago on every request.
+    MAX_MOVEMENT_SAMPLES = 2000
+    movements = list(reversed(
+        db.query(ProductionMovement).order_by(ProductionMovement.created_at.desc())
+        .limit(MAX_MOVEMENT_SAMPLES).all()
+    ))
     valid_samples = []
     rejected_count = 0
 

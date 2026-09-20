@@ -378,8 +378,11 @@ class OperationsService:
         )
 
     @staticmethod
-    def get_nc_records(db: Session) -> List[NCRecordOut]:
-        records = db.query(NCRecord).order_by(NCRecord.date_raised.desc()).all()
+    def get_nc_records(db: Session, limit: int = 500, offset: int = 0) -> List[NCRecordOut]:
+        records = (
+            db.query(NCRecord).order_by(NCRecord.date_raised.desc())
+            .offset(offset).limit(limit).all()
+        )
         results = []
         today = date.today()
         for r in records:
