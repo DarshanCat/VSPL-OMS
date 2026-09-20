@@ -7,27 +7,26 @@ class MovePartsRequest(BaseModel):
     target_wo_number: Optional[str] = Field(None, description="Target Work Order Number (must match source WO; cross-WO movement rejected)")
     from_stage: str = Field(..., description="Current stage e.g. F1, F2, F3, SP, FI, PACKING, BSR")
     to_stage: str = Field(..., description="Target stage e.g. F2, F3, SP, FI, PACKING, DISPATCH")
-    quantity_moved: int = Field(..., gt=0, description="Quantity of good parts to move to next stage")
-    rejected_quantity: int = Field(0, ge=0, description="Quantity of rejected parts at current stage")
+    quantity_moved: int = Field(..., gt=0, le=1_000_000, description="Quantity of good parts to move to next stage")
+    rejected_quantity: int = Field(0, ge=0, le=1_000_000, description="Quantity of rejected parts at current stage")
     machine_id: Optional[str] = None
-    operator_id: Optional[str] = None
-    operator_name: Optional[str] = None
+    operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
-    defect_code: Optional[str] = None
-    remarks: Optional[str] = None
+    defect_code: Optional[str] = Field(None, max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
     source_type: Optional[str] = Field("SMES_UI", description="Source: SMES_UI | EXCEL_IMPORT | API | SYSTEM")
 
 class RecordStageProductionRequest(BaseModel):
     wo_number: str = Field(..., description="Work Order Number e.g. WO-1001")
     stage: str = Field(..., description="Stage where production occurred e.g. F1, F2, F3, SP, FI")
-    good_qty: int = Field(..., ge=0, description="Quantity of good parts completed at this stage")
-    rejected_quantity: int = Field(0, ge=0, description="Quantity of rejected parts at this stage")
+    good_qty: int = Field(..., ge=0, le=1_000_000, description="Quantity of good parts completed at this stage")
+    rejected_quantity: int = Field(0, ge=0, le=1_000_000, description="Quantity of rejected parts at this stage")
     machine_id: Optional[str] = None
-    operator_name: Optional[str] = None
+    operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
-    defect_code: Optional[str] = None
-    remarks: Optional[str] = None
+    defect_code: Optional[str] = Field(None, max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
 
 class ProductionEntryResponse(BaseModel):

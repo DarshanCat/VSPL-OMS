@@ -1,6 +1,6 @@
 from typing import List
 from pydantic import BaseModel, field_validator
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
@@ -74,7 +74,7 @@ def list_machines(user: User = Depends(get_current_user)):
 
 @router.get("/audit-logs")
 def list_audit_logs(
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.CEO)),
 ):

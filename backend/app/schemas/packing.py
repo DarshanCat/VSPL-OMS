@@ -26,10 +26,10 @@ class PackingQueueItem(BaseModel):
 
 class PackingUpdateRequest(BaseModel):
     wo_number: str
-    packed_quantity: int = Field(..., gt=0, description="Quantity to pack / complete BSR")
-    box_count: Optional[int] = 1
-    package_type: Optional[str] = "Standard Box"
-    remarks: Optional[str] = None
+    packed_quantity: int = Field(..., gt=0, le=1_000_000, description="Quantity to pack / complete BSR")
+    box_count: Optional[int] = Field(1, ge=0, le=100_000)
+    package_type: Optional[str] = Field("Standard Box", max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
 
 class PackingUpdateResponse(BaseModel):

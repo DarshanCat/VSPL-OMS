@@ -33,7 +33,16 @@ async def save_upload(file: Optional[UploadFile], run_dir: Path) -> Optional[str
     """Save an uploaded file into run_dir; return its path, or None if no file was given."""
     if file is None or not file.filename:
         return None
-    dest = run_dir / file.filename
+    # Use only the base filename from the client-supplied name (never a path with
+    # directory components) and verify the resolved destination is still inside run_dir,
+    # so a crafted filename (e.g. "../../app/main.py") cannot write outside the intended
+    # per-run upload directory.
+    safe_name = Path(file.filename).name
+    if not safe_name:
+        return None
+    dest = (run_dir / safe_name).resolve()
+    if run_dir.resolve() not in dest.parents:
+        return None
     with open(dest, "wb") as f:
         f.write(await file.read())
     return str(dest)

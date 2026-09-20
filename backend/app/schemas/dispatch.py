@@ -22,12 +22,12 @@ class DispatchQueueItem(BaseModel):
 
 class DispatchRequest(BaseModel):
     wo_number: str
-    customer_po: Optional[str] = None
-    invoice_number: str = Field(..., description="Invoice Number e.g. INV-2026-001")
-    dispatched_quantity: int = Field(..., gt=0, description="Quantity to dispatch")
-    vehicle_number: Optional[str] = None
-    transporter: Optional[str] = None
-    remarks: Optional[str] = None
+    customer_po: Optional[str] = Field(None, max_length=200)
+    invoice_number: str = Field(..., max_length=200, description="Invoice Number e.g. INV-2026-001")
+    dispatched_quantity: int = Field(..., gt=0, le=1_000_000, description="Quantity to dispatch")
+    vehicle_number: Optional[str] = Field(None, max_length=100)
+    transporter: Optional[str] = Field(None, max_length=200)
+    remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
 
 class DispatchResponse(BaseModel):

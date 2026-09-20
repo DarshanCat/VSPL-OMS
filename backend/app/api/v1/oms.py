@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
@@ -10,6 +11,7 @@ from app.oms_core.oms_engine import run as run_oms_cycle
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/v1/oms", tags=["oms"])
+logger = logging.getLogger(__name__)
 
 ALLOWED_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER)
 
@@ -54,8 +56,9 @@ async def run_cycle(
             master_path, intake_path, mrb_path, conv_path, nc_path, history_path,
             outdir, require_all=not allow_partial, wor=wo_release_path,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Engine error: {e}")
+    except Exception:
+        logger.exception("OMS engine run-cycle failed")
+        raise HTTPException(status_code=500, detail="Engine error — see server logs for detail.")
 
     if mpath is None:
         report_name = Path(rpath).name if rpath else None

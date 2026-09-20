@@ -1,8 +1,12 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal, auto_migrate_schema
+from app.core.rate_limit import limiter
 from app.api.v1 import (
     auth, oms, production, work_orders, packing,
     dispatch, operations, dashboard, reports, ai, admin, analytics
@@ -27,6 +31,16 @@ app = FastAPI(
     description="AI Powered Production Tracking, Planning & Manufacturing Intelligence for Vijay Spheroidals Pvt Ltd",
     lifespan=lifespan
 )
+
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

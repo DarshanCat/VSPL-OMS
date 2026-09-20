@@ -239,7 +239,10 @@ class ProductionService:
             quantity_moved=req.quantity_moved,
             rejected_quantity=req.rejected_quantity,
             machine_id=req.machine_id,
-            operator_id=req.operator_id if req.operator_id else (current_user.id if current_user else None),
+            # operator_id is always the authenticated caller, never client-supplied: it is
+            # a foreign key to users.id, and trusting a client-sent value would let any
+            # authenticated user attribute a movement to an arbitrary other account.
+            operator_id=current_user.id if current_user else None,
             operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
             shift=req.shift or "Shift A",
             movement_date=str(now.date()),

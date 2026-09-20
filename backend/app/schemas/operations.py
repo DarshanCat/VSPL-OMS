@@ -4,18 +4,18 @@ from pydantic import BaseModel, Field, ConfigDict
 from app.models.order import OrderStatus
 
 class OrderIntakeCreate(BaseModel):
-    customer_code: str
-    customer_name: str
-    customer_po: str
-    part_number: str
-    grade: Optional[str] = "Standard"
-    part_description: Optional[str] = ""
-    po_quantity: int = Field(..., gt=0)
-    max_batch_size: int = Field(..., gt=0)
+    customer_code: str = Field(..., max_length=100)
+    customer_name: str = Field(..., max_length=300)
+    customer_po: str = Field(..., max_length=200)
+    part_number: str = Field(..., max_length=100)
+    grade: Optional[str] = Field("Standard", max_length=100)
+    part_description: Optional[str] = Field("", max_length=1000)
+    po_quantity: int = Field(..., gt=0, le=1_000_000)
+    max_batch_size: int = Field(..., gt=0, le=1_000_000)
     delivery_date: Optional[date] = None
-    order_type: Optional[str] = "Standard"
+    order_type: Optional[str] = Field("Standard", max_length=100)
     status: OrderStatus = OrderStatus.ACCEPT
-    remarks: Optional[str] = None
+    remarks: Optional[str] = Field(None, max_length=2000)
 
 class OrderIntakeResponse(BaseModel):
     success: bool
@@ -27,9 +27,9 @@ class OrderIntakeResponse(BaseModel):
 
 class WOReleaseCreate(BaseModel):
     wo_number: str
-    physical_wo_qty: int = Field(..., gt=0)
-    route_stages: List[str] = Field(..., description="Ordered list of stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
-    remarks: Optional[str] = None
+    physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
+    route_stages: List[str] = Field(..., max_length=50, description="Ordered list of stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
+    remarks: Optional[str] = Field(None, max_length=2000)
 
 class WOReleaseResponse(BaseModel):
     success: bool
@@ -40,13 +40,13 @@ class WOReleaseResponse(BaseModel):
     message: str
 
 class ConversionCreate(BaseModel):
-    conversion_wo_number: str = Field(..., description="Unique planner-assigned ID e.g. C-0021")
+    conversion_wo_number: str = Field(..., max_length=100, description="Unique planner-assigned ID e.g. C-0021")
     source_wo_number: str
     destination_oar_number: str
-    dest_part_number: Optional[str] = None
-    quantity: int = Field(..., gt=0)
+    dest_part_number: Optional[str] = Field(None, max_length=100)
+    quantity: int = Field(..., gt=0, le=1_000_000)
     entry_stage: str
-    reason: str
+    reason: str = Field(..., max_length=2000)
 
 class ConversionResponse(BaseModel):
     success: bool
@@ -59,19 +59,19 @@ class ConversionResponse(BaseModel):
 class NCRecordCreate(BaseModel):
     wo_number: str
     stage: str
-    defect_code: str
-    qty: int = Field(..., gt=0)
-    root_cause: Optional[str] = None
-    disposition: Optional[str] = "Scrap"
-    responsibility: Optional[str] = "Production"
-    remarks: Optional[str] = None
+    defect_code: str = Field(..., max_length=100)
+    qty: int = Field(..., gt=0, le=1_000_000)
+    root_cause: Optional[str] = Field(None, max_length=2000)
+    disposition: Optional[str] = Field("Scrap", max_length=100)
+    responsibility: Optional[str] = Field("Production", max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
 
 class NCRecordUpdate(BaseModel):
     nc_number: str
     status: str
-    root_cause: Optional[str] = None
-    disposition: Optional[str] = None
-    remarks: Optional[str] = None
+    root_cause: Optional[str] = Field(None, max_length=2000)
+    disposition: Optional[str] = Field(None, max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
 
 class NCRecordOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
