@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 from app.models.user import UserRole
 
 class UserLogin(BaseModel):
@@ -22,3 +22,8 @@ class UserOut(BaseModel):
     full_name: str
     email: EmailStr
     role: UserRole
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, v):
+        return str(v)

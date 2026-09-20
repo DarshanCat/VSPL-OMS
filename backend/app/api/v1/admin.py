@@ -1,5 +1,5 @@
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -17,6 +17,11 @@ class CustomerOut(BaseModel):
     class Config:
         from_attributes = True
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, v):
+        return str(v)
+
 class PartOut(BaseModel):
     id: str
     part_number: str
@@ -24,6 +29,11 @@ class PartOut(BaseModel):
     description: str
     class Config:
         from_attributes = True
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _coerce_id(cls, v):
+        return str(v)
 
 class MachineOut(BaseModel):
     machine_id: str

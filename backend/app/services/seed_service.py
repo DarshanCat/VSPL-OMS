@@ -27,15 +27,13 @@ def seed_database_if_empty(db: Session):
         ("operator.f2@vspl.com", "oper123", "Manjunath (CNC)", UserRole.MACHINE_OPERATOR, "OP-F2"),
     ]
 
+    # Only create accounts that don't exist yet. Never overwrite an existing user's
+    # password/role/active-status here: this function runs on every app startup, and
+    # doing so would silently reset any real admin's credentials back to the seed
+    # defaults on every restart/deploy.
     for email, pwd, name, role, emp_id in users_data:
         existing = db.query(User).filter(User.email == email).first()
-        if existing:
-            existing.hashed_password = get_password_hash(pwd)
-            existing.role = role
-            existing.full_name = name
-            existing.employee_id = emp_id
-            existing.is_active = True
-        else:
+        if not existing:
             u = User(
                 email=email,
                 hashed_password=get_password_hash(pwd),

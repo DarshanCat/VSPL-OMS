@@ -10,6 +10,7 @@ not already covered by the existing suite:
      the existing guarantee already covered for Movement/Production entries.
   3. Self-registration must not allow arbitrary-role account creation (privilege escalation).
 """
+import uuid
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -31,7 +32,7 @@ from app.models.work_order import WorkOrder
 from app.models.production_movement import StageWIP
 from app.models.packing import PackingRecord, PackingTransaction
 from app.models.dispatch import Dispatch
-from app.core.security import create_access_token, hash_password
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User, UserRole
 
 TEST_DB_URL = "sqlite:///:memory:"
@@ -182,3 +183,48 @@ def test_registration_requires_admin_role():
         "role": "admin",
     })
     assert resp.status_code in (401, 403)
+
+
+def test_seed_does_not_reset_existing_user_credentials(db_session):
+    """
+    seed_database_if_empty() runs on every application startup. It must never overwrite
+    an existing seeded account's password/role — otherwise a real admin's rotated
+    password would be silently reset back to the hardcoded demo default on every
+    restart/deploy.
+    """
+    admin = db_session.query(User).filter(User.email == "admin@vspl.com").first()
+    assert admin is not None
+
+    admin.hashed_password = hash_password("a-real-rotated-production-password")
+    admin.role = UserRole.PRODUCTION_MANAGER  # simulate a real role change too
+    db_session.commit()
+
+    # Simulate an application restart re-running the seeder against the same DB.
+    seed_database_if_empty(db_session)
+
+    db_session.refresh(admin)
+    assert verify_password("a-real-rotated-production-password", admin.hashed_password)
+    assert admin.role == UserRole.PRODUCTION_MANAGER
+
+
+def test_useout_customerout_partout_serialize_uuid_id():
+    """
+    UserOut/CustomerOut/PartOut declare `id: str`, but their endpoints return raw ORM
+    objects whose `id` is a uuid.UUID (via the custom GUID column type). Pydantic v2
+    does not auto-coerce UUID -> str for a plain `str` field, which previously crashed
+    /auth/register, /admin/customers and /admin/parts with a 500 ResponseValidationError
+    on every call. Confirms the fix (a `field_validator` coercing id to str) holds.
+    """
+    from app.schemas.auth import UserOut
+    from app.api.v1.admin import CustomerOut, PartOut
+
+    raw_id = uuid.uuid4()
+
+    user_out = UserOut.model_validate({"id": raw_id, "full_name": "X", "email": "x@x.com", "role": "admin"})
+    assert user_out.id == str(raw_id)
+
+    cust_out = CustomerOut.model_validate({"id": raw_id, "customer_code": "C1", "name": "N"})
+    assert cust_out.id == str(raw_id)
+
+    part_out = PartOut.model_validate({"id": raw_id, "part_number": "P1", "grade": "G", "description": "D"})
+    assert part_out.id == str(raw_id)
