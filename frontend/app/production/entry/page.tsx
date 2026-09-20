@@ -134,9 +134,10 @@ export default function ProductionEntryPage() {
       const state = await getStageState(cleanWO, curStage).catch(() => null);
       setStageState(state);
 
-      // Preset default good quantity based on available WIP at stage
-      const avail = state?.available_wip ?? tracking.available_wip ?? 0;
-      setGoodQty(avail > 0 ? avail : "");
+      // Production entry fields represent a NEW transaction delta only — never prefill
+      // with available WIP or any cumulative/aggregate figure. Operators must enter the
+      // actual pieces completed in this transaction.
+      setGoodQty("");
       setRejectedQty(0);
 
       // Preset matching machine

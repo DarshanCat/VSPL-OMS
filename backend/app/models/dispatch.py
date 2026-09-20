@@ -9,6 +9,7 @@ class Dispatch(Base):
 
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False)
+    client_request_id = Column(String, unique=True, nullable=True, index=True)
     customer_po = Column(String, nullable=True)
     invoice_number = Column(String, nullable=True, index=True)
     dispatched_qty = Column(Integer, nullable=False)

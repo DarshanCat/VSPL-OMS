@@ -10,7 +10,7 @@ class ProductionMovement(Base):
 
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     movement_id = Column(String, unique=True, nullable=False, index=True)
-    client_request_id = Column(String, nullable=True, index=True)
+    client_request_id = Column(String, unique=True, nullable=True, index=True)
     source_type = Column(String, default="SMES_UI", nullable=False)  # "SMES_UI", "EXCEL_IMPORT", "API", "SYSTEM"
     work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False)
     part_id = Column(GUID, ForeignKey("parts.id"), nullable=True)

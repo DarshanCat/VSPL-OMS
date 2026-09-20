@@ -24,3 +24,20 @@ class PackingRecord(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     work_order = relationship("WorkOrder", back_populates="packing_records")
+
+
+class PackingTransaction(Base):
+    """Immutable ledger of every individual packing/BSR transaction posted for a Work Order."""
+    __tablename__ = "packing_transactions"
+
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False)
+    client_request_id = Column(String, unique=True, nullable=True, index=True)
+    packed_quantity = Column(Integer, nullable=False)
+    box_count = Column(Integer, nullable=True)
+    package_type = Column(String, nullable=True)
+    remarks = Column(String, nullable=True)
+    created_by = Column(GUID, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    work_order = relationship("WorkOrder")

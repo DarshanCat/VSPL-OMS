@@ -147,6 +147,7 @@ def auto_migrate_schema():
         "ALTER TABLE packing_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
         # Dispatches
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS client_request_id VARCHAR;",
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS customer_po VARCHAR;",
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS invoice_number VARCHAR;",
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS dispatched_qty INTEGER DEFAULT 0;",
@@ -181,7 +182,15 @@ def auto_migrate_schema():
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS new_value TEXT;",
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS details TEXT;",
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR;",
-        "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;"
+        "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
+
+        # Idempotency: enforce uniqueness of client-supplied request tokens so a duplicate
+        # submission (double-click / network retry) cannot post the same transaction twice,
+        # even under concurrent requests. Nulls remain unrestricted (multiple untagged rows allowed).
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_movements_client_request_id ON production_movements (client_request_id) WHERE client_request_id IS NOT NULL;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_updates_client_request_id ON production_updates (client_request_id) WHERE client_request_id IS NOT NULL;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_dispatches_client_request_id ON dispatches (client_request_id) WHERE client_request_id IS NOT NULL;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;"
     ]
 
     for stmt in statements:

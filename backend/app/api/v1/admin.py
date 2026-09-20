@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
 from app.models.user import User, UserRole
 from app.models.order import Customer, Part
 from app.models.audit import AuditLog
@@ -63,7 +63,11 @@ def list_machines(user: User = Depends(get_current_user)):
     ]
 
 @router.get("/audit-logs")
-def list_audit_logs(limit: int = 100, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_audit_logs(
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.CEO)),
+):
     logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).all()
     return [
         {

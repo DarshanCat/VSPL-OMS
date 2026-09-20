@@ -2,6 +2,7 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
 from app.models.packing import PackingRecord
@@ -47,6 +48,25 @@ class DispatchService:
 
     @staticmethod
     def execute_dispatch(db: Session, req: DispatchRequest, current_user: Optional[User] = None) -> DispatchResponse:
+        # 1. Idempotency Check: Prevent duplicate submissions on double-click / network retry
+        if req.client_request_id:
+            existing_dispatch = db.query(Dispatch).filter(
+                Dispatch.client_request_id == req.client_request_id.strip()
+            ).first()
+            if existing_dispatch:
+                wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_dispatch.work_order_id).first()
+                pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_dispatch.work_order_id).first()
+                return DispatchResponse(
+                    success=True,
+                    invoice_number=existing_dispatch.invoice_number or req.invoice_number,
+                    wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                    client_request_id=existing_dispatch.client_request_id,
+                    dispatched_quantity=existing_dispatch.dispatched_qty,
+                    remaining_ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
+                    wo_status=wo_existing.status.value if wo_existing else "unknown",
+                    message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
+                )
+
         # Atomic lock on Work Order and Packing Record
         wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).with_for_update().first()
         if not wo:
@@ -76,12 +96,31 @@ class DispatchService:
         else:
             packing_rec.status = "Partially-Dispatched"
 
-        # Update StageWIP at Packing/BSR/Dispatch to reflect parts cleared and shipped
-        wips = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()
-        for w in wips:
-            if w.stage.upper() in ("PACKING / BSR", "PACKING/BSR", "PACKING", "BSR", "DISPATCH"):
-                w.ok_qty += req.dispatched_quantity
-                w.moved_out_qty += req.dispatched_quantity
+        # Update StageWIP only at the WO's actual terminal (DISPATCH) stage per its
+        # persisted route, to avoid crediting the same dispatch quantity to multiple
+        # StageWIP rows (e.g. when PACKING and BSR are separate stages in the route).
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        terminal_stage = routes[-1].stage if routes else "DISPATCH"
+        dispatch_wip = db.query(StageWIP).filter(
+            StageWIP.work_order_id == wo.id,
+            StageWIP.stage == terminal_stage
+        ).with_for_update().first()
+        if not dispatch_wip:
+            dispatch_wip = StageWIP(
+                work_order_id=wo.id,
+                stage=terminal_stage,
+                ent_qty=0,
+                ok_qty=0,
+                inproc_qty=0,
+                onhand_qty=0,
+                rejected_qty=0,
+                available_wip=0
+            )
+            db.add(dispatch_wip)
+            db.flush()
+        dispatch_wip.ent_qty += req.dispatched_quantity
+        dispatch_wip.ok_qty += req.dispatched_quantity
+        dispatch_wip.moved_out_qty += req.dispatched_quantity
 
         # Record in Dispatch table
         order = wo.order
@@ -90,6 +129,7 @@ class DispatchService:
 
         dispatch_entry = Dispatch(
             work_order_id=wo.id,
+            client_request_id=req.client_request_id.strip() if req.client_request_id else None,
             customer_po=customer_po,
             invoice_number=req.invoice_number.strip(),
             dispatched_qty=req.dispatched_quantity,
@@ -114,7 +154,28 @@ class DispatchService:
         )
         db.add(audit)
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent request with the same idempotency key won the race.
+            db.rollback()
+            existing_dispatch = db.query(Dispatch).filter(
+                Dispatch.client_request_id == req.client_request_id.strip()
+            ).first()
+            if not existing_dispatch:
+                raise
+            wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_dispatch.work_order_id).first()
+            pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_dispatch.work_order_id).first()
+            return DispatchResponse(
+                success=True,
+                invoice_number=existing_dispatch.invoice_number or req.invoice_number,
+                wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                client_request_id=existing_dispatch.client_request_id,
+                dispatched_quantity=existing_dispatch.dispatched_qty,
+                remaining_ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
+                wo_status=wo_existing.status.value if wo_existing else "unknown",
+                message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
+            )
         db.refresh(packing_rec)
         db.refresh(wo)
 
@@ -122,6 +183,7 @@ class DispatchService:
             success=True,
             invoice_number=req.invoice_number,
             wo_number=wo.wo_number,
+            client_request_id=req.client_request_id,
             dispatched_quantity=req.dispatched_quantity,
             remaining_ready_for_dispatch=packing_rec.ready_for_dispatch_qty,
             wo_status=wo.status.value,

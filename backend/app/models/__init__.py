@@ -2,7 +2,7 @@ from app.models.user import User, UserRole
 from app.models.order import Customer, Part, Order, OrderStatus
 from app.models.work_order import WorkOrder, WORoute, StageCode, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
-from app.models.packing import PackingRecord
+from app.models.packing import PackingRecord, PackingTransaction
 from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.conversion import Conversion
 from app.models.nc import NCRecord
@@ -23,6 +23,7 @@ __all__ = [
     "ProductionMovement",
     "StageWIP",
     "PackingRecord",
+    "PackingTransaction",
     "ProductionUpdate",
     "ProductionStatus",
     "Conversion",

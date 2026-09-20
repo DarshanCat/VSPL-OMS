@@ -3,6 +3,7 @@ from datetime import datetime, date
 from typing import Optional, List
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate, ProductionStatus
@@ -278,7 +279,41 @@ class ProductionService:
         )
         db.add(audit)
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent request with the same idempotency key won the race.
+            db.rollback()
+            existing_mov = db.query(ProductionMovement).filter(
+                ProductionMovement.client_request_id == req.client_request_id.strip()
+            ).first()
+            if not existing_mov:
+                raise
+            wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_mov.work_order_id).first()
+            from_wip_ex = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo_existing.id,
+                StageWIP.stage == existing_mov.from_stage
+            ).first()
+            to_wip_ex = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo_existing.id,
+                StageWIP.stage == existing_mov.to_stage
+            ).first()
+            return MovementResponse(
+                success=True,
+                movement_id=existing_mov.movement_id,
+                client_request_id=existing_mov.client_request_id,
+                wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                part_number=wo_existing.order.part.part_number if (wo_existing and wo_existing.order and wo_existing.order.part) else "N/A",
+                from_stage=existing_mov.from_stage,
+                to_stage=existing_mov.to_stage,
+                quantity_moved=existing_mov.quantity_moved,
+                rejected_quantity=existing_mov.rejected_quantity,
+                available_wip_remaining=from_wip_ex.available_wip if from_wip_ex else 0,
+                to_stage_available_wip=to_wip_ex.available_wip if to_wip_ex else 0,
+                current_stage=wo_existing.current_stage if wo_existing else "N/A",
+                timestamp=existing_mov.created_at or now,
+                message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction '{existing_mov.movement_id}'."
+            )
         db.refresh(from_wip)
         db.refresh(to_wip)
         db.refresh(wo)
@@ -439,7 +474,36 @@ class ProductionService:
         )
         db.add(audit)
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent request with the same idempotency key won the race.
+            db.rollback()
+            existing_entry = db.query(ProductionUpdate).filter(
+                ProductionUpdate.client_request_id == req.client_request_id.strip()
+            ).first()
+            if not existing_entry:
+                raise
+            wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_entry.work_order_id).first()
+            wip_existing = db.query(StageWIP).filter(
+                StageWIP.work_order_id == existing_entry.work_order_id,
+                StageWIP.stage == existing_entry.stage
+            ).first()
+            return ProductionEntryResponse(
+                success=True,
+                entry_id=str(existing_entry.id),
+                client_request_id=existing_entry.client_request_id,
+                wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                stage=existing_entry.stage,
+                good_qty=existing_entry.good_qty,
+                rejected_quantity=existing_entry.reject_qty,
+                stage_ok_total=wip_existing.ok_qty if wip_existing else existing_entry.good_qty,
+                stage_rejection_total=wip_existing.rejected_qty if wip_existing else existing_entry.reject_qty,
+                stage_onhand_available=wip_existing.onhand_qty if wip_existing else 0,
+                stage_inproc_remaining=wip_existing.inproc_qty if wip_existing else 0,
+                timestamp=existing_entry.created_at or now,
+                message=f"Duplicate production entry detected with token '{req.client_request_id}'. Returning original transaction."
+            )
         db.refresh(wip)
         db.refresh(wo)
 

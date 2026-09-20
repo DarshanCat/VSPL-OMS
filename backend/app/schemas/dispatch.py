@@ -28,11 +28,13 @@ class DispatchRequest(BaseModel):
     vehicle_number: Optional[str] = None
     transporter: Optional[str] = None
     remarks: Optional[str] = None
+    client_request_id: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
 
 class DispatchResponse(BaseModel):
     success: bool
     invoice_number: str
     wo_number: str
+    client_request_id: Optional[str] = None
     dispatched_quantity: int
     remaining_ready_for_dispatch: int
     wo_status: str

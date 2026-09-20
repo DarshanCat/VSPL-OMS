@@ -1,6 +1,6 @@
 import math
 from datetime import datetime, date
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 from sqlalchemy.orm import Session
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP

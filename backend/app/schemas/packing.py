@@ -30,10 +30,12 @@ class PackingUpdateRequest(BaseModel):
     box_count: Optional[int] = 1
     package_type: Optional[str] = "Standard Box"
     remarks: Optional[str] = None
+    client_request_id: Optional[str] = Field(None, description="Idempotency key to prevent duplicate submissions")
 
 class PackingUpdateResponse(BaseModel):
     success: bool
     wo_number: str
+    client_request_id: Optional[str] = None
     packed_this_batch: int
     total_packed: int
     remaining_pending: int

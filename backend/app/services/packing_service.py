@@ -2,9 +2,10 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.work_order import WorkOrder, WOStatus
 from app.models.production_movement import StageWIP
-from app.models.packing import PackingRecord
+from app.models.packing import PackingRecord, PackingTransaction
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.packing import PackingQueueItem, PackingUpdateRequest, PackingUpdateResponse
@@ -48,14 +49,33 @@ class PackingService:
 
     @staticmethod
     def update_packing(db: Session, req: PackingUpdateRequest, current_user: Optional[User] = None) -> PackingUpdateResponse:
-        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).first()
+        # 1. Idempotency Check: Prevent duplicate submissions on double-click / network retry
+        if req.client_request_id:
+            existing_txn = db.query(PackingTransaction).filter(
+                PackingTransaction.client_request_id == req.client_request_id.strip()
+            ).first()
+            if existing_txn:
+                wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_txn.work_order_id).first()
+                pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_txn.work_order_id).first()
+                return PackingUpdateResponse(
+                    success=True,
+                    wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                    client_request_id=existing_txn.client_request_id,
+                    packed_this_batch=existing_txn.packed_quantity,
+                    total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
+                    remaining_pending=pr_existing.pending_qty if pr_existing else 0,
+                    ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
+                    message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
+                )
+
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).with_for_update().first()
         if not wo:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Work Order '{req.wo_number}' not found."
             )
 
-        packing_rec = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
+        packing_rec = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).with_for_update().first()
         if not packing_rec:
             # Check PACKING or FI StageWIP to see how many parts actually arrived
             pack_wip = db.query(StageWIP).filter(
@@ -105,6 +125,18 @@ class PackingService:
         else:
             packing_rec.status = "In-Packing"
 
+        # Record immutable packing transaction ledger entry
+        txn = PackingTransaction(
+            work_order_id=wo.id,
+            client_request_id=req.client_request_id.strip() if req.client_request_id else None,
+            packed_quantity=req.packed_quantity,
+            box_count=req.box_count,
+            package_type=req.package_type,
+            remarks=req.remarks,
+            created_by=current_user.id if current_user else None
+        )
+        db.add(txn)
+
         # Create audit log
         audit = AuditLog(
             user_id=current_user.id if current_user else None,
@@ -118,12 +150,34 @@ class PackingService:
         )
         db.add(audit)
 
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # A concurrent request with the same idempotency key won the race.
+            db.rollback()
+            existing_txn = db.query(PackingTransaction).filter(
+                PackingTransaction.client_request_id == req.client_request_id.strip()
+            ).first()
+            if not existing_txn:
+                raise
+            wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_txn.work_order_id).first()
+            pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_txn.work_order_id).first()
+            return PackingUpdateResponse(
+                success=True,
+                wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                client_request_id=existing_txn.client_request_id,
+                packed_this_batch=existing_txn.packed_quantity,
+                total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
+                remaining_pending=pr_existing.pending_qty if pr_existing else 0,
+                ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
+                message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
+            )
         db.refresh(packing_rec)
 
         return PackingUpdateResponse(
             success=True,
             wo_number=wo.wo_number,
+            client_request_id=req.client_request_id,
             packed_this_batch=req.packed_quantity,
             total_packed=packing_rec.packed_qty,
             remaining_pending=packing_rec.pending_qty,

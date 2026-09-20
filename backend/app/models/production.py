@@ -14,7 +14,7 @@ class ProductionUpdate(Base):
 
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False)
-    client_request_id = Column(String, nullable=True, index=True)
+    client_request_id = Column(String, unique=True, nullable=True, index=True)
     stage = Column(String, nullable=False)
     machine = Column(String, nullable=True)
     operator_id = Column(GUID, ForeignKey("users.id"), nullable=True)
