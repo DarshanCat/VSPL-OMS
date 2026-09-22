@@ -96,8 +96,19 @@ app.include_router(conversion_mapping.router)
 
 @app.get("/health")
 def health():
+    """Application liveness AND database readiness, reported as two distinct fields --
+    the process can be up while the database is unreachable, and callers must be able
+    to tell the difference instead of receiving a blanket "online"."""
+    from sqlalchemy import text
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unavailable"
     return {
-        "status": "online",
+        "status": "online" if db_status == "connected" else "degraded",
         "system": "VSPL Smart Manufacturing Execution System (SMES)",
-        "oms_engine": "v3.3 connected"
+        "oms_engine": "v3.3 connected",
+        "database": db_status
     }

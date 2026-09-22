@@ -48,6 +48,20 @@ export function getCurrentUserRole(): string | null {
   }
 }
 
+// Server-resolved identity of the authenticated caller (never client-supplied) --
+// used to render the sidebar's real logged-in user instead of a hardcoded placeholder.
+export async function getCurrentUser(): Promise<{
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  department?: string | null;
+  is_active: boolean;
+}> {
+  const { data } = await api.get("/api/v1/auth/me");
+  return data;
+}
+
 // Dashboard
 export async function getDashboardStats() {
   const { data } = await api.get("/api/v1/dashboard/stats");

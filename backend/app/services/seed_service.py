@@ -1,5 +1,7 @@
+import os
 from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
+from app.core.config import settings
 from app.core.security import get_password_hash
 from app.models.user import User, UserRole
 from app.models.order import Customer, Part, Order, OrderStatus
@@ -10,8 +12,42 @@ from app.models.dispatch import Dispatch
 from app.models.nc import NCRecord
 from app.services.oms_integration_service import calculate_stage_targets
 
+def _is_production() -> bool:
+    return settings.ENVIRONMENT.lower() == "production"
+
+def _bootstrap_production_admin(db: Session) -> None:
+    """In production, no demo user with a known password is ever created. The only
+    account this seeds is a single first admin, and only when the deployer explicitly
+    provided its credentials via environment variables -- never a hardcoded password.
+    If those variables are absent, production starts with zero users and the first
+    admin must be created through a separate secure process (see ONBOARDING/deployment
+    docs), not through this seed path."""
+    if db.query(User).first():
+        return
+    email = os.environ.get("BOOTSTRAP_ADMIN_EMAIL")
+    password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+    if not email or not password:
+        return
+    db.add(User(
+        email=email,
+        hashed_password=get_password_hash(password),
+        full_name=os.environ.get("BOOTSTRAP_ADMIN_NAME", "System Administrator"),
+        role=UserRole.ADMIN,
+        employee_id="ADM-000",
+        department="Administration",
+        is_active=True,
+    ))
+    db.flush()
+
 def seed_database_if_empty(db: Session):
-    # 1. Users with distinct RBAC roles (Seed / Upsert all demo users)
+    if _is_production():
+        # Production never auto-creates demo/seed accounts with known passwords.
+        _bootstrap_production_admin(db)
+        db.commit()
+        return
+
+    # 1. Users with distinct RBAC roles (Seed / Upsert all demo users) --
+    # development/UAT only, gated above; never runs when ENVIRONMENT=production.
     users_data = [
         ("admin@vspl.com", "admin123", "Darshan Admin", UserRole.ADMIN, "ADM-001"),
         ("darshan@vspl.com", "admin123", "Darshan Admin", UserRole.ADMIN, "ADM-002"),

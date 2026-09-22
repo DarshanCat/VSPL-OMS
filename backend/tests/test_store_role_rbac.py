@@ -187,6 +187,72 @@ def test_store_can_record_melting_entry(client):
     assert melt_resp.json()["sent_by"] == "Krishna Murthy (Store)"
 
 
+def test_store_cannot_record_melting_entry_for_non_scrap_disposition(client):
+    """Melting entry only applies to a SCRAP disposition. A DEVIATION_ACCEPT (or any
+    other non-SCRAP) disposition must be rejected, not silently treated as scrap
+    material."""
+    admin = _login(client, "ADMIN")
+    qa = _login(client, "QA")
+    store = _login(client, "STORE")
+
+    wo = _intake_wo(client, admin, po_qty=50)
+    _produce(client, admin, wo, good_qty=0, rejected=20)
+
+    listing = client.get("/api/v1/rejection", headers=_auth(admin), params={"wo_number": wo})
+    nc_number = listing.json()[0]["nc_number"]
+
+    deviation_resp = client.post(
+        "/api/v1/rejection/disposition", headers=_auth(qa),
+        json={"nc_number": nc_number, "action": "DEVIATION_ACCEPT", "quantity": 20, "reason": "accepted under concession"}
+    )
+    assert deviation_resp.status_code == 200, deviation_resp.text
+
+    detail = client.get(f"/api/v1/rejection/{nc_number}", headers=_auth(admin))
+    disposition_id = detail.json()["disposition_history"][0]["id"]
+
+    melt_resp = client.post(
+        "/api/v1/rejection/melting-entry", headers=_auth(store),
+        json={"disposition_id": disposition_id}
+    )
+    assert melt_resp.status_code == 400, melt_resp.text
+
+
+def test_store_cannot_record_melting_entry_twice_for_same_disposition(client):
+    """Once a SCRAP disposition has already been sent for melting, a second melting
+    entry against the same disposition_id must be rejected -- material cannot be
+    consumed twice."""
+    admin = _login(client, "ADMIN")
+    qa = _login(client, "QA")
+    store = _login(client, "STORE")
+
+    wo = _intake_wo(client, admin, po_qty=50)
+    _produce(client, admin, wo, good_qty=0, rejected=20)
+
+    listing = client.get("/api/v1/rejection", headers=_auth(admin), params={"wo_number": wo})
+    nc_number = listing.json()[0]["nc_number"]
+
+    scrap_resp = client.post(
+        "/api/v1/rejection/disposition", headers=_auth(qa),
+        json={"nc_number": nc_number, "action": "SCRAP", "quantity": 20, "reason": "unrecoverable"}
+    )
+    assert scrap_resp.status_code == 200, scrap_resp.text
+
+    detail = client.get(f"/api/v1/rejection/{nc_number}", headers=_auth(admin))
+    disposition_id = detail.json()["disposition_history"][0]["id"]
+
+    first = client.post(
+        "/api/v1/rejection/melting-entry", headers=_auth(store),
+        json={"disposition_id": disposition_id}
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/api/v1/rejection/melting-entry", headers=_auth(store),
+        json={"disposition_id": disposition_id}
+    )
+    assert second.status_code == 400, second.text
+
+
 # ---------------------------------------------------------------------------
 # 7-9. STORE cannot approve conversion / DEVIATION_ACCEPT / scrap
 # ---------------------------------------------------------------------------

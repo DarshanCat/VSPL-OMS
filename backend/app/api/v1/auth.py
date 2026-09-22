@@ -3,11 +3,18 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.rate_limit import limiter
-from app.api.deps import require_roles
+from app.api.deps import require_roles, get_current_user
 from app.models.user import User, UserRole
 from app.schemas.auth import UserLogin, UserCreate, Token, UserOut
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+@router.get("/me", response_model=UserOut)
+def get_my_identity(user: User = Depends(get_current_user)):
+    """Return the identity of the currently authenticated user, resolved server-side
+    from the bearer token -- never client-supplied -- so the frontend can display the
+    real logged-in user instead of a hardcoded placeholder."""
+    return user
 
 @router.post("/register", response_model=UserOut)
 def register(

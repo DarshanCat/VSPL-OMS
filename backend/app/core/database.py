@@ -47,13 +47,23 @@ if db_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
     engine = create_engine(db_url, connect_args=connect_args)
 else:
-    try:
+    if settings.ENVIRONMENT.lower() == "production":
+        # Production must never silently downgrade to a local SQLite file if the
+        # configured PostgreSQL/Neon connection fails -- that would put real users on a
+        # throwaway local database without anyone noticing. Fail loudly instead so the
+        # process refuses to start (or /health reports it truthfully) rather than serve
+        # traffic against the wrong database.
         engine = create_engine(db_url, pool_pre_ping=True)
-        with engine.connect() as conn:
-            pass
-    except Exception:
-        fallback_url = "sqlite:///./vspl_smes.db"
-        engine = create_engine(fallback_url, connect_args={"check_same_thread": False})
+    else:
+        # Development convenience only: if Postgres isn't running locally, fall back to
+        # SQLite so `uvicorn app.main:app` still works without docker-compose up.
+        try:
+            engine = create_engine(db_url, pool_pre_ping=True)
+            with engine.connect() as conn:
+                pass
+        except Exception:
+            fallback_url = "sqlite:///./vspl_smes.db"
+            engine = create_engine(fallback_url, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

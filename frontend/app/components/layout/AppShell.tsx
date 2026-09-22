@@ -30,7 +30,7 @@ import {
   CheckSquare,
   Shuffle
 } from "lucide-react";
-import { logout, getCurrentUserRole } from "@/lib/api";
+import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
 // STORE is a physical material-handling role: it must see only the navigation it is
 // actually authorized to use (Move Parts, and Rejection Tracking for melting-entry
@@ -180,11 +180,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ full_name: string; email: string } | null>(null);
   const [notificationCount, setNotificationCount] = useState(3);
   const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     setUserRole(getCurrentUserRole());
+    getCurrentUser()
+      .then((u) => setCurrentUser({ full_name: u.full_name, email: u.email }))
+      .catch(() => setCurrentUser(null));
   }, []);
 
   const visibleNavGroups = userRole === "store"
@@ -312,16 +316,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Footer / User Role Switcher */}
         <div className="border-t border-zinc-200 dark:border-zinc-800 p-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold text-xs">
-                PM
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold text-xs">
+                {currentUser
+                  ? currentUser.full_name
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .slice(0, 2)
+                      .map((part) => part[0]?.toUpperCase())
+                      .join("") || "?"
+                  : "?"}
               </div>
               <div className="overflow-hidden">
                 <p className="truncate text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                  Production Mgr
+                  {currentUser ? currentUser.full_name : "..."}
                 </p>
-                <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                  pm@vspl.com
+                <p className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
+                  {currentUser ? currentUser.email : ""}
                 </p>
               </div>
             </div>

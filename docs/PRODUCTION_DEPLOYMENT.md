@@ -17,7 +17,8 @@ exists in this repository.
 
 | Variable | Purpose | Production requirement |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | Must point at the production database, e.g. `postgresql://user:pass@host:5432/vspl_smes` |
+| `DATABASE_URL` | PostgreSQL connection string | Production uses **Neon PostgreSQL**. Use the connection string from the Neon project dashboard (includes `sslmode=require`), e.g. `postgresql://<user>:<password>@<neon-host>/<db>?sslmode=require`. Set only as a deployment secret/environment variable — never commit it, log it, or return it from any endpoint. In production the app fails to start rather than silently falling back to a local SQLite file if this connection cannot be established (see `app/core/database.py`) |
+| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | First production admin | Only used once, when `ENVIRONMENT=production` and the `users` table is empty (see §8). Unset/remove after first login |
 | `REDIS_URL` | Present in config; no code path currently uses it (see §13) | Safe to leave default |
 | `SECRET_KEY` | JWT signing secret | **Required.** The app refuses to start if `ENVIRONMENT=production` and this is still the shipped default — generate a unique long random value (e.g. `openssl rand -hex 32`) |
 | `ALGORITHM` | JWT algorithm | Leave as `HS256` unless changed deliberately |
@@ -56,6 +57,10 @@ on backend startup (`app/main.py` lifespan) and applies only additive, idempoten
    curl -f https://api.vspl.example/health
    psql "$DATABASE_URL" -c "\d stage_wips" # spot-check a table touched by this release
    ```
+   `/health` reports application liveness and database connectivity as two separate
+   fields (`"status"` and `"database"`) — a running process with an unreachable Neon
+   database returns `"status": "degraded", "database": "unavailable"`, not a false
+   `"online"`.
 4. **Smoke test**: see `docs/PRODUCTION_SMOKE_TEST.md`.
 5. **Go live**: point the reverse proxy / release traffic at the new instance.
 
@@ -138,13 +143,36 @@ worry about if "stopped" — there is no running background process today.
 
 ## 8. Admin Setup
 
-See `docs/PRODUCTION_SMOKE_TEST.md` for the post-deploy checklist and the main UAT report
-for the full role list. In short: `seed_database_if_empty()` creates a fixed set of demo
-accounts (one per role) only the first time it runs against an empty `users` table.
-`POST /api/v1/auth/register` requires an existing ADMIN token, so no one else can create
-further accounts. **Rotate every seeded account's password immediately after first
-production login** — the seed credentials are public (they are in this repository's
-source code).
+`seed_database_if_empty()` behaves differently depending on `ENVIRONMENT`:
+
+- **`ENVIRONMENT=development` (default):** creates the fixed set of demo accounts (one per
+  role, documented in the main UAT report) the first time it runs against an empty `users`
+  table. These credentials are public — they are in this repository's source code — and
+  must never be relied on outside local development/UAT. The login page's "Quick Role Test
+  Logins" panel that surfaces them is also compiled out of production frontend builds
+  (`NODE_ENV=production`).
+- **`ENVIRONMENT=production`:** no demo/seed accounts are created, ever. The seed function
+  creates **at most one** admin account, and only if the deployer explicitly supplied
+  `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` as environment variables before
+  first startup against an empty database. If those variables are absent, the database
+  starts with zero users and no one can sign in until an admin is created directly against
+  the production database (e.g. a one-off script using `app.core.security.get_password_hash`
+  run by an operator with database access) — this is intentional: production must never
+  depend on a password that ever existed in source control.
+
+To bring up a fresh production deployment:
+
+1. Set `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` (a strong, unique password) as
+   environment variables for the backend process's first startup only.
+2. Start the backend once against the empty database; confirm the bootstrap admin can log in.
+3. Remove `BOOTSTRAP_ADMIN_PASSWORD` from the environment (or rotate it via the app once
+   logged in) so it does not linger in process environment/orchestration config.
+4. Use `POST /api/v1/auth/register` (requires an ADMIN token) to create any further named
+   accounts — including a STORE account for the material-handling role. `register` never
+   auto-generates or reuses a seed password.
+
+**Never** set `BOOTSTRAP_ADMIN_PASSWORD` (or any credential) in a committed file. It belongs
+only in the deployment platform's secret store / environment configuration.
 
 ## 9. Release Version
 

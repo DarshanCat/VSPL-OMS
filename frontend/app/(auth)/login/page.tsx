@@ -13,9 +13,14 @@ const DEMO_ROLES = [
   { role: "Machine Operator", email: "operator@vspl.com", pass: "op123" },
 ];
 
+// Demo credential quick-fill is a development/UAT convenience only. It must never render
+// in a production build, since it would expose seed account passwords to anyone who can
+// load the login page.
+const SHOW_DEMO_LOGINS = process.env.NODE_ENV !== "production";
+
 export default function LoginPage() {
-  const [email, setEmail] = useState("pm@vspl.com");
-  const [password, setPassword] = useState("pm123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
@@ -152,25 +157,27 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Demo Role Fillers */}
-          <div className="pt-4 border-t border-zinc-800">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
-              Quick Role Test Logins:
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_ROLES.map((r) => (
-                <button
-                  key={r.email}
-                  type="button"
-                  onClick={() => quickFill(r.email, r.pass)}
-                  className="flex flex-col items-start rounded-lg border border-zinc-800 bg-zinc-900/60 p-2 text-left hover:border-blue-500/50 hover:bg-zinc-800/80 transition-all"
-                >
-                  <span className="text-[11px] font-bold text-zinc-200">{r.role}</span>
-                  <span className="text-[10px] text-zinc-500">{r.email}</span>
-                </button>
-              ))}
+          {/* Quick Demo Role Fillers -- development/UAT builds only */}
+          {SHOW_DEMO_LOGINS && (
+            <div className="pt-4 border-t border-zinc-800">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                Quick Role Test Logins:
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {DEMO_ROLES.map((r) => (
+                  <button
+                    key={r.email}
+                    type="button"
+                    onClick={() => quickFill(r.email, r.pass)}
+                    className="flex flex-col items-start rounded-lg border border-zinc-800 bg-zinc-900/60 p-2 text-left hover:border-blue-500/50 hover:bg-zinc-800/80 transition-all"
+                  >
+                    <span className="text-[11px] font-bold text-zinc-200">{r.role}</span>
+                    <span className="text-[10px] text-zinc-500">{r.email}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
