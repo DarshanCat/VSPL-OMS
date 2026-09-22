@@ -10,8 +10,12 @@ MASTERS_DIR = BASE_DATA_DIR / "masters"
 REPORTS_DIR = BASE_DATA_DIR / "reports"
 UPLOADS_DIR = BASE_DATA_DIR / "uploads"
 
-for d in (MASTERS_DIR, REPORTS_DIR, UPLOADS_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+# These directories are created lazily, at the point each write actually happens
+# (see new_run_dir() and promote_master() below) -- never at module import time.
+# A serverless runtime's filesystem is read-only outside its own temp location, so
+# an unconditional mkdir() here would crash `from app.main import app` -- and every
+# endpoint in the application, not just the OMS Engine batch feature that actually
+# needs these directories -- the moment this module is imported.
 
 _MASTER_DATE_RE = re.compile(r"Master_(\d{4}-\d{2}-\d{2})\.xlsx$")
 
@@ -58,6 +62,7 @@ def promote_master(mpath: Optional[str]) -> Optional[str]:
     """Copy a freshly generated master into MASTERS_DIR so the next run picks it up as 'latest'."""
     if not mpath:
         return None
+    MASTERS_DIR.mkdir(parents=True, exist_ok=True)
     src = Path(mpath)
     dest = MASTERS_DIR / src.name
     if src.resolve() != dest.resolve():
