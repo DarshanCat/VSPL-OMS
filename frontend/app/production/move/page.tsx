@@ -26,6 +26,7 @@ import { Modal } from "@/app/components/ui/Modal";
 import {
   getWorkOrders,
   getWorkOrderTracking,
+  getStageState,
   moveParts,
   predictDelay,
   predictRejection
@@ -46,6 +47,7 @@ export default function MovePartsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
   const [woData, setWoData] = useState<any>(null);
+  const [stageState, setStageState] = useState<any>(null);
   const [mlDelayPred, setMlDelayPred] = useState<any>(null);
   const [mlRejPred, setMlRejPred] = useState<any>(null);
   const [availableWOs, setAvailableWOs] = useState<any[]>([]);
@@ -107,8 +109,16 @@ export default function MovePartsPage() {
       setWoData(data);
       setSearchTerm(data.wo_number);
 
-      // Default move qty to available WIP
-      setQuantityToMove(data.available_wip > 0 ? data.available_wip : "");
+      // Movement quantity is always a fresh transaction amount, never prefilled with
+      // the available WIP -- an operator must enter what was actually physically moved.
+      setQuantityToMove("");
+
+      // Authoritative production/movement breakdown for the selected SOURCE stage --
+      // same data source (get_current_stage_state) the Production Entry screen uses,
+      // so the two screens never show competing numbers.
+      getStageState(targetWO, data.current_stage)
+        .then((s) => setStageState(s))
+        .catch(() => setStageState(null));
 
       // Preset machine based on next stage
       const matchingMach = MACHINES.find((m) => m.stage === data.next_allowed_stage || m.stage === data.current_stage);
@@ -396,6 +406,46 @@ export default function MovePartsPage() {
               </div>
             </div>
 
+            {/* Production & Material Summary -- authoritative breakdown for the
+                SELECTED SOURCE stage only (never plant-wide totals), from the same
+                get_current_stage_state data source the Production Entry screen uses,
+                so the two screens can never disagree. */}
+            {stageState && (
+              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-100 dark:border-zinc-800">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Production &amp; Material Summary — Stage {stageState.stage}
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-zinc-400">Target / Required</span>
+                    <span className="font-mono font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">{stageState.target_qty} pcs</span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-zinc-400">OK Produced</span>
+                    <span className="font-mono font-extrabold text-emerald-600 text-sm">{stageState.ok_completed_qty} pcs</span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-zinc-400">Rejected</span>
+                    <span className="font-mono font-extrabold text-rose-600 text-sm">{stageState.rejected_qty} pcs</span>
+                  </div>
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-zinc-400">Already Moved</span>
+                    <span className="font-mono font-extrabold text-blue-600 text-sm">{stageState.already_moved_qty} pcs</span>
+                  </div>
+                  <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-purple-700 dark:text-purple-400">Available to Move</span>
+                    <span className="font-mono font-extrabold text-purple-700 dark:text-purple-400 text-sm">{stageState.available_wip} pcs</span>
+                  </div>
+                  <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 p-3">
+                    <span className="block text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">Remaining to Produce</span>
+                    <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">{stageState.in_process_qty} pcs</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Terminal Stage Banner if at DISPATCH */}
             {isTerminalStage ? (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-center space-y-2">
@@ -416,6 +466,68 @@ export default function MovePartsPage() {
                   </Link>
                 </div>
               </div>
+            ) : woData.available_wip <= 0 ? (
+              /* No movable WIP at the current stage -- show the actual reason, not a
+                 generic message. Planned/target quantity is never movable WIP; only
+                 production actually recorded at this stage is. */
+              (() => {
+                const curStep = woData.timeline?.find((s: any) => s.stage === woData.current_stage);
+                const ok = stageState?.ok_completed_qty ?? curStep?.ok_completed_qty ?? 0;
+                const rej = stageState?.rejected_qty ?? curStep?.rejected_qty ?? 0;
+                const alreadyMoved = stageState?.already_moved_qty ?? 0;
+
+                let reason = "No good material is currently available for movement.";
+                if (ok === 0 && rej === 0) {
+                  reason = "No good production has been recorded at this stage.";
+                } else if (ok > 0 && alreadyMoved >= ok) {
+                  reason = "All completed good material has already been moved.";
+                } else if (ok === 0 && rej > 0) {
+                  reason = "Rejected quantity is not movable good WIP.";
+                }
+
+                return (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-center space-y-3">
+                    <div className="flex items-center justify-center gap-2 text-amber-600 dark:text-amber-400">
+                      <Ban className="h-6 w-6" />
+                      <h3 className="text-base font-extrabold">No Movable Material at {woData.current_stage}</h3>
+                    </div>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400 max-w-lg mx-auto font-semibold">
+                      {reason}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-4 pt-2 text-xs">
+                      <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                        <span className="block text-[10px] uppercase font-bold text-zinc-400">Current Stage</span>
+                        <span className="font-mono font-extrabold text-blue-600">{woData.current_stage}</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                        <span className="block text-[10px] uppercase font-bold text-zinc-400">OK Produced</span>
+                        <span className="font-mono font-extrabold text-emerald-600">{ok} pcs</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                        <span className="block text-[10px] uppercase font-bold text-zinc-400">Rejected</span>
+                        <span className="font-mono font-extrabold text-rose-600">{rej} pcs</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                        <span className="block text-[10px] uppercase font-bold text-zinc-400">Already Moved</span>
+                        <span className="font-mono font-extrabold text-blue-600">{alreadyMoved} pcs</span>
+                      </div>
+                      <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
+                        <span className="block text-[10px] uppercase font-bold text-zinc-400">Movable WIP</span>
+                        <span className="font-mono font-extrabold text-purple-600">{woData.available_wip} pcs</span>
+                      </div>
+                    </div>
+                    <div className="pt-2">
+                      <Link
+                        href="/production/entry"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        <span>Record production at {woData.current_stage} to create movable WIP</span>
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })()
             ) : (
               /* Physical Movement Execution Grid */
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

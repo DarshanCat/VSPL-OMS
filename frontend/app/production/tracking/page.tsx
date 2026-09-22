@@ -1,6 +1,7 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Route,
   Search,
@@ -25,8 +26,18 @@ import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
 import { getWorkOrders, getWorkOrderTracking } from "@/lib/api";
 
 export default function WorkOrderTrackingPage() {
-  const [searchTerm, setSearchTerm] = useState("WO-1001");
-  const [selectedWO, setSelectedWO] = useState<string>("WO-1001");
+  return (
+    <Suspense fallback={null}>
+      <WorkOrderTrackingPageInner />
+    </Suspense>
+  );
+}
+
+function WorkOrderTrackingPageInner() {
+  const searchParams = useSearchParams();
+  const initialWO = searchParams.get("wo") || "WO-1001";
+  const [searchTerm, setSearchTerm] = useState(initialWO);
+  const [selectedWO, setSelectedWO] = useState<string>(initialWO);
   const [loading, setLoading] = useState(false);
   const [woData, setWoData] = useState<any>(null);
   const [wosList, setWosList] = useState<any[]>([]);
@@ -37,10 +48,11 @@ export default function WorkOrderTrackingPage() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setWosList(data);
-          fetchTracking(data[0].wo_number);
         }
       })
       .catch(() => {});
+    fetchTracking(initialWO);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchTracking = async (woNum: string) => {

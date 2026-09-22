@@ -27,9 +27,23 @@ import {
   ChevronRight,
   Factory,
   Sparkles,
-  CheckSquare
+  CheckSquare,
+  Shuffle
 } from "lucide-react";
-import { logout } from "@/lib/api";
+import { logout, getCurrentUserRole } from "@/lib/api";
+
+// STORE is a physical material-handling role: it must see only the navigation it is
+// actually authorized to use (Move Parts, and Rejection Tracking for melting-entry
+// execution), never the planning/quality/dispatch/admin surfaces those roles govern.
+// Every other existing role's navigation is left exactly as it was -- this allowlist
+// only ever narrows what STORE specifically sees.
+const STORE_ALLOWED_HREFS = new Set([
+  "/dashboard",
+  "/production/move",
+  "/production/tracking",
+  "/production/history",
+  "/quality/nc",
+]);
 
 interface NavItem {
   name: string;
@@ -117,6 +131,11 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <FilePlus className="h-4 w-4" />,
       },
       {
+        name: "OAR & WO List",
+        href: "/orders/list",
+        icon: <FileSpreadsheet className="h-4 w-4 text-blue-500" />,
+      },
+      {
         name: "WO Release & Routing",
         href: "/planning/wo-release",
         icon: <Factory className="h-4 w-4" />,
@@ -127,7 +146,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <ArrowRightLeft className="h-4 w-4 text-indigo-500" />,
       },
       {
-        name: "NC Quality Tracker",
+        name: "Conversion Part Mapping",
+        href: "/planning/conversion-mapping",
+        icon: <Shuffle className="h-4 w-4 text-indigo-500" />,
+      },
+      {
+        name: "Rejection Tracking",
         href: "/quality/nc",
         icon: <AlertTriangle className="h-4 w-4 text-rose-500" />,
       },
@@ -155,9 +179,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
-  const [userRole, setUserRole] = useState("PRODUCTION_MANAGER");
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [notificationCount, setNotificationCount] = useState(3);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    setUserRole(getCurrentUserRole());
+  }, []);
+
+  const visibleNavGroups = userRole === "store"
+    ? NAV_GROUPS
+        .map((grp) => ({ ...grp, items: grp.items.filter((item) => STORE_ALLOWED_HREFS.has(item.href)) }))
+        .filter((grp) => grp.items.length > 0)
+    : NAV_GROUPS;
 
   useEffect(() => {
     // Detect system dark mode or stored preference
@@ -239,7 +273,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Navigation Items */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
-          {NAV_GROUPS.map((grp) => (
+          {visibleNavGroups.map((grp) => (
             <div key={grp.group}>
               <h4 className="px-3 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
                 {grp.group}

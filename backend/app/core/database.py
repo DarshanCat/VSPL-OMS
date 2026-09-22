@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from sqlalchemy import create_engine, String, TypeDecorator, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -171,6 +172,25 @@ def auto_migrate_schema():
         "ALTER TABLE nc_records ADD COLUMN IF NOT EXISTS date_closed TIMESTAMP;",
         "ALTER TABLE nc_records ADD COLUMN IF NOT EXISTS remarks VARCHAR;",
         "ALTER TABLE nc_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
+        # Rejection Tracking: source discriminator. Every pre-existing NC row was created by
+        # a production-rejection event (the only path that existed before this column), so
+        # backfilling the default 'REJECTION' onto old rows is correct, not just convenient.
+        "ALTER TABLE nc_records ADD COLUMN IF NOT EXISTS source_type VARCHAR DEFAULT 'REJECTION';",
+        "UPDATE nc_records SET source_type = 'REJECTION' WHERE source_type IS NULL;",
+
+        # Conversions: optional link back to the Rejection Tracking record a conversion
+        # was dispositioned from. Null for every pre-existing direct mid-route conversion.
+        "ALTER TABLE conversions ADD COLUMN IF NOT EXISTS nc_record_id UUID;",
+
+        # Rejection dispositions: physical material-handling fulfillment fields for a
+        # SCRAP disposition being sent for melting (a later, separate event from the
+        # disposition decision itself).
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_status VARCHAR;",
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_destination VARCHAR;",
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_sent_by_id UUID;",
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_sent_by_name VARCHAR;",
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_sent_at TIMESTAMP;",
+        "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_remarks VARCHAR;",
 
         # Audit Logs
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id UUID;",
@@ -193,8 +213,29 @@ def auto_migrate_schema():
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;"
     ]
 
+    # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used
+    # above (it's a Postgres-ism) -- on SQLite every one of those statements has always
+    # raised a syntax error and been silently swallowed by the broad except below, so
+    # none of them ever actually applied to a local SQLite dev database. Detect that
+    # column-add case for SQLite and apply it the SQLite-native way (check via
+    # PRAGMA table_info, then ALTER without the unsupported clause) instead of letting
+    # it silently no-op.
+    is_sqlite = engine.dialect.name == "sqlite"
+    add_col_re = re.compile(
+        r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) (.+?);\s*$", re.IGNORECASE
+    )
+
     for stmt in statements:
         try:
+            if is_sqlite:
+                m = add_col_re.match(stmt.strip())
+                if m:
+                    table, column, col_def = m.group(1), m.group(2), m.group(3)
+                    with engine.begin() as conn:
+                        existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+                        if column not in existing:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))
+                    continue
             with engine.begin() as conn:
                 conn.execute(text(stmt))
         except Exception:

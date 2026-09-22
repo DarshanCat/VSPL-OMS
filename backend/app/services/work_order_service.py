@@ -9,9 +9,11 @@ from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate
 from app.models.order import Order, Customer, Part
 from app.models.packing import PackingRecord
+from app.models.dispatch import Dispatch
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
-    WorkOrderRouteResponse, TransactionHistoryItem
+    WorkOrderRouteResponse, TransactionHistoryItem,
+    OARListItem, OARWorkOrderSummary
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -299,6 +301,101 @@ class WorkOrderService:
             return None
 
         return OMSIntegrationService.get_current_stage_state(db, wo, stage_name)
+
+    @staticmethod
+    def list_oars(
+        db: Session,
+        search: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        customer_code: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[OARListItem]:
+        """Read-only OAR + WO roll-up over existing Order/WorkOrder records. Computes no
+        business rules of its own -- allocated/remaining/WIP/dispatch figures are pulled
+        directly from the existing OMS Engine-derived data (StageWIP, ProductionUpdate,
+        Dispatch), the same authoritative sources the WO tracking detail endpoint uses."""
+        query = db.query(Order).join(Customer).join(Part)
+
+        if search:
+            s = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    Order.oar_number.ilike(s),
+                    Order.customer_po.ilike(s),
+                    Customer.customer_code.ilike(s),
+                    Customer.name.ilike(s),
+                    Part.part_number.ilike(s)
+                )
+            )
+
+        if customer_code:
+            query = query.filter(Customer.customer_code == customer_code.upper())
+
+        if status_filter:
+            query = query.filter(Order.status == status_filter)
+
+        orders = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
+        results = []
+
+        for order in orders:
+            wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.wo_number).all()
+
+            wo_summaries = []
+            allocated_total = 0
+
+            for wo in wos:
+                allocated_total += wo.physical_wo_qty
+
+                routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+                route_stages = [r.stage for r in routes] if routes else STANDARD_STAGES
+                cur_stage = wo.current_stage or route_stages[0]
+
+                cur_wip_rec = db.query(StageWIP).filter(
+                    StageWIP.work_order_id == wo.id,
+                    StageWIP.stage == cur_stage
+                ).first()
+                movable_wip = cur_wip_rec.available_wip if cur_wip_rec else 0
+
+                prod_ok = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).all()
+                ok_total = sum(p.good_qty or 0 for p in prod_ok)
+                rej_total = sum(p.reject_qty or 0 for p in prod_ok)
+
+                dispatched_total = sum(
+                    d.dispatched_qty or 0
+                    for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
+                )
+
+                wo_summaries.append(OARWorkOrderSummary(
+                    wo_number=wo.wo_number,
+                    allocated_qty=wo.physical_wo_qty,
+                    release_status="Released" if wo.release_date else "Not Released",
+                    current_stage=cur_stage,
+                    wo_status=wo.status.value,
+                    ok_completed=ok_total,
+                    rejected=rej_total,
+                    movable_wip=movable_wip,
+                    dispatched_qty=dispatched_total
+                ))
+
+            results.append(OARListItem(
+                oar_number=order.oar_number or "—",
+                order_id=str(order.id),
+                customer_code=order.customer.customer_code if order.customer else "N/A",
+                customer_name=order.customer.name if order.customer else "N/A",
+                customer_po=order.customer_po,
+                part_number=order.part.part_number if order.part else "N/A",
+                oar_qty=order.po_qty,
+                allocated_qty=allocated_total,
+                remaining_qty=order.po_qty - allocated_total,
+                num_wos=len(wos),
+                status=order.status.value,
+                delivery_date=order.delivery_date,
+                created_at=order.created_at or datetime.now(),
+                work_orders=wo_summaries
+            ))
+
+        return results
 
     @staticmethod
     def get_wip_matrix(db: Session) -> WIPMatrixResponse:

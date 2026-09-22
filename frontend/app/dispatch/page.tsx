@@ -61,7 +61,10 @@ export default function DispatchPage() {
 
   const openShipModal = (item: any) => {
     setSelectedItem(item);
-    setDispatchQty(item.ready_for_dispatch_qty > 0 ? item.ready_for_dispatch_qty : "");
+    // Dispatch quantity is always a fresh transaction amount, never prefilled with the
+    // full ready-for-dispatch quantity -- the operator must enter what is actually
+    // being shipped in this consignment.
+    setDispatchQty("");
     const invCount = history.length + 1;
     setInvoiceNo(`INV-2026-${String(invCount).padStart(4, "0")}`);
     setVehicleNo("KA-04-E-8821");

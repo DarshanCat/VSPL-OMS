@@ -32,6 +32,22 @@ export function getCurrentUserToken() {
   return Cookies.get("access_token");
 }
 
+// Decodes the role already embedded in the JWT payload by the backend
+// (create_access_token includes {"role": user.role.value}) so the frontend can tailor
+// navigation without a network round trip. This is a UI convenience only -- every
+// endpoint enforces its own authorization server-side regardless of what this returns.
+export function getCurrentUserRole(): string | null {
+  const token = Cookies.get("access_token");
+  if (!token) return null;
+  try {
+    const payloadB64 = token.split(".")[1];
+    const json = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    return json.role || null;
+  } catch {
+    return null;
+  }
+}
+
 // Dashboard
 export async function getDashboardStats() {
   const { data } = await api.get("/api/v1/dashboard/stats");
@@ -167,8 +183,20 @@ export async function createOrderIntake(payload: {
   max_batch_size: number;
   delivery_date?: string;
   order_type?: string;
+  wo_quantities?: number[];
 }) {
   const { data } = await api.post("/api/v1/operations/intake", payload);
+  return data;
+}
+
+export async function getOarList(params?: {
+  search?: string;
+  status_filter?: string;
+  customer_code?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const { data } = await api.get("/api/v1/operations/oars", { params });
   return data;
 }
 
@@ -222,6 +250,102 @@ export async function updateNCRecord(payload: {
   remarks?: string;
 }) {
   const { data } = await api.put("/api/v1/operations/nc", payload);
+  return data;
+}
+
+// Rejection Tracking
+export async function getRejections(params?: {
+  search?: string;
+  wo_number?: string;
+  oar_number?: string;
+  part_number?: string;
+  customer_code?: string;
+  stage?: string;
+  source_type?: string;
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const { data } = await api.get("/api/v1/rejection", { params });
+  return data;
+}
+
+export async function getRejectionSummary() {
+  const { data } = await api.get("/api/v1/rejection/summary");
+  return data;
+}
+
+export async function getRejectionDetail(ncNumber: string) {
+  const { data } = await api.get(`/api/v1/rejection/${encodeURIComponent(ncNumber)}`);
+  return data;
+}
+
+export async function createExcessOrNonMoving(payload: {
+  wo_number: string;
+  stage?: string;
+  source_type: "EXCESS_PRODUCTION" | "NON_MOVING";
+  qty: number;
+  reason: string;
+  remarks?: string;
+}) {
+  const { data } = await api.post("/api/v1/rejection/excess-non-moving", payload);
+  return data;
+}
+
+export async function createDisposition(payload: {
+  nc_number: string;
+  action: "CONVERT_PART" | "SAME_PART" | "CWO" | "SCRAP" | "DEVIATION_ACCEPT";
+  quantity: number;
+  destination_oar_number?: string;
+  entry_stage?: string;
+  conversion_wo_number?: string;
+  destination_customer_code?: string;
+  reason: string;
+  remarks?: string;
+}) {
+  const { data } = await api.post("/api/v1/rejection/disposition", payload);
+  return data;
+}
+
+export async function createMeltingEntry(payload: {
+  disposition_id: string;
+  melting_destination?: string;
+  remarks?: string;
+}) {
+  const { data } = await api.post("/api/v1/rejection/melting-entry", payload);
+  return data;
+}
+
+export async function getCWODetail(woNumber: string) {
+  const { data } = await api.get(`/api/v1/rejection/cwo/${encodeURIComponent(woNumber)}`);
+  return data;
+}
+
+// Conversion Part Mapping (authoritative Source Part -> Destination Part master)
+export async function getConversionMappings(params?: { source_part_number?: string; active_only?: boolean }) {
+  const { data } = await api.get("/api/v1/conversion-mapping", { params });
+  return data;
+}
+
+export async function createConversionMapping(payload: {
+  source_part_number: string;
+  destination_part_number: string;
+  conversion_type: "PART_TO_PART" | "SAME_PART";
+  conversion_factor?: number;
+  is_active?: boolean;
+}) {
+  const { data } = await api.post("/api/v1/conversion-mapping", payload);
+  return data;
+}
+
+export async function updateConversionMapping(payload: {
+  id: string;
+  is_active?: boolean;
+  conversion_factor?: number;
+}) {
+  const { data } = await api.put("/api/v1/conversion-mapping", payload);
   return data;
 }
 

@@ -24,10 +24,38 @@ from app.services.oms_integration_service import (
     match_route_stage,
     DEFAULT_YIELDS
 )
+from app.services.conversion_mapping_service import ConversionMappingService
 
 class OperationsService:
     @staticmethod
     def create_order_intake(db: Session, req: OrderIntakeCreate, current_user: Optional[User] = None) -> OrderIntakeResponse:
+        # 0. Validate an explicit WO quantity split up front (fail fast, before any
+        # Customer/Part/Order row is created) -- reject under-allocation,
+        # over-allocation, and zero/negative per-WO quantities. Never silently drop or
+        # adjust quantity.
+        if req.wo_quantities is not None:
+            if len(req.wo_quantities) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="wo_quantities was provided but is empty. Provide at least one WO quantity, or omit the field entirely to use automatic batch-size splitting."
+                )
+            if any(q <= 0 for q in req.wo_quantities):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Every WO quantity must be greater than zero."
+                )
+            allocated = sum(req.wo_quantities)
+            if allocated != req.po_quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"WO quantity allocation ({allocated}) does not match the OAR quantity "
+                        f"({req.po_quantity}). Allocated must exactly equal the order quantity -- "
+                        f"{'reduce' if allocated > req.po_quantity else 'increase'} the allocation by "
+                        f"{abs(allocated - req.po_quantity)}."
+                    )
+                )
+
         # 1. Customer
         customer = db.query(Customer).filter(Customer.customer_code == req.customer_code.strip().upper()).first()
         if not customer:
@@ -68,15 +96,27 @@ class OperationsService:
         db.flush()
 
         created_wos = []
+        created_wo_qtys: List[int] = []
         if req.status == OrderStatus.ACCEPT:
-            num_wos = math.ceil(req.po_quantity / req.max_batch_size)
-            rem_qty = req.po_quantity
+            # Determine the exact per-WO quantities to create. An explicit split (from
+            # Order Intake's WO allocation step) takes precedence when supplied; it has
+            # already been validated (sum == po_quantity, all > 0) above. Otherwise this
+            # falls back to the original, unchanged max_batch_size-driven auto-split so
+            # every existing caller/behavior is preserved exactly.
+            if req.wo_quantities:
+                wo_qty_list = list(req.wo_quantities)
+            else:
+                num_wos = math.ceil(req.po_quantity / req.max_batch_size)
+                rem_qty = req.po_quantity
+                wo_qty_list = []
+                for _ in range(num_wos):
+                    take = min(req.max_batch_size, rem_qty)
+                    rem_qty -= take
+                    wo_qty_list.append(take)
+
             default_route = ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
-            
-            for i in range(num_wos):
-                wo_qty = min(req.max_batch_size, rem_qty)
-                rem_qty -= wo_qty
-                
+
+            for wo_qty in wo_qty_list:
                 wo_count = db.query(WorkOrder).count()
                 wo_num = f"WO-{1000 + wo_count + 1}"
                 
@@ -120,6 +160,7 @@ class OperationsService:
                 )
                 db.add(initial_wip)
                 created_wos.append(wo_num)
+                created_wo_qtys.append(wo_qty)
 
         # Audit Log
         audit = AuditLog(
@@ -140,6 +181,7 @@ class OperationsService:
             oar_number=oar_num,
             order_id=str(order.id),
             wos_created=created_wos,
+            wo_quantities=created_wo_qtys,
             total_qty=req.po_quantity,
             message=f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
         )
@@ -250,6 +292,17 @@ class OperationsService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Destination OAR '{req.destination_oar_number}' not found."
+            )
+
+        # Backend-authoritative destination-part validation (never rely on the frontend
+        # having already filtered this) -- the same ConversionPartMapping master used by
+        # the Rejection Tracking disposition flow governs every conversion path.
+        src_part = src_wo.order.part if src_wo.order else None
+        dst_part = dest_order.part
+        if src_part and dst_part and not ConversionMappingService.is_conversion_allowed(db, src_part.id, dst_part.id, "PART_TO_PART"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Destination part '{dst_part.part_number}' is not an approved conversion for source part '{src_part.part_number}'."
             )
 
         entry_stage = req.entry_stage.strip().upper()
@@ -434,6 +487,9 @@ class OperationsService:
             disposition=req.disposition or "Scrap",
             responsibility=req.responsibility or "Production",
             status="Open",
+            # QA-initiated via the /nc endpoint, not an automatic production-rejection
+            # event -- distinguishes it in Rejection Tracking's source_type filter.
+            source_type="MANUAL",
             date_raised=now,
             remarks=req.remarks
         )

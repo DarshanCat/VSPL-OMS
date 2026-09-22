@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 from app.models.user import UserRole
 
@@ -10,6 +11,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: UserRole
+    department: Optional[str] = None
+    is_active: bool = True
 
 class Token(BaseModel):
     access_token: str
@@ -22,6 +25,8 @@ class UserOut(BaseModel):
     full_name: str
     email: EmailStr
     role: UserRole
+    department: Optional[str] = None
+    is_active: bool = True
 
     @field_validator("id", mode="before")
     @classmethod

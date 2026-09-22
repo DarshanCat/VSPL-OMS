@@ -101,6 +101,33 @@ class WorkOrderTrackingDetail(BaseModel):
     yield_pct: float
     created_at: datetime
 
+class OARWorkOrderSummary(BaseModel):
+    wo_number: str
+    allocated_qty: int
+    release_status: str
+    current_stage: str
+    wo_status: str
+    ok_completed: int
+    rejected: int
+    movable_wip: int
+    dispatched_qty: int
+
+class OARListItem(BaseModel):
+    oar_number: str
+    order_id: str
+    customer_code: str
+    customer_name: str
+    customer_po: str
+    part_number: str
+    oar_qty: int
+    allocated_qty: int
+    remaining_qty: int
+    num_wos: int
+    status: str
+    delivery_date: Optional[date] = None
+    created_at: datetime
+    work_orders: List[OARWorkOrderSummary]
+
 class WorkOrderRouteResponse(BaseModel):
     wo_number: str
     physical_wo_qty: int

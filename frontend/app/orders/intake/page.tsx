@@ -41,9 +41,24 @@ export default function OrderIntakePage() {
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
   const [orderType, setOrderType] = useState("Standard");
 
+  const [splitMode, setSplitMode] = useState<"auto" | "manual">("auto");
+  const [manualQtys, setManualQtys] = useState<string[]>(["", ""]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
+
+  const manualAllocated = manualQtys.reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const manualRemaining = Number(poQty || 0) - manualAllocated;
+  const manualComplete = Number(poQty) > 0 && manualRemaining === 0 && manualQtys.every((v) => Number(v) > 0);
+
+  const updateManualQty = (idx: number, value: string) => {
+    setManualQtys((prev) => prev.map((v, i) => (i === idx ? value : v)));
+  };
+
+  const addManualRow = () => setManualQtys((prev) => [...prev, ""]);
+  const removeManualRow = (idx: number) =>
+    setManualQtys((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
   const handleCustomerChange = (code: string) => {
     setCustomerCode(code);
@@ -73,6 +88,24 @@ export default function OrderIntakePage() {
       return;
     }
 
+    let wo_quantities: number[] | undefined = undefined;
+    if (splitMode === "manual") {
+      const parsed = manualQtys.map((v) => Number(v));
+      if (parsed.some((v) => !v || v <= 0)) {
+        setError("Every WO quantity must be a whole number greater than 0.");
+        return;
+      }
+      const allocated = parsed.reduce((sum, v) => sum + v, 0);
+      if (allocated !== qty) {
+        setError(
+          `Allocated WO quantities (${allocated}) must exactly equal the OAR quantity (${qty}). ` +
+            `${allocated > qty ? "Reduce" : "Increase"} the allocation by ${Math.abs(allocated - qty)}.`
+        );
+        return;
+      }
+      wo_quantities = parsed;
+    }
+
     setLoading(true);
 
     try {
@@ -87,6 +120,7 @@ export default function OrderIntakePage() {
         max_batch_size: batch,
         delivery_date: deliveryDate,
         order_type: orderType,
+        wo_quantities,
       });
 
       setSuccessResult(res);
@@ -131,7 +165,7 @@ export default function OrderIntakePage() {
                   {successResult.message}
                 </h4>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs
+                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs | {successResult.wos_created.length} Work Order(s) created
                 </p>
               </div>
             </div>
@@ -141,17 +175,32 @@ export default function OrderIntakePage() {
                 Generated Work Orders (Initialized at Stage F1):
               </span>
               <div className="flex flex-wrap gap-2">
-                {successResult.wos_created.map((wo: string) => (
+                {successResult.wos_created.map((wo: string, idx: number) => (
                   <Link
                     key={wo}
                     href={`/production/tracking?wo=${wo}`}
-                    className="inline-flex items-center gap-1 rounded-lg bg-blue-50 dark:bg-blue-950/60 px-3 py-1 font-mono font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:underline"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 px-3 py-1 font-mono font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:underline"
                   >
                     <span>{wo}</span>
+                    {Array.isArray(successResult.wo_quantities) && successResult.wo_quantities[idx] != null && (
+                      <span className="text-zinc-500 dark:text-zinc-400 font-semibold">
+                        ({successResult.wo_quantities[idx]} pcs)
+                      </span>
+                    )}
                     <ArrowRight className="h-3 w-3" />
                   </Link>
                 ))}
               </div>
+            </div>
+
+            <div className="pt-1">
+              <Link
+                href="/orders/list"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline"
+              >
+                <span>View in OAR &amp; WO List</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
             </div>
           </div>
         )}
@@ -260,22 +309,102 @@ export default function OrderIntakePage() {
             </div>
           </div>
 
-          {/* Computed WO Split preview */}
-          {Number(poQty) > 0 && Number(batchSize) > 0 && (
-            <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
-              <span className="text-zinc-600 dark:text-zinc-400">
-                Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
-              </span>
-              <span className="font-mono text-zinc-500">
-                {poQty} pcs ÷ {batchSize} batch max
-              </span>
+          {/* WO Quantity Allocation */}
+          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Work Order Quantity Split</h4>
+              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSplitMode("auto")}
+                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                    splitMode === "auto"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  Auto Split
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSplitMode("manual")}
+                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                    splitMode === "manual"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  Manual Split
+                </button>
+              </div>
             </div>
-          )}
+
+            {splitMode === "auto" ? (
+              Number(poQty) > 0 && Number(batchSize) > 0 && (
+                <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
+                  <span className="text-zinc-600 dark:text-zinc-400">
+                    Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
+                  </span>
+                  <span className="font-mono text-zinc-500">
+                    {poQty} pcs ÷ {batchSize} batch max
+                  </span>
+                </div>
+              )
+            ) : (
+              <div className="space-y-2">
+                {manualQtys.map((v, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className="w-14 text-[11px] font-mono font-bold text-zinc-400">WO #{idx + 1}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={v}
+                      onChange={(e) => updateManualQty(idx, e.target.value)}
+                      placeholder="Quantity"
+                      className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeManualRow(idx)}
+                      disabled={manualQtys.length <= 1}
+                      className="text-[11px] font-bold text-rose-500 disabled:opacity-30 disabled:cursor-not-allowed px-2"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addManualRow}
+                  className="text-[11px] font-bold text-blue-600 hover:underline"
+                >
+                  + Add another Work Order
+                </button>
+
+                <div
+                  className={`rounded-xl p-3.5 border text-xs flex items-center justify-between ${
+                    manualComplete
+                      ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40"
+                      : "bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40"
+                  }`}
+                >
+                  <span className="text-zinc-600 dark:text-zinc-400">
+                    Allocated: <strong className="font-mono">{manualAllocated}</strong> / {Number(poQty) || 0} pcs
+                    {" · "}
+                    Remaining: <strong className="font-mono">{manualRemaining}</strong>
+                  </span>
+                  <span className={`font-bold ${manualComplete ? "text-emerald-600" : "text-amber-600"}`}>
+                    {manualComplete ? "Allocation Complete" : "Allocation Incomplete"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !poQty || !batchSize}
+              disabled={loading || !poQty || !batchSize || (splitMode === "manual" && !manualComplete)}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 disabled:opacity-50 transition-colors cursor-pointer"
             >
               <FilePlus className="h-4 w-4" />

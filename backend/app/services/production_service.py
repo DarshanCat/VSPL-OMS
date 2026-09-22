@@ -419,10 +419,19 @@ class ProductionService:
             db.add(wip)
             db.flush()
 
-        if total_proc > wip.available_wip:
+        # Authoritative production ceiling: a fresh production entry can only convert
+        # material that is still physically unprocessed at this stage (inproc_qty =
+        # ent_qty - ok_qty - rejected_qty), never `available_wip`. available_wip also
+        # includes onhand_qty -- completed-but-not-yet-moved stock -- which exists
+        # precisely because earlier production already consumed that capacity; letting
+        # a new entry validate against it double-counts already-completed pieces and
+        # allows cumulative OK to run past ent_qty (and past the OMS target derived
+        # from it) with no ceiling. This is the same ent/ok/rej accounting the OMS
+        # Engine already uses to compute inproc_qty -- not a new formula.
+        if total_proc > wip.inproc_qty:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot process {total_proc} pieces ({req.good_qty} Good + {req.rejected_quantity} Rej). Only {wip.available_wip} pieces are available at stage '{matched_stage}'."
+                detail=f"Cannot process {total_proc} pieces ({req.good_qty} Good + {req.rejected_quantity} Rej). Only {wip.inproc_qty} pieces of unprocessed material remain at stage '{matched_stage}' (target consumed: {wip.ok_qty + wip.rejected_qty} of {wip.ent_qty})."
             )
 
         wip.ok_qty += req.good_qty

@@ -16,8 +16,13 @@ class Conversion(Base):
     quantity = Column(Integer, nullable=False)
     reason = Column(String, nullable=True)
     planner = Column(String, nullable=True)
+    # Set only when this conversion originated from a Rejection Tracking disposition
+    # decision (CONVERT_PART / SAME_PART / CWO) rather than a direct mid-route WIP
+    # conversion. Null for every pre-existing conversion, which remain unaffected.
+    nc_record_id = Column(GUID, ForeignKey("nc_records.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     source_wo = relationship("WorkOrder", foreign_keys=[source_wo_id])
     destination_order = relationship("Order", foreign_keys=[destination_order_id])
     conversion_wo = relationship("WorkOrder", foreign_keys=[conversion_wo_id])
+    nc_record = relationship("NCRecord", foreign_keys=[nc_record_id])

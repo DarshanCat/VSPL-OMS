@@ -16,12 +16,22 @@ class OrderIntakeCreate(BaseModel):
     order_type: Optional[str] = Field("Standard", max_length=100)
     status: OrderStatus = OrderStatus.ACCEPT
     remarks: Optional[str] = Field(None, max_length=2000)
+    wo_quantities: Optional[List[int]] = Field(
+        None,
+        max_length=100,
+        description=(
+            "Optional explicit WO quantity split (e.g. [400, 300, 200, 100]). Must sum "
+            "exactly to po_quantity, with every value > 0. When omitted, falls back to "
+            "the existing automatic max_batch_size-driven split (unchanged behavior)."
+        ),
+    )
 
 class OrderIntakeResponse(BaseModel):
     success: bool
     oar_number: str
     order_id: str
     wos_created: List[str]
+    wo_quantities: List[int] = []
     total_qty: int
     message: str
 

@@ -22,6 +22,8 @@ def register(
         email=payload.email,
         hashed_password=hash_password(payload.password),
         role=payload.role,
+        department=payload.department,
+        is_active=payload.is_active,
     )
     db.add(user)
     db.commit()

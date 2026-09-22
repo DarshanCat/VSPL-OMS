@@ -353,6 +353,12 @@ class OMSIntegrationService:
         inproc_qty = wip_rec.inproc_qty if wip_rec else 0
         onhand_qty = wip_rec.onhand_qty if wip_rec else 0
         avail_wip = inproc_qty + onhand_qty
+        # Good quantity that has already left this stage via movement -- the portion of
+        # cumulative OK that is no longer sitting here as on-hand WIP. Derived from the
+        # same ok_qty/onhand_qty this function already computes; not a new calculation,
+        # just exposing an existing relationship (onhand_qty = max(ok_qty - next stage's
+        # ent_qty, 0), so ok_qty - onhand_qty is exactly what has moved on).
+        already_moved_qty = max(ok_qty - onhand_qty, 0)
         rag = route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty)
         next_stage = OMSIntegrationService.get_next_stage(db, wo, matched or stage_name)
 
@@ -365,6 +371,7 @@ class OMSIntegrationService:
             "in_process_qty": inproc_qty,
             "on_hand_qty": onhand_qty,
             "available_wip": avail_wip,
+            "already_moved_qty": already_moved_qty,
             "stage_status": rag,
             "is_current_stage": (wo.current_stage == (matched or stage_name)),
             "next_stage": next_stage

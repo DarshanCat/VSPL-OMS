@@ -6,6 +6,8 @@ from app.models.packing import PackingRecord, PackingTransaction
 from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.conversion import Conversion
 from app.models.nc import NCRecord
+from app.models.rejection_disposition import RejectionDisposition
+from app.models.conversion_mapping import ConversionPartMapping
 from app.models.dispatch import Dispatch
 from app.models.audit import AuditLog
 
@@ -28,6 +30,8 @@ __all__ = [
     "ProductionStatus",
     "Conversion",
     "NCRecord",
+    "RejectionDisposition",
+    "ConversionPartMapping",
     "Dispatch",
     "AuditLog",
 ]

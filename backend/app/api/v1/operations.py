@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -10,27 +10,46 @@ from app.schemas.operations import (
     ConversionCreate, ConversionResponse,
     NCRecordCreate, NCRecordUpdate, NCRecordOut
 )
+from app.schemas.work_order import OARListItem
 from app.services.operations_service import OperationsService
+from app.services.work_order_service import WorkOrderService
+from app.core.roles import PLANNING_ROLES, QUALITY_OVERSIGHT_ROLES
 
 router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
-
-# Same role grouping already used for the OMS planning cycle (app/api/v1/oms.py
-# ALLOWED_ROLES) -- WO release and conversion are the same class of planning/release
-# decision, not open shop-floor actions.
-PLANNING_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER)
-
-# Same role grouping already used for audit-log access (app/api/v1/admin.py) -- NC
-# disposition is an oversight/quality-approval action, the same class of action.
-QUALITY_OVERSIGHT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.CEO)
 
 @router.post("/intake", response_model=OrderIntakeResponse)
 def create_order_intake(
     payload: OrderIntakeCreate,
     db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Process incoming Order Intake (OAR) and create corresponding Work Orders. Same
+    planning-decision role gate as its sibling /wo-release and /conversion endpoints in
+    this router -- this was previously left open to any authenticated user, an
+    inconsistency with those siblings rather than an intentional design."""
+    return OperationsService.create_order_intake(db, payload, current_user=user)
+
+@router.get("/oars", response_model=List[OARListItem])
+def list_oars(
+    search: Optional[str] = Query(None, description="Search by OAR, customer, part, or PO"),
+    status_filter: Optional[str] = Query(None, description="Filter by OAR status (accept/hold/reject)"),
+    customer_code: Optional[str] = Query(None, description="Filter by customer code"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
-    """Process incoming Order Intake (OAR) and create corresponding Work Orders."""
-    return OperationsService.create_order_intake(db, payload, current_user=user)
+    """Read-only OAR & WO roll-up list/search for order intake tracking. Not a new
+    business engine -- every figure is read directly from existing Order/WorkOrder/
+    StageWIP/ProductionUpdate/Dispatch records."""
+    return WorkOrderService.list_oars(
+        db,
+        search=search,
+        status_filter=status_filter,
+        customer_code=customer_code,
+        limit=limit,
+        offset=offset
+    )
 
 @router.post("/wo-release", response_model=WOReleaseResponse)
 def release_work_order(

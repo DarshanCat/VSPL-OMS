@@ -50,7 +50,9 @@ export default function PackingPage() {
 
   const openPackModal = (item: any) => {
     setSelectedWO(item);
-    setPackQty(item.pending_qty > 0 ? item.pending_qty : "");
+    // Packing quantity is always a fresh transaction amount, never prefilled with the
+    // full pending quantity -- the operator must enter what was actually just packed.
+    setPackQty("");
     setBoxCount(1);
     setRemarks("");
     setModalError("");

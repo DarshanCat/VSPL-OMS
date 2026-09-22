@@ -242,9 +242,16 @@ export default function ProductionEntryPage() {
       return;
     }
 
-    const availWIP = stageState?.available_wip ?? woData.available_wip ?? 0;
-    if (totalProc > availWIP) {
-      setFormError(`Total quantity processed (${totalProc}) cannot exceed available WIP at ${woData.current_stage} (${availWIP} pcs).`);
+    // The ceiling for a NEW production transaction is the unprocessed material still
+    // remaining at this stage (in_process_qty), never available_wip -- available_wip
+    // also includes onhand_qty (already-completed material awaiting movement), and
+    // validating a fresh entry against it would let cumulative OK run past the
+    // authoritative target. This mirrors the backend's own authoritative check in
+    // ProductionService.record_stage_production; the backend remains the enforcing
+    // authority regardless of this client-side check.
+    const remainingTarget = stageState?.in_process_qty ?? activeStage.in_process_qty ?? 0;
+    if (totalProc > remainingTarget) {
+      setFormError(`Total quantity processed (${totalProc}) exceeds the remaining allowable target at ${woData.current_stage} (${remainingTarget} pcs remaining of target).`);
       inputGoodQtyRef.current?.focus();
       return;
     }
@@ -296,6 +303,7 @@ export default function ProductionEntryPage() {
     target_qty: woData?.physical_wo_qty ?? 0,
     ok_completed_qty: 0,
     rejected_qty: 0,
+    in_process_qty: woData?.physical_wo_qty ?? 0,
     available_wip: woData?.available_wip ?? 0,
     stage_status: "In-Progress"
   };
@@ -506,6 +514,13 @@ export default function ProductionEntryPage() {
                       </span>
                     </div>
 
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800">
+                      <span className="text-amber-700 dark:text-amber-400 font-bold">Remaining Target:</span>
+                      <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">
+                        {activeStage.in_process_qty} pcs
+                      </span>
+                    </div>
+
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
                       <span className="text-rose-600 dark:text-rose-400 font-semibold">Rejections (Scrap):</span>
                       <span className="font-mono font-extrabold text-rose-600 text-sm">
@@ -553,12 +568,13 @@ export default function ProductionEntryPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        OK COMPLETED QUANTITY <span className="text-emerald-600">*</span>
+                        NEW OK QUANTITY (THIS TRANSACTION) <span className="text-emerald-600">*</span>
                       </label>
                       <input
                         ref={inputGoodQtyRef}
                         type="number"
                         min="0"
+                        max={activeStage.in_process_qty}
                         value={goodQty}
                         onChange={(e) => setGoodQty(e.target.value === "" ? "" : Number(e.target.value))}
                         onKeyDown={(e) => handleKeyDown(e, "rejQty")}
@@ -566,7 +582,9 @@ export default function ProductionEntryPage() {
                         className="w-full rounded-xl border-2 border-emerald-500/50 bg-emerald-50/20 dark:bg-zinc-950 px-4 py-3 text-lg font-mono font-extrabold text-zinc-900 dark:text-zinc-50 focus:border-emerald-500 focus:outline-none"
                         required
                       />
-                      <span className="text-[10px] text-zinc-400 mt-1 block">Good pieces cleared and held on-hand at stage</span>
+                      <span className="text-[10px] text-zinc-400 mt-1 block">
+                        Fresh pieces completed in this transaction only — not the cumulative total. Remaining target: {activeStage.in_process_qty} pcs.
+                      </span>
                     </div>
 
                     <div>
