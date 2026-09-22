@@ -14,7 +14,8 @@
       "source": "/api/backend/:path*",
       "destination": {
         "type": "service",
-        "service": "backend"
+        "service": "backend",
+        "path": "/:path*"
       },
       "transforms": [
         {
