@@ -13,7 +13,7 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.api.v1 import (
     auth, oms, production, work_orders, packing,
     dispatch, operations, dashboard, reports, ai, admin, analytics, rejection,
-    conversion_mapping
+    conversion_mapping, users
 )
 from app.services.seed_service import seed_database_if_empty
 
@@ -93,6 +93,7 @@ app.include_router(admin.router)
 app.include_router(analytics.router)
 app.include_router(rejection.router)
 app.include_router(conversion_mapping.router)
+app.include_router(users.router)
 
 @app.get("/health")
 def health():

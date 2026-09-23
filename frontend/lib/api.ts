@@ -22,6 +22,17 @@ export async function login(email: string, password: string) {
   return data;
 }
 
+export async function changePassword(currentPassword: string, newPassword: string) {
+  const { data } = await api.post("/api/v1/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  // The backend issues a fresh token once must_change_password clears -- the old one
+  // may have been obtained with the temporary password, whose hash no longer exists.
+  Cookies.set("access_token", data.access_token, { expires: 1 });
+  return data;
+}
+
 export function logout() {
   Cookies.remove("access_token");
   window.location.href = "/login";
@@ -57,8 +68,52 @@ export async function getCurrentUser(): Promise<{
   role: string;
   department?: string | null;
   is_active: boolean;
+  must_change_password: boolean;
 }> {
   const { data } = await api.get("/api/v1/auth/me");
+  return data;
+}
+
+// User administration (ADMIN only -- enforced server-side regardless of who calls these)
+export interface AdminUser {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  department?: string | null;
+  is_active: boolean;
+  must_change_password: boolean;
+}
+
+export interface TemporaryPasswordResult {
+  user: AdminUser;
+  temporary_password: string;
+}
+
+export async function getUsers(): Promise<AdminUser[]> {
+  const { data } = await api.get("/api/v1/users");
+  return data;
+}
+
+export async function createUser(payload: {
+  full_name: string;
+  email: string;
+  department?: string;
+  role: string;
+}): Promise<TemporaryPasswordResult> {
+  const { data } = await api.post("/api/v1/users", payload);
+  return data;
+}
+
+export async function resetUserPassword(userId: string): Promise<TemporaryPasswordResult> {
+  const { data } = await api.post(`/api/v1/users/${encodeURIComponent(userId)}/reset-password`);
+  return data;
+}
+
+export async function setUserStatus(userId: string, isActive: boolean): Promise<AdminUser> {
+  const { data } = await api.patch(`/api/v1/users/${encodeURIComponent(userId)}/status`, {
+    is_active: isActive,
+  });
   return data;
 }
 

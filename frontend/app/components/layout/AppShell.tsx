@@ -28,7 +28,8 @@ import {
   Factory,
   Sparkles,
   CheckSquare,
-  Shuffle
+  Shuffle,
+  Users as UsersIcon
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -172,6 +173,17 @@ const NAV_GROUPS: NavGroup[] = [
       },
     ],
   },
+  {
+    group: "ADMINISTRATION",
+    items: [
+      {
+        name: "Users",
+        href: "/admin/users",
+        icon: <UsersIcon className="h-4 w-4 text-zinc-500" />,
+        roles: ["admin"],
+      },
+    ],
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -187,15 +199,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setUserRole(getCurrentUserRole());
     getCurrentUser()
-      .then((u) => setCurrentUser({ full_name: u.full_name, email: u.email }))
+      .then((u) => {
+        setCurrentUser({ full_name: u.full_name, email: u.email });
+        // A password-change-pending account must set a permanent password before
+        // reaching any other page -- the backend re-asserts this at every login too
+        // (must_change_password is re-checked, not a one-time client flag).
+        if (u.must_change_password && pathname !== "/change-password") {
+          router.replace("/change-password");
+        }
+      })
       .catch(() => setCurrentUser(null));
-  }, []);
+  }, [pathname, router]);
 
-  const visibleNavGroups = userRole === "store"
-    ? NAV_GROUPS
-        .map((grp) => ({ ...grp, items: grp.items.filter((item) => STORE_ALLOWED_HREFS.has(item.href)) }))
-        .filter((grp) => grp.items.length > 0)
-    : NAV_GROUPS;
+  const visibleNavGroups = NAV_GROUPS
+    .map((grp) => ({
+      ...grp,
+      items: grp.items.filter((item) => {
+        if (userRole === "store" && !STORE_ALLOWED_HREFS.has(item.href)) return false;
+        if (item.roles && (!userRole || !item.roles.includes(userRole))) return false;
+        return true;
+      }),
+    }))
+    .filter((grp) => grp.items.length > 0);
 
   useEffect(() => {
     // Detect system dark mode or stored preference

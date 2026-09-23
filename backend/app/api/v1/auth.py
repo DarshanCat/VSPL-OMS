@@ -5,7 +5,8 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.core.rate_limit import limiter
 from app.api.deps import require_roles, get_current_user
 from app.models.user import User, UserRole
-from app.schemas.auth import UserLogin, UserCreate, Token, UserOut
+from app.schemas.auth import UserLogin, UserCreate, Token, UserOut, ChangePasswordRequest
+from app.services.user_admin_service import UserAdminService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -44,4 +45,15 @@ def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)):
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
     token = create_access_token({"sub": user.email, "role": user.role.value})
-    return Token(access_token=token)
+    return Token(access_token=token, must_change_password=user.must_change_password)
+
+@router.post("/change-password", response_model=Token)
+def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Self-service password change -- used both for the forced first-login flow
+    (must_change_password=true) and any later voluntary change. Never accepts role or
+    department, so a user can never change those about themselves here."""
+    return UserAdminService.change_own_password(db, current_user=user, req=payload)

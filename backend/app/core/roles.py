@@ -26,3 +26,9 @@ PRODUCTION_ENTRY_ROLES = (
     UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.PLANNER,
     UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
 )
+
+# User account administration: creating accounts, generating/resetting temporary
+# passwords, activating/deactivating. Matches the existing /auth/register gate
+# (require_roles(UserRole.ADMIN)) -- this is not a new authority tier, just naming the
+# same boundary for the new user-management endpoints.
+USER_MANAGEMENT_ROLES = (UserRole.ADMIN,)

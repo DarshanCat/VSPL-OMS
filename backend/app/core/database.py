@@ -83,6 +83,7 @@ def auto_migrate_schema():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS employee_id VARCHAR;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS department VARCHAR;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
         # Work Orders
