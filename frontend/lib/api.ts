@@ -253,8 +253,175 @@ export async function createOrderIntake(payload: {
   delivery_date?: string;
   order_type?: string;
   wo_quantities?: number[];
+  source_type?: string;
+  po_line_id?: string;
+  schedule_id?: string;
 }) {
   const { data } = await api.post("/api/v1/operations/intake", payload);
+  return data;
+}
+
+// --- Masters: Customer / PO / Schedule ---
+
+export interface MasterCustomer {
+  id: string;
+  customer_code: string;
+  name: string;
+  address?: string | null;
+  gst?: string | null;
+  contact_person?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  is_active: boolean;
+}
+
+export async function getMasterCustomers(): Promise<MasterCustomer[]> {
+  const { data } = await api.get("/api/v1/masters/customers");
+  return data;
+}
+
+export async function createMasterCustomer(payload: {
+  customer_code: string;
+  name: string;
+  address?: string;
+  gst?: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+  is_active?: boolean;
+}): Promise<MasterCustomer> {
+  const { data } = await api.post("/api/v1/masters/customers", payload);
+  return data;
+}
+
+export async function updateMasterCustomer(payload: {
+  id: string;
+  address?: string;
+  gst?: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+  is_active?: boolean;
+}): Promise<MasterCustomer> {
+  const { data } = await api.put("/api/v1/masters/customers", payload);
+  return data;
+}
+
+export interface POLineOut {
+  id: string;
+  part_number: string;
+  po_qty: number;
+  allocated_qty: number;
+  available_qty: number;
+  required_date?: string | null;
+}
+
+export interface POMasterOut {
+  id: string;
+  po_number: string;
+  customer_code: string;
+  customer_name: string;
+  po_date?: string | null;
+  validity_date?: string | null;
+  status: string;
+  lines: POLineOut[];
+}
+
+export async function getPOMasters(customerCode?: string): Promise<POMasterOut[]> {
+  const { data } = await api.get("/api/v1/masters/pos", {
+    params: customerCode ? { customer_code: customerCode } : undefined,
+  });
+  return data;
+}
+
+export async function createPOMaster(payload: {
+  po_number: string;
+  customer_code: string;
+  po_date?: string;
+  validity_date?: string;
+  lines: { part_number: string; po_qty: number; required_date?: string }[];
+}): Promise<POMasterOut> {
+  const { data } = await api.post("/api/v1/masters/pos", payload);
+  return data;
+}
+
+export interface ScheduleOut {
+  id: string;
+  schedule_number: string;
+  customer_code: string;
+  customer_name: string;
+  part_number: string;
+  scheduled_qty: number;
+  required_date?: string | null;
+  customer_schedule_ref?: string | null;
+  po_status: string;
+  linked_oar_number?: string | null;
+}
+
+export async function getSchedules(customerCode?: string): Promise<ScheduleOut[]> {
+  const { data } = await api.get("/api/v1/masters/schedules", {
+    params: customerCode ? { customer_code: customerCode } : undefined,
+  });
+  return data;
+}
+
+export async function createSchedule(payload: {
+  customer_code: string;
+  part_number: string;
+  scheduled_qty: number;
+  required_date?: string;
+  customer_schedule_ref?: string;
+}): Promise<ScheduleOut> {
+  const { data } = await api.post("/api/v1/masters/schedules", payload);
+  return data;
+}
+
+// --- PO <-> Schedule Matching ---
+
+export interface MatchCandidate {
+  schedule_id: string;
+  schedule_number: string;
+  part_number: string;
+  scheduled_qty: number;
+  required_date?: string | null;
+  oar_number?: string | null;
+  quantity_match: "EXACT" | "PO_BELOW_SCHEDULE" | "PO_ABOVE_SCHEDULE";
+  mismatch_message?: string | null;
+}
+
+export interface DuplicateCheckResult {
+  has_candidate: boolean;
+  candidates: MatchCandidate[];
+  message?: string | null;
+}
+
+export async function checkScheduleDuplicate(customerCode: string, partNumber: string): Promise<DuplicateCheckResult> {
+  const { data } = await api.get("/api/v1/po-matching/check-duplicate", {
+    params: { customer_code: customerCode, part_number: partNumber },
+  });
+  return data;
+}
+
+export async function getMatchCandidates(poLineId: string): Promise<MatchCandidate[]> {
+  const { data } = await api.get("/api/v1/po-matching/candidates", { params: { po_line_id: poLineId } });
+  return data;
+}
+
+export interface MatchConfirmResponse {
+  success: boolean;
+  oar_number: string;
+  schedule_number: string;
+  po_number: string;
+  quantity_match: string;
+  message: string;
+}
+
+export async function confirmMatch(payload: {
+  po_line_id: string;
+  schedule_id: string;
+  acknowledge_mismatch?: boolean;
+}): Promise<MatchConfirmResponse> {
+  const { data } = await api.post("/api/v1/po-matching/match", payload);
   return data;
 }
 
@@ -492,7 +659,14 @@ export async function getCustomers() {
   return data;
 }
 
-export async function getParts() {
+export interface AdminPart {
+  id: string;
+  part_number: string;
+  grade?: string | null;
+  description?: string | null;
+}
+
+export async function getParts(): Promise<AdminPart[]> {
   const { data } = await api.get("/api/v1/admin/parts");
   return data;
 }

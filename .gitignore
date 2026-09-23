@@ -55,3 +55,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.vercel
+.env*
+
+# Local Claude Code tooling/session state (dev-server launch config here is
+# machine-local convenience, not part of the deployed application)
+.claude/

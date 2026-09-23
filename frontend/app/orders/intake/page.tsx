@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   FilePlus,
@@ -8,10 +8,14 @@ import {
   Building,
   Layers,
   ArrowRight,
-  Package
+  Package,
+  Clock3,
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { createOrderIntake } from "@/lib/api";
+import {
+  createOrderIntake, getMasterCustomers, getPOMasters, getSchedules, getParts,
+  MasterCustomer, POMasterOut, ScheduleOut, AdminPart,
+} from "@/lib/api";
 
 const PRESET_CUSTOMERS = [
   { code: "CUST-VALVE", name: "Flowserve Controls Ltd" },
@@ -30,6 +34,20 @@ const PRESET_PARTS = [
 ];
 
 export default function OrderIntakePage() {
+  const [masterCustomers, setMasterCustomers] = useState<MasterCustomer[]>([]);
+  const customerOptions = masterCustomers.length
+    ? masterCustomers.map((c) => ({ code: c.customer_code, name: c.name }))
+    : PRESET_CUSTOMERS;
+
+  const [masterParts, setMasterParts] = useState<AdminPart[]>([]);
+  const partOptions = masterParts.length
+    ? masterParts.map((p) => ({ num: p.part_number, grade: p.grade || "", desc: p.description || "" }))
+    : PRESET_PARTS;
+  const [partSearch, setPartSearch] = useState("");
+  const filteredPartOptions = partSearch.trim()
+    ? partOptions.filter((p) => p.num.toLowerCase().includes(partSearch.trim().toLowerCase())).slice(0, 300)
+    : partOptions.slice(0, 300);
+
   const [customerCode, setCustomerCode] = useState("CUST-VALVE");
   const [customerName, setCustomerName] = useState("Flowserve Controls Ltd");
   const [customerPO, setCustomerPO] = useState("PO-2026-950");
@@ -41,12 +59,44 @@ export default function OrderIntakePage() {
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
   const [orderType, setOrderType] = useState("Standard");
 
+  // Demand source -- PO (confirmed) vs Schedule (forecast, not yet a confirmed PO).
+  const [sourceType, setSourceType] = useState<"po" | "schedule">("po");
+  const [poMasters, setPoMasters] = useState<POMasterOut[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleOut[]>([]);
+  const [selectedPoLineId, setSelectedPoLineId] = useState("");
+  const [selectedScheduleId, setSelectedScheduleId] = useState("");
+
   const [splitMode, setSplitMode] = useState<"auto" | "manual">("auto");
   const [manualQtys, setManualQtys] = useState<string[]>(["", ""]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
+
+  useEffect(() => {
+    getMasterCustomers()
+      .then(setMasterCustomers)
+      .catch(() => setMasterCustomers([]));
+    getParts()
+      .then(setMasterParts)
+      .catch(() => setMasterParts([]));
+  }, []);
+
+  useEffect(() => {
+    if (!customerCode) return;
+    setSelectedPoLineId("");
+    setSelectedScheduleId("");
+    getPOMasters(customerCode).then(setPoMasters).catch(() => setPoMasters([]));
+    getSchedules(customerCode)
+      .then((all) => setSchedules(all.filter((s) => s.po_status === "scheduled" || s.po_status === "awaiting_po")))
+      .catch(() => setSchedules([]));
+  }, [customerCode]);
+
+  const poLineOptions = poMasters.flatMap((po) =>
+    po.lines.map((l) => ({ ...l, po_number: po.po_number, po_id: po.id }))
+  );
+  const selectedPoLine = poLineOptions.find((l) => l.id === selectedPoLineId);
+  const selectedSchedule = schedules.find((s) => s.id === selectedScheduleId);
 
   const manualAllocated = manualQtys.reduce((sum, v) => sum + (Number(v) || 0), 0);
   const manualRemaining = Number(poQty || 0) - manualAllocated;
@@ -62,16 +112,37 @@ export default function OrderIntakePage() {
 
   const handleCustomerChange = (code: string) => {
     setCustomerCode(code);
-    const found = PRESET_CUSTOMERS.find((c) => c.code === code);
+    const found = customerOptions.find((c) => c.code === code);
     if (found) setCustomerName(found.name);
   };
 
   const handlePartChange = (num: string) => {
     setPartNumber(num);
-    const found = PRESET_PARTS.find((p) => p.num === num);
+    const found = partOptions.find((p) => p.num === num);
     if (found) {
       setGrade(found.grade);
       setPartDesc(found.desc);
+    }
+  };
+
+  const handlePoLineChange = (lineId: string) => {
+    setSelectedPoLineId(lineId);
+    const line = poLineOptions.find((l) => l.id === lineId);
+    if (line) {
+      setPartNumber(line.part_number);
+      setPoQty(line.available_qty);
+      setCustomerPO(line.po_number);
+    }
+  };
+
+  const handleScheduleChange = (scheduleId: string) => {
+    setSelectedScheduleId(scheduleId);
+    const schedule = schedules.find((s) => s.id === scheduleId);
+    if (schedule) {
+      setPartNumber(schedule.part_number);
+      setPoQty(schedule.scheduled_qty);
+      setDeliveryDate(schedule.required_date || deliveryDate);
+      setCustomerPO(schedule.customer_schedule_ref || schedule.schedule_number);
     }
   };
 
@@ -85,6 +156,18 @@ export default function OrderIntakePage() {
 
     if (qty <= 0 || batch <= 0) {
       setError("PO Quantity and Max Batch Size must be greater than 0.");
+      return;
+    }
+
+    if (sourceType === "schedule" && !selectedScheduleId) {
+      setError("Select a schedule to link this OAR to.");
+      return;
+    }
+
+    if (sourceType === "po" && selectedPoLine && qty > selectedPoLine.available_qty) {
+      setError(
+        `OAR quantity (${qty}) exceeds the available unallocated PO quantity (${selectedPoLine.available_qty}) on this PO line.`
+      );
       return;
     }
 
@@ -121,6 +204,9 @@ export default function OrderIntakePage() {
         delivery_date: deliveryDate,
         order_type: orderType,
         wo_quantities,
+        source_type: sourceType,
+        po_line_id: sourceType === "po" ? selectedPoLineId || undefined : undefined,
+        schedule_id: sourceType === "schedule" ? selectedScheduleId : undefined,
       });
 
       setSuccessResult(res);
@@ -225,7 +311,7 @@ export default function OrderIntakePage() {
                 onChange={(e) => handleCustomerChange(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
               >
-                {PRESET_CUSTOMERS.map((c) => (
+                {customerOptions.map((c) => (
                   <option key={c.code} value={c.code}>
                     {c.name} ({c.code})
                   </option>
@@ -234,7 +320,7 @@ export default function OrderIntakePage() {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Customer PO Number *</label>
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Customer PO / Reference Number *</label>
               <input
                 type="text"
                 required
@@ -246,17 +332,104 @@ export default function OrderIntakePage() {
             </div>
           </div>
 
+          {/* Order Source: PO (confirmed) vs Schedule (forecast) */}
+          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Order Source</h4>
+              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSourceType("po")}
+                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                    sourceType === "po" ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  PO
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceType("schedule")}
+                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                    sourceType === "schedule" ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  Schedule
+                </button>
+              </div>
+            </div>
+
+            {sourceType === "po" ? (
+              <div>
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">PO Line (optional — links this OAR to a specific PO)</label>
+                <select
+                  value={selectedPoLineId}
+                  onChange={(e) => handlePoLineChange(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                >
+                  <option value="">No PO Master line — free-text PO number above</option>
+                  {poLineOptions.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.po_number} — {l.part_number} (available {l.available_qty} / {l.po_qty})
+                    </option>
+                  ))}
+                </select>
+                {selectedPoLine && (
+                  <p className="mt-1.5 text-[11px] text-zinc-500">
+                    OAR quantity may not exceed the available unallocated PO quantity ({selectedPoLine.available_qty} pcs).
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Schedule *</label>
+                <select
+                  required
+                  value={selectedScheduleId}
+                  onChange={(e) => handleScheduleChange(e.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                >
+                  <option value="">Select a schedule for this customer</option>
+                  {schedules.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.schedule_number} — {s.part_number} (qty {s.scheduled_qty}, req {s.required_date || "-"})
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                  <Clock3 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>Schedule-based demand — PO not yet released</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Part Number</label>
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                Part Number{" "}
+                <span className="font-normal text-zinc-400">({partOptions.length} in Part Master)</span>
+              </label>
+              {!(sourceType === "po" ? !!selectedPoLineId : !!selectedScheduleId) && (
+                <input
+                  type="text"
+                  value={partSearch}
+                  onChange={(e) => setPartSearch(e.target.value)}
+                  placeholder="Type to filter by part number..."
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 text-[11px] text-zinc-700 dark:text-zinc-300 focus:outline-none"
+                />
+              )}
               <select
                 value={partNumber}
                 onChange={(e) => handlePartChange(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                disabled={sourceType === "po" ? !!selectedPoLineId : !!selectedScheduleId}
+                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none disabled:opacity-60"
               >
-                {PRESET_PARTS.map((p) => (
+                {!filteredPartOptions.some((p) => p.num === partNumber) && (
+                  <option value={partNumber}>{partNumber}</option>
+                )}
+                {filteredPartOptions.map((p) => (
                   <option key={p.num} value={p.num}>
-                    {p.num} — {p.grade}
+                    {p.num}{p.grade ? ` — ${p.grade}` : ""}
                   </option>
                 ))}
               </select>

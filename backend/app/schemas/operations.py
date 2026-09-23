@@ -25,6 +25,11 @@ class OrderIntakeCreate(BaseModel):
             "the existing automatic max_batch_size-driven split (unchanged behavior)."
         ),
     )
+    # Demand-source linkage -- all optional, all default to the pre-existing behavior
+    # (a plain PO-sourced OAR) when omitted, so every existing caller is unaffected.
+    source_type: Optional[str] = Field("po", description="'po' or 'schedule'.")
+    po_line_id: Optional[str] = Field(None, description="Links this OAR to a specific PO Master line when source_type='po' via the structured PO workflow.")
+    schedule_id: Optional[str] = Field(None, description="Links this OAR to a Schedule Master record when source_type='schedule'.")
 
 class OrderIntakeResponse(BaseModel):
     success: bool
@@ -33,6 +38,8 @@ class OrderIntakeResponse(BaseModel):
     wos_created: List[str]
     wo_quantities: List[int] = []
     total_qty: int
+    source_type: str = "po"
+    oar_po_status: Optional[str] = None
     message: str
 
 class WOReleaseCreate(BaseModel):

@@ -203,6 +203,22 @@ def auto_migrate_schema():
         "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_sent_at TIMESTAMP;",
         "ALTER TABLE rejection_dispositions ADD COLUMN IF NOT EXISTS melting_remarks VARCHAR;",
 
+        # Customer master data completion
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS address VARCHAR;",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS gst VARCHAR;",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person VARCHAR;",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR;",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone VARCHAR;",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;",
+
+        # OAR demand-source linkage (PO vs Schedule) -- default 'po' makes every
+        # existing OAR row correctly PO-sourced with no backfill needed.
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS source_type VARCHAR DEFAULT 'po';",
+        "UPDATE orders SET source_type = 'po' WHERE source_type IS NULL;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_line_id UUID;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS schedule_id UUID;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS oar_po_status VARCHAR;",
+
         # Audit Logs
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id UUID;",
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_name VARCHAR;",

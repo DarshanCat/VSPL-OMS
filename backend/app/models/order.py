@@ -1,6 +1,6 @@
 import enum
 import uuid
-from sqlalchemy import Column, String, Integer, Date, Enum, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Date, Enum, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, GUID
@@ -15,6 +15,12 @@ class Customer(Base):
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     customer_code = Column(String, unique=True, nullable=False)
     name = Column(String, nullable=False)
+    address = Column(String, nullable=True)
+    gst = Column(String, nullable=True)
+    contact_person = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     orders = relationship("Order", back_populates="customer")
 
 class Part(Base):
@@ -41,6 +47,19 @@ class Order(Base):
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Demand-source linkage. source_type defaults to "po" so every existing OAR row
+    # (created before this feature existed) is correctly, automatically treated as
+    # PO-sourced -- confirmed demand, exactly what it always was -- with no backfill
+    # migration required. po_line_id/schedule_id/oar_po_status stay null for those
+    # rows and for any new PO-sourced OAR; they are populated only for the
+    # schedule-based intake and PO-matching workflow.
+    source_type = Column(String, nullable=False, default="po")
+    po_line_id = Column(GUID, ForeignKey("po_lines.id"), nullable=True)
+    schedule_id = Column(GUID, ForeignKey("schedule_master.id"), nullable=True)
+    oar_po_status = Column(String, nullable=True)
+
     customer = relationship("Customer", back_populates="orders")
     part = relationship("Part", back_populates="orders")
     work_orders = relationship("WorkOrder", back_populates="order")
+    po_line = relationship("POLine", back_populates="orders")
+    schedule = relationship("ScheduleMaster", back_populates="orders")

@@ -10,6 +10,10 @@ from app.models.rejection_disposition import RejectionDisposition
 from app.models.conversion_mapping import ConversionPartMapping
 from app.models.dispatch import Dispatch
 from app.models.audit import AuditLog
+from app.models.master_data import (
+    POMaster, POLine, ScheduleMaster,
+    POStatus, ScheduleStatus, OrderSourceType, OARPOStatus
+)
 
 __all__ = [
     "User",
@@ -34,4 +38,11 @@ __all__ = [
     "ConversionPartMapping",
     "Dispatch",
     "AuditLog",
+    "POMaster",
+    "POLine",
+    "ScheduleMaster",
+    "POStatus",
+    "ScheduleStatus",
+    "OrderSourceType",
+    "OARPOStatus",
 ]

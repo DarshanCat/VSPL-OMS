@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part, OrderStatus
+from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
 from app.models.conversion import Conversion
@@ -77,10 +78,38 @@ class OperationsService:
             db.add(part)
             db.flush()
 
+        # 2b. Demand-source linkage (PO Master line / Schedule Master) -- optional;
+        # every existing caller omits these and gets exactly the prior behavior.
+        source_type = (req.source_type or "po").strip().lower()
+        po_line = None
+        schedule = None
+        oar_po_status = None
+
+        if req.po_line_id:
+            po_line = db.query(POLine).filter(POLine.id == req.po_line_id).with_for_update().first()
+            if not po_line:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PO line '{req.po_line_id}' not found.")
+            allocated = sum(o.po_qty for o in po_line.orders)
+            available = max(po_line.po_qty - allocated, 0)
+            if req.po_quantity > available:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"OAR quantity ({req.po_quantity}) exceeds the available unallocated PO quantity ({available}) on this PO line.",
+                )
+
+        if source_type == "schedule":
+            if not req.schedule_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="schedule_id is required when source_type is 'schedule'.")
+            schedule = db.query(ScheduleMaster).filter(ScheduleMaster.id == req.schedule_id).with_for_update().first()
+            if not schedule:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{req.schedule_id}' not found.")
+            oar_po_status = "awaiting_po"
+            schedule.po_status = ScheduleStatus.AWAITING_PO
+
         # 3. Order (OAR)
         order_count = db.query(Order).count()
         oar_num = f"OAR-{order_count + 1:04d}"
-        
+
         order = Order(
             oar_number=oar_num,
             customer_id=customer.id,
@@ -90,7 +119,11 @@ class OperationsService:
             max_batch_size=req.max_batch_size,
             delivery_date=req.delivery_date,
             order_type=req.order_type or "Standard",
-            status=req.status
+            status=req.status,
+            source_type=source_type,
+            po_line_id=po_line.id if po_line else None,
+            schedule_id=schedule.id if schedule else None,
+            oar_po_status=oar_po_status,
         )
         db.add(order)
         db.flush()
@@ -183,7 +216,13 @@ class OperationsService:
             wos_created=created_wos,
             wo_quantities=created_wo_qtys,
             total_qty=req.po_quantity,
-            message=f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
+            source_type=source_type,
+            oar_po_status=oar_po_status,
+            message=(
+                f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
+                if source_type != "schedule"
+                else f"Order '{oar_num}' created from Schedule '{schedule.schedule_number}' -- awaiting PO. Schedule-based demand — PO not yet released."
+            )
         )
 
     @staticmethod

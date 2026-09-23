@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -25,8 +25,11 @@ class CustomerOut(BaseModel):
 class PartOut(BaseModel):
     id: str
     part_number: str
-    grade: str
-    description: str
+    # The imported VSPL Part Master legitimately leaves grade/description blank for
+    # parts whose source Excel row had no unambiguous value (see scripts/
+    # import_part_master.py) -- these are not invented defaults, so both stay optional.
+    grade: Optional[str] = None
+    description: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -60,7 +63,9 @@ def list_customers(db: Session = Depends(get_db), user: User = Depends(get_curre
 
 @router.get("/parts", response_model=List[PartOut])
 def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.query(Part).order_by(Part.part_number).limit(5000).all()
+    # Cap raised past the real, imported VSPL Part Master count (~6,200) -- 5000 was
+    # silently truncating the list before every part existed in this table.
+    return db.query(Part).order_by(Part.part_number).limit(20000).all()
 
 @router.get("/machines", response_model=List[MachineOut])
 def list_machines(user: User = Depends(get_current_user)):

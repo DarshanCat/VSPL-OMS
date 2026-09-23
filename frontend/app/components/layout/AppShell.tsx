@@ -29,7 +29,10 @@ import {
   Sparkles,
   CheckSquare,
   Shuffle,
-  Users as UsersIcon
+  Users as UsersIcon,
+  Building2,
+  CalendarClock,
+  GitMerge
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -124,6 +127,29 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    group: "MASTERS",
+    items: [
+      {
+        name: "Customer Master",
+        href: "/masters/customers",
+        icon: <Building2 className="h-4 w-4 text-blue-500" />,
+        roles: ["admin", "planner", "production_manager"],
+      },
+      {
+        name: "PO Master",
+        href: "/masters/pos",
+        icon: <FileSpreadsheet className="h-4 w-4 text-emerald-500" />,
+        roles: ["admin", "planner", "production_manager"],
+      },
+      {
+        name: "Schedule Master",
+        href: "/masters/schedules",
+        icon: <CalendarClock className="h-4 w-4 text-amber-500" />,
+        roles: ["admin", "planner", "production_manager"],
+      },
+    ],
+  },
+  {
     group: "OPERATIONS & PLANNING",
     items: [
       {
@@ -135,6 +161,12 @@ const NAV_GROUPS: NavGroup[] = [
         name: "OAR & WO List",
         href: "/orders/list",
         icon: <FileSpreadsheet className="h-4 w-4 text-blue-500" />,
+      },
+      {
+        name: "PO Matching",
+        href: "/orders/po-matching",
+        icon: <GitMerge className="h-4 w-4 text-indigo-500" />,
+        roles: ["admin", "planner", "production_manager"],
       },
       {
         name: "WO Release & Routing",
