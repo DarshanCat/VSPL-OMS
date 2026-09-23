@@ -6,7 +6,7 @@
     },
     "backend": {
       "root": "backend",
-      "entrypoint": "app.main:app"
+      "entrypoint": "vercel_entry:app"
     }
   },
   "rewrites": [
@@ -14,16 +14,8 @@
       "source": "/api/backend/:path*",
       "destination": {
         "type": "service",
-        "service": "backend",
-        "path": "/:path*"
-      },
-      "transforms": [
-        {
-          "type": "request.path",
-          "op": "set",
-          "args": "/:path*"
-        }
-      ]
+        "service": "backend"
+      }
     },
     {
       "source": "/(.*)",
