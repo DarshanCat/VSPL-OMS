@@ -464,3 +464,18 @@ export async function getLatestMaster() {
   const { data } = await api.get("/api/v1/oms/latest-master");
   return data;
 }
+
+// Report / file downloads. A plain `<a href download>` never sends the
+// Authorization header this API requires (there is no cookie-based auth), so every
+// protected download must go through this authenticated blob fetch instead.
+export async function downloadFile(url: string, filename: string): Promise<void> {
+  const { data } = await api.get(url, { responseType: "blob" });
+  const blobUrl = window.URL.createObjectURL(data as Blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(blobUrl);
+}
