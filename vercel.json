@@ -1,15 +1,36 @@
 {
-  "experimentalServices": {
+  "services": {
     "frontend": {
       "root": "frontend",
       "framework": "nextjs"
     },
     "backend": {
       "root": "backend",
-      "entrypoint": "app.main:app",
-      "mount": {
-        "path": "/api/backend"
+      "entrypoint": "app.main:app"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/backend/:path*",
+      "destination": {
+        "type": "service",
+        "service": "backend",
+        "path": "/:path*"
+      },
+      "transforms": [
+        {
+          "type": "request.path",
+          "op": "set",
+          "args": "/:path*"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "frontend"
       }
     }
-  }
+  ]
 }
