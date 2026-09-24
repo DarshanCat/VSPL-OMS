@@ -88,6 +88,17 @@ class WorkOrderTrackingDetail(BaseModel):
     current_stage: str
     next_allowed_stage: Optional[str] = None
     available_wip: int
+    # The stage the Move Parts screen must actually use for a new movement. `current_stage`
+    # is the OMS "furthest stage touched" snapshot (used for dashboards/RAG/reporting) --
+    # it advances to the next stage as soon as ANY quantity has been moved into it, even
+    # while the prior stage still has movable WIP sitting available. Movement eligibility
+    # is a different question: it's the earliest stage (by route sequence) that still has
+    # available_wip > 0. Both are derived from the same authoritative StageWIP.available_wip
+    # values already computed above; this is not a new quantity engine, just picking the
+    # correct one of two existing, legitimate readings for the movement use case.
+    movable_from_stage: Optional[str] = None
+    movable_to_stage: Optional[str] = None
+    movable_wip: int = 0
     status: str
     shortfall: str
     projected_final_good: int

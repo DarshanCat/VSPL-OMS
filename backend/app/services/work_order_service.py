@@ -145,6 +145,26 @@ class WorkOrderService:
         wip_records = {w.stage: w for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
         movements = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).order_by(ProductionMovement.created_at.asc()).all()
 
+        # Movement-eligible stage: the earliest stage (by route sequence) that still has
+        # available_wip > 0 and has a next stage to move into. This can legitimately be
+        # behind `cur_stage` -- e.g. F1 still has 10 available while F2 has already begun
+        # receiving material, which advances cur_stage to F2 for reporting purposes but
+        # must not hide F1's still-movable quantity from the Move Parts screen.
+        movable_from_stage = None
+        movable_to_stage = None
+        movable_wip_qty = 0
+        if wo.status not in (WOStatus.DISPATCHED, WOStatus.CLOSED):
+            for idx2, stg2 in enumerate(route_stages):
+                if idx2 + 1 >= len(route_stages):
+                    break
+                wr = wip_records.get(stg2)
+                av = wr.available_wip if wr else (wo.physical_wo_qty if idx2 == 0 and not wip_records else 0)
+                if av > 0:
+                    movable_from_stage = stg2
+                    movable_wip_qty = av
+                    movable_to_stage = route_stages[idx2 + 1]
+                    break
+
         timeline_steps = []
         total_wip_held = 0
         total_rejected = 0
@@ -246,6 +266,9 @@ class WorkOrderService:
             current_stage=cur_stage,
             next_allowed_stage=next_stage,
             available_wip=cur_wip_val,
+            movable_from_stage=movable_from_stage,
+            movable_to_stage=movable_to_stage,
+            movable_wip=movable_wip_qty,
             status=wo.status.value,
             shortfall=wo.shortfall or "No",
             projected_final_good=wo.projected_final_good or max(wo.physical_wo_qty - total_rejected, 0),

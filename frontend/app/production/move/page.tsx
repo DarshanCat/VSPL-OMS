@@ -113,15 +113,20 @@ export default function MovePartsPage() {
       // the available WIP -- an operator must enter what was actually physically moved.
       setQuantityToMove("");
 
-      // Authoritative production/movement breakdown for the selected SOURCE stage --
-      // same data source (get_current_stage_state) the Production Entry screen uses,
-      // so the two screens never show competing numbers.
-      getStageState(targetWO, data.current_stage)
+      // Authoritative production/movement breakdown for the actual movement-eligible
+      // SOURCE stage (movable_from_stage) -- not necessarily data.current_stage, which
+      // is the OMS "furthest stage touched" snapshot and advances as soon as the next
+      // stage receives any material, even while this stage still has WIP available to
+      // move. Same data source (get_current_stage_state) the Production Entry screen
+      // uses, so the two screens never show competing numbers for a given stage.
+      const originStage = data.movable_from_stage || data.current_stage;
+      getStageState(targetWO, originStage)
         .then((s) => setStageState(s))
         .catch(() => setStageState(null));
 
-      // Preset machine based on next stage
-      const matchingMach = MACHINES.find((m) => m.stage === data.next_allowed_stage || m.stage === data.current_stage);
+      // Preset machine based on the actual movement destination
+      const destStage = data.movable_to_stage || data.next_allowed_stage;
+      const matchingMach = MACHINES.find((m) => m.stage === destStage || m.stage === originStage);
       if (matchingMach) setSelectedMachine(matchingMach.id);
 
       // Fetch ML risk insights
@@ -184,14 +189,18 @@ export default function MovePartsPage() {
       return;
     }
 
-    if (moveQtyNum > woData.available_wip) {
+    const originStageNow = woData.movable_from_stage || woData.current_stage;
+    const destStageNow = woData.movable_to_stage || woData.next_allowed_stage;
+    const availableNow = woData.movable_from_stage ? woData.movable_wip : woData.available_wip;
+
+    if (moveQtyNum > availableNow) {
       setFormError(
-        `Cannot move ${moveQtyNum} pieces. Only ${woData.available_wip} pieces available at stage ${woData.current_stage}.`
+        `Cannot move ${moveQtyNum} pieces. Only ${availableNow} pieces available at stage ${originStageNow}.`
       );
       return;
     }
 
-    if (!woData.next_allowed_stage) {
+    if (!destStageNow) {
       setFormError("Terminal Stage — No further movement available for this Work Order.");
       return;
     }
@@ -204,8 +213,8 @@ export default function MovePartsPage() {
     try {
       const res = await moveParts({
         wo_number: woData.wo_number,
-        from_stage: woData.current_stage,
-        to_stage: woData.next_allowed_stage,
+        from_stage: originStageNow,
+        to_stage: destStageNow,
         quantity_moved: moveQtyNum,
         rejected_quantity: 0,
         machine_id: selectedMachine,
@@ -237,6 +246,15 @@ export default function MovePartsPage() {
   };
 
   const isTerminalStage = woData && (!woData.next_allowed_stage || woData.current_stage === "DISPATCH");
+
+  // The actual origin/destination/available-qty for a NEW movement -- the earliest
+  // stage (by route sequence) that still has WIP available to move, which can be
+  // behind woData.current_stage (see movable_from_stage doc comment on the backend
+  // schema). Falls back to current_stage/available_wip when nothing is movable
+  // anywhere, so "no movable material" banners still show correct, consistent figures.
+  const originStage = woData ? (woData.movable_from_stage || woData.current_stage) : null;
+  const destStage = woData ? (woData.movable_to_stage || woData.next_allowed_stage) : null;
+  const availableAtOrigin = woData ? (woData.movable_from_stage ? woData.movable_wip : woData.available_wip) : 0;
 
   return (
     <AppShell>
@@ -375,8 +393,8 @@ export default function MovePartsPage() {
                 </span>
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
                   {woData.timeline.map((step: any, i: number) => {
-                    const isOrigin = step.stage === woData.current_stage;
-                    const isDest = step.stage === woData.next_allowed_stage;
+                    const isOrigin = step.stage === originStage;
+                    const isDest = step.stage === destStage;
                     const isDone = step.is_completed;
 
                     return (
@@ -466,12 +484,12 @@ export default function MovePartsPage() {
                   </Link>
                 </div>
               </div>
-            ) : woData.available_wip <= 0 ? (
+            ) : availableAtOrigin <= 0 ? (
               /* No movable WIP at the current stage -- show the actual reason, not a
                  generic message. Planned/target quantity is never movable WIP; only
                  production actually recorded at this stage is. */
               (() => {
-                const curStep = woData.timeline?.find((s: any) => s.stage === woData.current_stage);
+                const curStep = woData.timeline?.find((s: any) => s.stage === originStage);
                 const ok = stageState?.ok_completed_qty ?? curStep?.ok_completed_qty ?? 0;
                 const rej = stageState?.rejected_qty ?? curStep?.rejected_qty ?? 0;
                 const alreadyMoved = stageState?.already_moved_qty ?? 0;
@@ -489,7 +507,7 @@ export default function MovePartsPage() {
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-6 text-center space-y-3">
                     <div className="flex items-center justify-center gap-2 text-amber-600 dark:text-amber-400">
                       <Ban className="h-6 w-6" />
-                      <h3 className="text-base font-extrabold">No Movable Material at {woData.current_stage}</h3>
+                      <h3 className="text-base font-extrabold">No Movable Material at {originStage}</h3>
                     </div>
                     <p className="text-xs text-zinc-600 dark:text-zinc-400 max-w-lg mx-auto font-semibold">
                       {reason}
@@ -497,7 +515,7 @@ export default function MovePartsPage() {
                     <div className="flex flex-wrap items-center justify-center gap-4 pt-2 text-xs">
                       <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
                         <span className="block text-[10px] uppercase font-bold text-zinc-400">Current Stage</span>
-                        <span className="font-mono font-extrabold text-blue-600">{woData.current_stage}</span>
+                        <span className="font-mono font-extrabold text-blue-600">{originStage}</span>
                       </div>
                       <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
                         <span className="block text-[10px] uppercase font-bold text-zinc-400">OK Produced</span>
@@ -513,7 +531,7 @@ export default function MovePartsPage() {
                       </div>
                       <div className="rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-2">
                         <span className="block text-[10px] uppercase font-bold text-zinc-400">Movable WIP</span>
-                        <span className="font-mono font-extrabold text-purple-600">{woData.available_wip} pcs</span>
+                        <span className="font-mono font-extrabold text-purple-600">{availableAtOrigin} pcs</span>
                       </div>
                     </div>
                     <div className="pt-2">
@@ -521,7 +539,7 @@ export default function MovePartsPage() {
                         href="/production/entry"
                         className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
                       >
-                        <span>Record production at {woData.current_stage} to create movable WIP</span>
+                        <span>Record production at {originStage} to create movable WIP</span>
                         <ArrowRight className="h-3.5 w-3.5" />
                       </Link>
                     </div>
@@ -543,10 +561,10 @@ export default function MovePartsPage() {
                       <div>
                         <span className="text-[10px] uppercase font-bold text-zinc-400">Origin Stage</span>
                         <p className="text-xl font-extrabold text-zinc-900 dark:text-zinc-50 font-mono">
-                          {woData.current_stage}
+                          {originStage}
                         </p>
                         <p className="text-[11px] font-bold text-blue-600">
-                          {woData.available_wip} pcs available
+                          {availableAtOrigin} pcs available
                         </p>
                       </div>
 
@@ -557,7 +575,7 @@ export default function MovePartsPage() {
                       <div className="text-right">
                         <span className="text-[10px] uppercase font-bold text-zinc-400">Destination Stage</span>
                         <p className="text-xl font-extrabold text-emerald-600 font-mono">
-                          {woData.next_allowed_stage}
+                          {destStage}
                         </p>
                         <p className="text-[11px] text-zinc-500">
                           Next route target
@@ -590,7 +608,7 @@ export default function MovePartsPage() {
                         <span>Physical Material Transfer</span>
                       </h3>
                       <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">
-                        {woData.current_stage} ➔ {woData.next_allowed_stage}
+                        {originStage} ➔ {destStage}
                       </span>
                     </div>
 
@@ -605,7 +623,7 @@ export default function MovePartsPage() {
                       <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
                         <span>Quantity to Move *</span>
                         <span className="text-[11px] text-zinc-400">
-                          Available at {woData.current_stage}: <strong>{woData.available_wip} pcs</strong>
+                          Available at {originStage}: <strong>{availableAtOrigin} pcs</strong>
                         </span>
                       </label>
                       <input
@@ -613,11 +631,11 @@ export default function MovePartsPage() {
                         type="number"
                         required
                         min={1}
-                        max={woData.available_wip}
+                        max={availableAtOrigin}
                         value={quantityToMove}
                         onChange={(e) => setQuantityToMove(e.target.value === "" ? "" : Number(e.target.value))}
                         onKeyDown={(e) => handleKeyDownEnter(e, "machine")}
-                        placeholder={`1 to ${woData.available_wip}`}
+                        placeholder={`1 to ${availableAtOrigin}`}
                         className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-4 py-2.5 text-base font-extrabold text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
                       />
                     </div>
@@ -696,14 +714,14 @@ export default function MovePartsPage() {
                       <button
                         ref={btnSubmitRef}
                         type="submit"
-                        disabled={submitting || woData.available_wip <= 0 || !woData.next_allowed_stage}
+                        disabled={submitting || availableAtOrigin <= 0 || !destStage}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-500/25 hover:bg-blue-500 focus:outline-none disabled:opacity-50 transition-all cursor-pointer"
                       >
                         <ArrowRightLeft className="h-4 w-4" />
                         <span>
                           {submitting
                             ? "Validating & Moving..."
-                            : `Transfer ${quantityToMove || 0} pcs to Stage ${woData.next_allowed_stage}`}
+                            : `Transfer ${quantityToMove || 0} pcs to Stage ${destStage}`}
                         </span>
                       </button>
                     </div>
