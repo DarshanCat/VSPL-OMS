@@ -429,7 +429,7 @@ export default function OrderIntakePage() {
                 )}
                 {filteredPartOptions.map((p) => (
                   <option key={p.num} value={p.num}>
-                    {p.num}{p.grade ? ` — ${p.grade}` : ""}
+                    {p.num} — {p.grade || "Grade N/A"}
                   </option>
                 ))}
               </select>

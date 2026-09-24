@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.operations import (
     OrderIntakeCreate, OrderIntakeResponse,
     WOReleaseCreate, WOReleaseResponse,
@@ -13,7 +13,7 @@ from app.schemas.operations import (
 from app.schemas.work_order import OARListItem
 from app.services.operations_service import OperationsService
 from app.services.work_order_service import WorkOrderService
-from app.core.roles import PLANNING_ROLES, QUALITY_OVERSIGHT_ROLES
+from app.core.roles import PLANNING_ROLES, WO_RELEASE_ROLES, CONVERSION_MODULE_ROLES, QUALITY_APPROVAL_ROLES
 
 router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
 
@@ -23,10 +23,9 @@ def create_order_intake(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*PLANNING_ROLES))
 ):
-    """Process incoming Order Intake (OAR) and create corresponding Work Orders. Same
-    planning-decision role gate as its sibling /wo-release and /conversion endpoints in
-    this router -- this was previously left open to any authenticated user, an
-    inconsistency with those siblings rather than an intentional design."""
+    """Process incoming Order Intake (OAR) and create corresponding Work Orders.
+    Planning-only per the OMS Roles & Responsibilities spec (Production Manager
+    explicitly cannot create/edit an OAR)."""
     return OperationsService.create_order_intake(db, payload, current_user=user)
 
 @router.get("/oars", response_model=List[OARListItem])
@@ -55,7 +54,7 @@ def list_oars(
 def release_work_order(
     payload: WOReleaseCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*PLANNING_ROLES))
+    user: User = Depends(require_roles(*WO_RELEASE_ROLES))
 ):
     """Release a Work Order with physical quantity and custom stage routing."""
     return OperationsService.release_work_order(db, payload, current_user=user)
@@ -64,7 +63,7 @@ def release_work_order(
 def create_conversion(
     payload: ConversionCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*PLANNING_ROLES))
+    user: User = Depends(require_roles(*CONVERSION_MODULE_ROLES))
 ):
     """Execute part conversion between Work Orders with route debit validation."""
     return OperationsService.create_conversion(db, payload, current_user=user)
@@ -92,7 +91,7 @@ def create_nc_record(
 def update_nc_record(
     payload: NCRecordUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*QUALITY_OVERSIGHT_ROLES))
+    user: User = Depends(require_roles(*QUALITY_APPROVAL_ROLES))
 ):
     """Update NC status, root cause, or disposition (quality-approval action)."""
     return OperationsService.update_nc(db, payload, current_user=user)

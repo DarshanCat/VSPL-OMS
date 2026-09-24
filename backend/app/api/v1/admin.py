@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
-from app.models.user import User, UserRole
+from app.core.roles import QUALITY_OVERSIGHT_ROLES
+from app.models.user import User
 from app.models.order import Customer, Part
 from app.models.audit import AuditLog
 
@@ -83,7 +84,7 @@ def list_machines(user: User = Depends(get_current_user)):
 def list_audit_logs(
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.CEO)),
+    user: User = Depends(require_roles(*QUALITY_OVERSIGHT_ROLES)),
 ):
     logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).all()
     return [

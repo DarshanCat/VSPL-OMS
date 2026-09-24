@@ -12,12 +12,13 @@ temporary password is printed to THIS terminal exactly once, for the operator to
 to that person through a secure channel; it is never logged, never stored anywhere
 except as its bcrypt hash, and never printed again by any other command or endpoint.
 
-"SUPER_ADMIN" (requested for data.analyst@vijayspheroidals.com) is mapped to the
-existing UserRole.ADMIN -- the system's actual highest-authority role, already used
-throughout RBAC (PLANNING_ROLES, QUALITY_OVERSIGHT_ROLES, USER_MANAGEMENT_ROLES, the
-/auth/register gate). Introducing a second, distinct "super" tier would mean touching
-every one of those role tuples to decide whether it also carries ADMIN's authority --
-exactly the kind of RBAC/business-rule change this task was told to avoid.
+data.analyst@vijayspheroidals.com is mapped to UserRole.DATA_ANALYST -- a dedicated,
+read-only role added by the OMS Roles & Responsibilities RBAC pass (see
+app/core/roles.py). It is granted no entry in any require_roles(...) tuple, so it can
+authenticate and read every tracking/reports/analytics endpoint (all gated only by
+"any authenticated user") but cannot mutate any manufacturing transaction or master
+data, matching the spec's "Cannot modify manufacturing transactions or master data
+unless separately assigned an authorized operational role."
 """
 import sys
 
@@ -29,7 +30,7 @@ from app.models.user import User, UserRole
 # generic (derived from the email's local part) since none was specified for these
 # accounts; an admin can rename them later via the Users screen.
 ACCOUNTS = [
-    ("Data Analyst", "data.analyst@vijayspheroidals.com", "Management / Analytics", UserRole.ADMIN),
+    ("Data Analyst", "data.analyst@vijayspheroidals.com", "Management / Analytics", UserRole.DATA_ANALYST),
     ("PPC", "ppc@vijayspheroidals.com", "Planning", UserRole.PLANNER),
     ("Stores", "stores@vijayspheroidals.com", "Stores", UserRole.STORE),
     ("Quality", "quality@vijayspheroidals.com", "Quality", UserRole.QA),

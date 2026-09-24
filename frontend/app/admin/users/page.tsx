@@ -13,7 +13,7 @@ import { UserPlus, KeyRound, Copy, CheckCircle2, AlertTriangle, ShieldAlert } fr
 
 const ROLES = [
   "admin", "ceo", "production_manager", "planner", "qa",
-  "dispatch", "machine_operator", "operator", "packing", "store", "sales",
+  "dispatch", "machine_operator", "operator", "packing", "store", "sales", "data_analyst",
 ];
 
 function roleLabel(role: string) {

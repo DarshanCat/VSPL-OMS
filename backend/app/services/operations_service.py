@@ -9,7 +9,7 @@ from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
 from app.models.conversion import Conversion
-from app.models.nc import NCRecord
+from app.models.nc import NCRecord, next_nc_number
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.operations import (
@@ -512,9 +512,8 @@ class OperationsService:
                 detail=f"Work Order '{req.wo_number}' not found."
             )
 
-        count = db.query(NCRecord).count()
-        nc_num = f"NC-{count + 1:05d}"
         now = datetime.now()
+        nc_num = next_nc_number(db)
 
         nc = NCRecord(
             nc_number=nc_num,
@@ -534,7 +533,6 @@ class OperationsService:
         )
         db.add(nc)
 
-        # Audit Log
         audit = AuditLog(
             user_id=current_user.id if current_user else None,
             user_name=current_user.full_name if current_user else "QA Officer",
