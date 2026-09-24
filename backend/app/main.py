@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from app.core.config import settings
-from app.core.database import engine, Base, SessionLocal, auto_migrate_schema
+from app.core.database import engine, Base, SessionLocal, auto_migrate_schema, LIFESPAN_STATUS
 from app.core.rate_limit import limiter
 from app.core.security_headers import SecurityHeadersMiddleware
 from app.api.v1 import (
@@ -19,8 +19,15 @@ from app.services.seed_service import seed_database_if_empty
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Ensure tables exist, apply column migrations, then seed initial data
+    # Startup: Ensure tables exist, apply column migrations, then seed initial data.
+    # LIFESPAN_STATUS is diagnostics-only (no secrets, no business data) -- it exists
+    # so a deployment's startup behavior can be verified via the read-only status
+    # endpoint instead of being assumed, after this exact code path was found to never
+    # execute under the Vercel mount architecture (see vercel_entry.py).
+    import datetime as _dt
+    LIFESPAN_STATUS["started_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
     Base.metadata.create_all(bind=engine)
+    LIFESPAN_STATUS["create_all_ran"] = True
     auto_migrate_schema()
     db = SessionLocal()
     try:

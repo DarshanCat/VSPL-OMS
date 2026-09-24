@@ -20,9 +20,21 @@ import secrets
 from fastapi import APIRouter, Header, HTTPException, status
 from sqlalchemy import text
 from app.core.config import settings
-from app.core.database import engine
+from app.core import database as db_core
+from app.core.database import engine, Base, auto_migrate_schema, LIFESPAN_STATUS
 
 router = APIRouter(prefix="/api/v1/migration", tags=["migration"])
+
+
+def _require_migration_secret(x_migration_secret: str):
+    """Shared gate for every endpoint in this router: hidden entirely outside
+    production, and a constant-time comparison against MIGRATION_SECRET otherwise --
+    the same authorization model already used by add-must-change-password-column."""
+    if settings.ENVIRONMENT.lower() != "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    expected = os.environ.get("MIGRATION_SECRET")
+    if not expected or not secrets.compare_digest(x_migration_secret or "", expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 @router.post("/add-must-change-password-column")
@@ -49,3 +61,44 @@ def add_must_change_password_column(x_migration_secret: str = Header(default="")
         raise HTTPException(status_code=500, detail="Migration did not take effect.")
 
     return {"success": True, "column": "must_change_password", "verified": True}
+
+
+@router.get("/status")
+def schema_sync_status(x_migration_secret: str = Header(default="")):
+    """READ-ONLY diagnostic. Reports whether this running process's lifespan startup
+    has executed and what the last schema-sync attempt found -- never secrets, never
+    business data, never a row of application data. Exists because the app.main
+    lifespan (Base.metadata.create_all() + auto_migrate_schema()) was found to never
+    run at all under the Vercel mount architecture until vercel_entry.py's fix; this
+    lets that be verified directly against a live deployment instead of assumed."""
+    _require_migration_secret(x_migration_secret)
+
+    return {
+        "lifespan_started_at": LIFESPAN_STATUS["started_at"],
+        "create_all_ran": LIFESPAN_STATUS["create_all_ran"],
+        "schema_sync_last_result": db_core.SCHEMA_SYNC_LAST_RESULT,
+    }
+
+
+@router.post("/sync-schema")
+def sync_schema(x_migration_secret: str = Header(default="")):
+    """Manual, on-demand fallback for the exact same additive-only schema sync the
+    app lifespan already performs on every normal startup (Base.metadata.create_all()
+    -- creates only entirely-missing tables, never touches an existing one -- then
+    auto_migrate_schema() -- ADD COLUMN IF NOT EXISTS / CREATE INDEX IF NOT EXISTS
+    only, per-statement, never DROP/TRUNCATE/DELETE). Not a second mechanism: it
+    calls the identical functions, so its safety guarantees are identical. Exists so
+    schema sync can be triggered explicitly if a given deployment's lifespan turns
+    out not to run for any reason, without needing a code change or redeploy to fix
+    it -- 'do not assume the startup mechanism works' extended to future deployments
+    too, not just this one investigation.
+
+    Idempotent: safe to call any number of times. Returns only counts (attempted/
+    succeeded/failed) and the dialect name -- never a statement's SQL, never a
+    credential, never a row of business data."""
+    _require_migration_secret(x_migration_secret)
+
+    Base.metadata.create_all(bind=engine)
+    result = auto_migrate_schema()
+
+    return {"success": True, "schema_sync": result}

@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, String, TypeDecorator, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -68,8 +69,22 @@ else:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Diagnostics only -- never business data, never credentials. Populated by the
+# actual lifespan handler (app.main:lifespan) and by auto_migrate_schema() itself,
+# and surfaced read-only via app/api/v1/migration.py's status endpoint so a
+# deployment's startup behavior can be verified without guessing.
+LIFESPAN_STATUS = {"started_at": None, "create_all_ran": False}
+SCHEMA_SYNC_LAST_RESULT = None
+
+
 def auto_migrate_schema():
-    """Auto-migrate schema to ensure newly added columns and enum types exist in PostgreSQL/SQLite."""
+    """Auto-migrate schema to ensure newly added columns and enum types exist in PostgreSQL/SQLite.
+
+    Returns a summary dict (attempted/succeeded/failed counts, dialect, timestamp --
+    never the statements' data or any credential) and also stores it on the module as
+    SCHEMA_SYNC_LAST_RESULT so a diagnostic endpoint can report the last run without
+    needing this function to be called again."""
+    global SCHEMA_SYNC_LAST_RESULT
     statements = [
         # Convert enum columns to VARCHAR in PostgreSQL for flexible compatibility
         "ALTER TABLE users ALTER COLUMN role TYPE VARCHAR;",
@@ -252,6 +267,8 @@ def auto_migrate_schema():
         r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) (.+?);\s*$", re.IGNORECASE
     )
 
+    succeeded = 0
+    failed = 0
     for stmt in statements:
         try:
             if is_sqlite:
@@ -262,11 +279,23 @@ def auto_migrate_schema():
                         existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
                         if column not in existing:
                             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))
+                    succeeded += 1
                     continue
             with engine.begin() as conn:
                 conn.execute(text(stmt))
+            succeeded += 1
         except Exception:
-            pass
+            failed += 1
+
+    result = {
+        "attempted": len(statements),
+        "succeeded": succeeded,
+        "failed": failed,
+        "dialect": engine.dialect.name,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+    SCHEMA_SYNC_LAST_RESULT = result
+    return result
 
 def get_db():
     db = SessionLocal()
