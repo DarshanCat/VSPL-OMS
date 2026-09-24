@@ -106,3 +106,77 @@ def test_migration_endpoint_does_not_expose_secrets(client, monkeypatch):
     assert "the-real-secret" not in resp.text
     assert "DATABASE_URL" not in resp.text
     assert "SECRET_KEY" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# /status and /sync-schema -- added after discovering auto_migrate_schema() never
+# ran in production at all (the Vercel mount lifespan bug, see vercel_entry.py and
+# test_vercel_lifespan.py), to make that verifiable and to give a manual fallback
+# that doesn't depend on lifespan working correctly on any given deployment.
+# ---------------------------------------------------------------------------
+
+def test_status_endpoint_hidden_outside_production(client, monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    resp = client.get("/api/v1/migration/status", headers={"X-Migration-Secret": "anything"})
+    assert resp.status_code == 404, resp.text
+
+
+def test_status_endpoint_rejects_wrong_secret(client, monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("MIGRATION_SECRET", "the-real-secret")
+    resp = client.get("/api/v1/migration/status", headers={"X-Migration-Secret": "wrong"})
+    assert resp.status_code == 403, resp.text
+
+
+def test_status_endpoint_reports_lifespan_and_schema_sync_state(client, monkeypatch):
+    """The TestClient fixture's `with TestClient(app)` already runs app.main's real
+    lifespan on entry (same as any ASGI server would against app.main:app directly),
+    so by the time a request is made, LIFESPAN_STATUS/SCHEMA_SYNC_LAST_RESULT must
+    already be populated -- proving this endpoint reflects real state, not a stub."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("MIGRATION_SECRET", "the-real-secret")
+    resp = client.get("/api/v1/migration/status", headers={"X-Migration-Secret": "the-real-secret"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["lifespan_started_at"] is not None
+    assert body["create_all_ran"] is True
+    assert body["schema_sync_last_result"] is not None
+    assert body["schema_sync_last_result"]["attempted"] > 0
+    assert "the-real-secret" not in resp.text
+    assert "DATABASE_URL" not in resp.text
+
+
+def test_sync_schema_hidden_outside_production(client, monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    resp = client.post("/api/v1/migration/sync-schema", headers={"X-Migration-Secret": "anything"})
+    assert resp.status_code == 404, resp.text
+
+
+def test_sync_schema_rejects_wrong_secret(client, monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("MIGRATION_SECRET", "the-real-secret")
+    resp = client.post("/api/v1/migration/sync-schema", headers={"X-Migration-Secret": "wrong"})
+    assert resp.status_code == 403, resp.text
+
+
+def test_sync_schema_is_additive_and_idempotent(client, monkeypatch):
+    """Calling it explicitly must succeed and be safe to repeat -- same guarantee as
+    auto_migrate_schema() itself, since this endpoint calls the identical function."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("MIGRATION_SECRET", "the-real-secret")
+    for _ in range(2):
+        resp = client.post("/api/v1/migration/sync-schema", headers={"X-Migration-Secret": "the-real-secret"})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["success"] is True
+        assert body["schema_sync"]["attempted"] > 0
+        assert body["schema_sync"]["failed"] == 0 or engine.dialect.name != "postgresql"
+
+
+def test_sync_schema_does_not_expose_secrets(client, monkeypatch):
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setenv("MIGRATION_SECRET", "the-real-secret")
+    resp = client.post("/api/v1/migration/sync-schema", headers={"X-Migration-Secret": "the-real-secret"})
+    assert "the-real-secret" not in resp.text
+    assert "DATABASE_URL" not in resp.text
+    assert "SECRET_KEY" not in resp.text
