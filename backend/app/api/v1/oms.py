@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 
 from app.api.deps import require_roles
-from app.models.user import UserRole
+from app.core.roles import PLANNING_ROLES
 from app.schemas.oms import OMSRunResult
 from app.oms_core import storage
 from app.oms_core.oms_engine import run as run_oms_cycle
@@ -13,7 +13,10 @@ from starlette.concurrency import run_in_threadpool
 router = APIRouter(prefix="/api/v1/oms", tags=["oms"])
 logger = logging.getLogger(__name__)
 
-ALLOWED_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER)
+# OMS Engine batch upload/download is master-data-adjacent (it ingests the same
+# master workbook this system's Masters UI now edits directly) -- Planning-only,
+# per the OMS Roles & Responsibilities spec's "Master-data administration" line.
+ALLOWED_ROLES = PLANNING_ROLES
 
 
 def _safe_name(filename: str) -> str:

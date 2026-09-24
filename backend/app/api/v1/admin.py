@@ -1,10 +1,11 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
-from app.models.user import User, UserRole
+from app.core.roles import QUALITY_OVERSIGHT_ROLES
+from app.models.user import User
 from app.models.order import Customer, Part
 from app.models.audit import AuditLog
 
@@ -25,8 +26,11 @@ class CustomerOut(BaseModel):
 class PartOut(BaseModel):
     id: str
     part_number: str
-    grade: str
-    description: str
+    # The imported VSPL Part Master legitimately leaves grade/description blank for
+    # parts whose source Excel row had no unambiguous value (see scripts/
+    # import_part_master.py) -- these are not invented defaults, so both stay optional.
+    grade: Optional[str] = None
+    description: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -60,7 +64,9 @@ def list_customers(db: Session = Depends(get_db), user: User = Depends(get_curre
 
 @router.get("/parts", response_model=List[PartOut])
 def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.query(Part).order_by(Part.part_number).limit(5000).all()
+    # Cap raised past the real, imported VSPL Part Master count (~6,200) -- 5000 was
+    # silently truncating the list before every part existed in this table.
+    return db.query(Part).order_by(Part.part_number).limit(20000).all()
 
 @router.get("/machines", response_model=List[MachineOut])
 def list_machines(user: User = Depends(get_current_user)):
@@ -78,7 +84,7 @@ def list_machines(user: User = Depends(get_current_user)):
 def list_audit_logs(
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.CEO)),
+    user: User = Depends(require_roles(*QUALITY_OVERSIGHT_ROLES)),
 ):
     logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit).all()
     return [

@@ -11,7 +11,7 @@ from app.models.production_movement import StageWIP
 from app.models.order import Order, Customer
 from app.models.audit import AuditLog
 from app.models.user import User
-from app.core.roles import PLANNING_ROLES, QUALITY_OVERSIGHT_ROLES, MELTING_ENTRY_ROLES
+from app.core.roles import PLANNING_ROLES, QUALITY_APPROVAL_ROLES, MELTING_ENTRY_ROLES
 from app.schemas.rejection import (
     ExcessNonMovingCreate, DispositionCreate, DispositionResponse, DispositionOut,
     RejectionListItem, RejectionDetail, RejectionSourceBlock, RejectionBalance,
@@ -279,7 +279,7 @@ class RejectionService:
         if action in WO_CREATING_ACTIONS:
             _require_role(current_user, PLANNING_ROLES, f"create a '{action}' disposition")
         else:
-            _require_role(current_user, QUALITY_OVERSIGHT_ROLES, f"create a '{action}' disposition")
+            _require_role(current_user, QUALITY_APPROVAL_ROLES, f"create a '{action}' disposition")
 
         record = db.query(NCRecord).filter(NCRecord.nc_number == req.nc_number.strip()).with_for_update().first()
         if not record:
@@ -534,7 +534,7 @@ class RejectionService:
     def record_melting_entry(db: Session, req: MeltingEntryCreate, current_user: Optional[User] = None) -> MeltingEntryResponse:
         """Physical-handling fulfillment of an already-decided SCRAP disposition: record
         that its material was actually sent for melting. This never re-decides or
-        re-authorizes the disposition -- it only executes what a QUALITY_OVERSIGHT_ROLES
+        re-authorizes the disposition -- it only executes what a QUALITY_APPROVAL_ROLES
         user already approved via create_disposition(action="SCRAP")."""
         _require_role(current_user, MELTING_ENTRY_ROLES, "record a melting entry")
 

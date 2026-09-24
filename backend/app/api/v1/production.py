@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.models.production_movement import ProductionMovement
 from app.schemas.production import (
     MovePartsRequest, MovementResponse, MovementListItem,
@@ -13,7 +13,7 @@ from app.schemas.production import (
 from app.services.production_service import ProductionService
 from app.services.work_order_service import WorkOrderService
 from app.services.oms_integration_service import OMSIntegrationService
-from app.core.roles import PRODUCTION_ENTRY_ROLES
+from app.core.roles import PRODUCTION_ENTRY_ROLES, MATERIAL_MOVEMENT_ROLES
 
 router = APIRouter(prefix="/api/v1/production", tags=["production"])
 
@@ -30,7 +30,7 @@ def record_stage_production(
 def move_parts(
     payload: MovePartsRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    user: User = Depends(require_roles(*MATERIAL_MOVEMENT_ROLES))
 ):
     """Execute physical part movement between manufacturing stages with strict route, idempotency, and OMS WIP validation."""
     return ProductionService.move_parts(db, payload, current_user=user)

@@ -62,6 +62,7 @@ def seed_database_if_empty(db: Session):
         ("operator.f1@vspl.com", "oper123", "Devanand (Foundry)", UserRole.MACHINE_OPERATOR, "OP-F1"),
         ("operator.f2@vspl.com", "oper123", "Manjunath (CNC)", UserRole.MACHINE_OPERATOR, "OP-F2"),
         ("store@vspl.com", "store123", "Krishna Murthy (Store)", UserRole.STORE, "STR-001"),
+        ("analyst@vspl.com", "analyst123", "Data Analyst (Read-Only)", UserRole.DATA_ANALYST, "DAT-001"),
     ]
 
     # Only create accounts that don't exist yet. Never overwrite an existing user's

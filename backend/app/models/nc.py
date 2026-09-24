@@ -1,8 +1,27 @@
+import re
 import uuid
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Session, relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, GUID
+
+_NC_NUMBER_RE = re.compile(r"^NC-(\d+)$")
+
+
+def next_nc_number(db: Session) -> str:
+    """Collision-resistant NC number generation. A plain COUNT(*)+1 formula (the
+    original scheme here, and the one OAR/WO numbering elsewhere in this codebase
+    still use) drifts out of sync with the highest number actually in use once a
+    database accumulates rows from multiple sessions/imports/non-sequential sources
+    (e.g. a directly-inserted test fixture) -- this instead finds the true highest
+    'NC-#####' suffix in use and continues from there, ignoring any row whose
+    nc_number doesn't match that format rather than crashing on it."""
+    highest = 0
+    for (nc_number,) in db.query(NCRecord.nc_number).all():
+        m = _NC_NUMBER_RE.match(nc_number or "")
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"NC-{highest + 1:05d}"
 
 class NCRecord(Base):
     __tablename__ = "nc_records"

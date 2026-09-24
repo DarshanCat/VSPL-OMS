@@ -2,7 +2,8 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
+from app.core.roles import PACKING_ROLES
 from app.models.user import User
 from app.schemas.packing import PackingQueueItem, PackingUpdateRequest, PackingUpdateResponse
 from app.services.packing_service import PackingService
@@ -21,7 +22,7 @@ def get_packing_queue(
 def update_packing(
     payload: PackingUpdateRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    user: User = Depends(require_roles(*PACKING_ROLES))
 ):
     """Record completed packing / BSR quantities and make them available for dispatch."""
     return PackingService.update_packing(db, payload, current_user=user)

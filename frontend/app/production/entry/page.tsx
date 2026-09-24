@@ -305,6 +305,9 @@ export default function ProductionEntryPage() {
     rejected_qty: 0,
     in_process_qty: woData?.physical_wo_qty ?? 0,
     available_wip: woData?.available_wip ?? 0,
+    already_moved_qty: 0,
+    not_yet_produced: woData?.physical_wo_qty ?? 0,
+    remaining_to_produce: woData?.physical_wo_qty ?? 0,
     stage_status: "In-Progress"
   };
 
@@ -501,37 +504,44 @@ export default function ProductionEntryPage() {
 
                   <div className="mt-5 space-y-3.5 text-xs">
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
-                      <span className="text-zinc-500 font-semibold">Target Qty (OMS):</span>
+                      <span className="text-zinc-500 font-semibold">Target / Required:</span>
                       <span className="font-mono font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">
                         {activeStage.target_qty} pcs
                       </span>
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">OK Completed:</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">OK Produced:</span>
                       <span className="font-mono font-extrabold text-emerald-600 text-sm">
                         {activeStage.ok_completed_qty} pcs
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800">
-                      <span className="text-amber-700 dark:text-amber-400 font-bold">Remaining Target:</span>
-                      <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">
-                        {activeStage.in_process_qty} pcs
-                      </span>
-                    </div>
-
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
-                      <span className="text-rose-600 dark:text-rose-400 font-semibold">Rejections (Scrap):</span>
+                      <span className="text-rose-600 dark:text-rose-400 font-semibold">Rejected:</span>
                       <span className="font-mono font-extrabold text-rose-600 text-sm">
                         {activeStage.rejected_qty} pcs
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-100/50 dark:bg-emerald-900/30 border border-emerald-300 dark:border-emerald-800">
-                      <span className="text-emerald-800 dark:text-emerald-200 font-bold">Available Live WIP:</span>
-                      <span className="font-mono font-extrabold text-emerald-700 dark:text-emerald-300 text-base">
-                        {activeStage.available_wip} pcs
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-300 dark:border-blue-800">
+                      <span className="text-blue-700 dark:text-blue-400 font-bold">In Process / WIP:</span>
+                      <span className="font-mono font-extrabold text-blue-700 dark:text-blue-400 text-sm">
+                        {activeStage.already_moved_qty} pcs
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
+                      <span className="text-zinc-500 font-semibold">Not Yet Produced:</span>
+                      <span className="font-mono font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">
+                        {activeStage.not_yet_produced} pcs
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800">
+                      <span className="text-amber-700 dark:text-amber-400 font-bold">Remaining to Produce:</span>
+                      <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">
+                        {activeStage.remaining_to_produce} pcs
                       </span>
                     </div>
                   </div>
@@ -542,7 +552,7 @@ export default function ProductionEntryPage() {
                     <ShieldCheck className="h-4 w-4" />
                     <span>Target Qty is Read-Only</span>
                   </div>
-                  <p>Target quantity is mathematically derived from OMS yield algorithms. Operators log completed units and scrap.</p>
+                  <p>Target quantity is mathematically derived from OMS yield algorithms. "Not Yet Produced" / "Remaining to Produce" is Target minus cumulative OK Produced. The physically unprocessed material actually available to convert right now at this stage is {activeStage.in_process_qty} pcs — that is the backend-enforced ceiling for your next entry below.</p>
                 </div>
               </div>
 
@@ -583,7 +593,7 @@ export default function ProductionEntryPage() {
                         required
                       />
                       <span className="text-[10px] text-zinc-400 mt-1 block">
-                        Fresh pieces completed in this transaction only — not the cumulative total. Remaining target: {activeStage.in_process_qty} pcs.
+                        Fresh pieces completed in this transaction only — not the cumulative total. Physically unprocessed material available to convert now: {activeStage.in_process_qty} pcs.
                       </span>
                     </div>
 

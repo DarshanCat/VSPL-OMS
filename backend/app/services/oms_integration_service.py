@@ -359,6 +359,13 @@ class OMSIntegrationService:
         # just exposing an existing relationship (onhand_qty = max(ok_qty - next stage's
         # ent_qty, 0), so ok_qty - onhand_qty is exactly what has moved on).
         already_moved_qty = max(ok_qty - onhand_qty, 0)
+        # Production-planning view (Target vs. cumulative OK), distinct from inproc_qty
+        # (the physical unprocessed-material ceiling above). These can legitimately
+        # differ once anything has been rejected: e.g. Target=10, 2 rejected, 5 OK ->
+        # inproc_qty = 10-5-2 = 3 pieces of raw material still physically convertible,
+        # while "Not Yet Produced" = 10-5 = 5 against the original target. Both are
+        # real, correct answers to different questions -- not an inconsistency.
+        not_yet_produced = max(target_qty - ok_qty, 0)
         rag = route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty)
         next_stage = OMSIntegrationService.get_next_stage(db, wo, matched or stage_name)
 
@@ -372,6 +379,8 @@ class OMSIntegrationService:
             "on_hand_qty": onhand_qty,
             "available_wip": avail_wip,
             "already_moved_qty": already_moved_qty,
+            "not_yet_produced": not_yet_produced,
+            "remaining_to_produce": not_yet_produced,
             "stage_status": rag,
             "is_current_stage": (wo.current_stage == (matched or stage_name)),
             "next_stage": next_stage

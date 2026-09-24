@@ -158,7 +158,7 @@ def get_work_order_kpis(
     return WOKPIResponse(
         wo_number=wo.wo_number,
         part_number=part.part_number if part else "N/A",
-        part_grade=part.grade if part else "DEFAULT",
+        part_grade=part.grade if (part and part.grade) else "DEFAULT",
         physical_wo_qty=wo.physical_wo_qty,
         current_stage=wo.current_stage or "F1",
         overall_yield_pct=overall_y,

@@ -8,7 +8,7 @@ from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.packing import PackingRecord
-from app.models.nc import NCRecord
+from app.models.nc import NCRecord, next_nc_number
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.production import (
@@ -254,8 +254,7 @@ class ProductionService:
 
         # 10. Record NC if rejected
         if req.rejected_quantity > 0:
-            nc_count = db.query(NCRecord).count()
-            nc_num = f"NC-{nc_count + 1:05d}"
+            nc_num = next_nc_number(db)
             nc_record = NCRecord(
                 nc_number=nc_num,
                 work_order_id=wo.id,
@@ -455,8 +454,7 @@ class ProductionService:
 
         # Log NC if rejected
         if req.rejected_quantity > 0:
-            nc_count = db.query(NCRecord).count()
-            nc_num = f"NC-{nc_count + 1:05d}"
+            nc_num = next_nc_number(db)
             nc_record = NCRecord(
                 nc_number=nc_num,
                 work_order_id=wo.id,
