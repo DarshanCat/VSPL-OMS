@@ -12,11 +12,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   Boxes,
-  RotateCw
+  RotateCw,
+  Plus,
+  X
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
-import { getOarList, OARListItem } from "@/lib/api";
+import { getOarList, OARListItem, createReplacement, ReplacementResult } from "@/lib/api";
 
 export default function OarWoListPage() {
   const [search, setSearch] = useState("");
@@ -25,6 +27,16 @@ export default function OarWoListPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Patch / Replacement WO modal state
+  const [patchModalOar, setPatchModalOar] = useState<OARListItem | null>(null);
+  const [selectedSourceWo, setSelectedSourceWo] = useState<string>("");
+  const [patchQty, setPatchQty] = useState<number | "">(1);
+  const [patchReason, setPatchReason] = useState<string>("Replacement for shortfall / scrap during production");
+  const [patchRemarks, setPatchRemarks] = useState<string>("");
+  const [patchSubmitting, setPatchSubmitting] = useState<boolean>(false);
+  const [patchError, setPatchError] = useState<string>("");
+  const [patchSuccess, setPatchSuccess] = useState<ReplacementResult | null>(null);
 
   const fetchOars = useCallback(async (searchTerm: string, status: string) => {
     setLoading(true);
@@ -50,6 +62,57 @@ export default function OarWoListPage() {
 
   const toggleExpand = (oarNumber: string) => {
     setExpanded((prev) => ({ ...prev, [oarNumber]: !prev[oarNumber] }));
+  };
+
+  const handleOpenPatchModal = (oar: OARListItem) => {
+    setPatchModalOar(oar);
+    const defaultSource = oar.work_orders.find((w) => w.wo_type === "ORIGINAL") || oar.work_orders[0];
+    setSelectedSourceWo(defaultSource ? defaultSource.wo_number : "");
+    setPatchQty(oar.oar_shortfall);
+    setPatchReason("Replacement for shortfall / scrap during production");
+    setPatchRemarks("");
+    setPatchError("");
+    setPatchSuccess(null);
+  };
+
+  const handleCreatePatchWO = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!patchModalOar) return;
+    setPatchError("");
+    setPatchSuccess(null);
+
+    const qty = Number(patchQty);
+    if (!qty || qty <= 0) {
+      setPatchError("Patch WO quantity must be greater than 0.");
+      return;
+    }
+    if (qty > patchModalOar.oar_shortfall) {
+      setPatchError(`Patch WO quantity cannot exceed the authoritative shortfall of ${patchModalOar.oar_shortfall} pcs.`);
+      return;
+    }
+    if (!patchReason.trim()) {
+      setPatchError("Reason is mandatory.");
+      return;
+    }
+
+    setPatchSubmitting(true);
+    try {
+      const res = await createReplacement({
+        oar_number: patchModalOar.oar_number,
+        source_wo_number: selectedSourceWo || undefined,
+        quantity: qty,
+        reason: patchReason.trim(),
+        remarks: patchRemarks.trim() || undefined,
+      });
+
+      setPatchSuccess(res);
+      // Re-fetch OAR list in background to immediately update genealogy
+      fetchOars(search, statusFilter);
+    } catch (err: any) {
+      setPatchError(err?.response?.data?.detail || "Failed to create Patch Work Order.");
+    } finally {
+      setPatchSubmitting(false);
+    }
   };
 
   return (
@@ -271,13 +334,27 @@ export default function OarWoListPage() {
 
                             {/* WO-level genealogy table */}
                             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-xs">
-                              <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex items-center justify-between">
-                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                                  Work Order Genealogy Breakdown
-                                </span>
-                                <span className="text-[10px] text-zinc-400 font-mono">
-                                  {oar.work_orders.length} Work Order{oar.work_orders.length === 1 ? "" : "s"} linked to {oar.oar_number}
-                                </span>
+                              <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                                    Work Order Genealogy Breakdown
+                                  </span>
+                                  <span className="text-[10px] text-zinc-400 font-mono">
+                                    ({oar.work_orders.length} Work Order{oar.work_orders.length === 1 ? "" : "s"} linked to {oar.oar_number})
+                                  </span>
+                                </div>
+
+                                {oar.oar_shortfall > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenPatchModal(oar)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                                    title={`Create Patch/Replacement WO for shortfall of ${oar.oar_shortfall} pcs`}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>+ Create Patch WO</span>
+                                  </button>
+                                )}
                               </div>
 
                               {oar.work_orders.length === 0 ? (
@@ -302,7 +379,7 @@ export default function OarWoListPage() {
                                         <th className="py-2 px-2.5">Release Status</th>
                                         <th className="py-2 px-2.5">WO Status</th>
                                         <th className="py-2 px-2.5 text-right">Dispatched</th>
-                                        <th className="py-2 px-2.5"></th>
+                                        <th className="py-2 px-2.5 text-right">Actions</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
@@ -362,14 +439,25 @@ export default function OarWoListPage() {
                                           <td className="py-2 px-2.5 text-right font-mono font-semibold text-zinc-600 dark:text-zinc-400">
                                             {wo.dispatched_qty}
                                           </td>
-                                          <td className="py-2 px-2.5">
-                                            <Link
-                                              href={`/production/tracking?wo=${wo.wo_number}`}
-                                              className="inline-flex items-center gap-1 text-blue-600 hover:underline font-bold text-[10px]"
-                                            >
-                                              <span>Detail</span>
-                                              <ArrowRight className="h-2.5 w-2.5" />
-                                            </Link>
+                                          <td className="py-2 px-2.5 text-right">
+                                            <div className="flex items-center justify-end gap-2">
+                                              {wo.release_status !== "RELEASED" && (
+                                                <Link
+                                                  href="/planning/wo-release"
+                                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 hover:text-purple-700 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800"
+                                                >
+                                                  <span>Release</span>
+                                                  <ArrowRight className="h-2.5 w-2.5" />
+                                                </Link>
+                                              )}
+                                              <Link
+                                                href={`/production/tracking?wo=${wo.wo_number}`}
+                                                className="inline-flex items-center gap-1 text-blue-600 hover:underline font-bold text-[10px]"
+                                              >
+                                                <span>Detail</span>
+                                                <ArrowRight className="h-2.5 w-2.5" />
+                                              </Link>
+                                            </div>
                                           </td>
                                         </tr>
                                       ))}
@@ -399,8 +487,200 @@ export default function OarWoListPage() {
             </table>
           </div>
         </div>
+
+        {/* Create Patch / Replacement WO Modal */}
+        {patchModalOar && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50 dark:bg-zinc-950/60">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-600">
+                    <Plus className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      Create Patch / Replacement WO
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Authoritative shortfall recovery against OAR {patchModalOar.oar_number}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPatchModalOar(null)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {patchSuccess ? (
+                <div className="p-6 space-y-4">
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-xs">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>Patch Work Order Created Successfully</span>
+                    </div>
+                    <p className="text-xs text-zinc-700 dark:text-zinc-300">
+                      Patch WO <strong className="font-mono text-purple-600">{patchSuccess.replacement_wo_number}</strong> ({patchSuccess.quantity} pcs) was created as <span className="font-semibold text-amber-600">DRAFT / Unreleased</span> against OAR <strong className="font-mono">{patchSuccess.oar_number}</strong>.
+                    </p>
+                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400 bg-white/70 dark:bg-zinc-900/70 p-2.5 rounded-lg border border-emerald-500/20 space-y-1">
+                      <div className="font-semibold text-zinc-700 dark:text-zinc-300">Required Release Workflow:</div>
+                      <div>1. Engineering Readiness &amp; Release</div>
+                      <div>2. Manufacturing Readiness &amp; Release</div>
+                      <div>3. WO Release &amp; Route Configuration</div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPatchModalOar(null)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Close
+                    </button>
+                    <Link
+                      href="/planning/wo-release"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm transition-colors"
+                    >
+                      <span>Proceed to WO Release</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleCreatePatchWO} className="p-6 space-y-4">
+                  {patchError && (
+                    <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-600 font-medium">
+                      {patchError}
+                    </div>
+                  )}
+
+                  {/* OAR Context Cards */}
+                  <div className="grid grid-cols-3 gap-2 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded-xl border border-zinc-200 dark:border-zinc-800 text-center">
+                    <div>
+                      <div className="text-[10px] text-zinc-400 font-bold uppercase">Required Qty</div>
+                      <div className="text-sm font-mono font-extrabold text-zinc-900 dark:text-zinc-100">
+                        {patchModalOar.oar_qty} <span className="text-[10px] text-zinc-400">pcs</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-emerald-600 font-bold uppercase">Fulfilled</div>
+                      <div className="text-sm font-mono font-extrabold text-emerald-600">
+                        {patchModalOar.oar_fulfilled} <span className="text-[10px] text-zinc-400">pcs</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-rose-500 font-bold uppercase">Shortfall</div>
+                      <div className="text-sm font-mono font-extrabold text-rose-600">
+                        {patchModalOar.oar_shortfall} <span className="text-[10px] text-zinc-400">pcs</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Source Work Order
+                      </label>
+                      <select
+                        value={selectedSourceWo}
+                        onChange={(e) => setSelectedSourceWo(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 font-mono focus:border-purple-500 focus:outline-none"
+                      >
+                        {patchModalOar.work_orders.map((w) => (
+                          <option key={w.wo_number} value={w.wo_number}>
+                            {w.wo_number} ({w.wo_type} - Qty: {w.allocated_qty}, Good: {w.good_qty}, Rej: {w.rejected_qty})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Patch WO Quantity <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={1}
+                          max={patchModalOar.oar_shortfall}
+                          value={patchQty}
+                          onChange={(e) => setPatchQty(e.target.value === "" ? "" : Number(e.target.value))}
+                          required
+                          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:border-purple-500 focus:outline-none"
+                        />
+                        <span className="absolute right-3 top-2 text-[10px] text-zinc-400 font-medium">
+                          Max: {patchModalOar.oar_shortfall} pcs
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Reason <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={patchReason}
+                        onChange={(e) => setPatchReason(e.target.value)}
+                        required
+                        placeholder="Reason for raising replacement/patch WO..."
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-purple-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Remarks (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={patchRemarks}
+                        onChange={(e) => setPatchRemarks(e.target.value)}
+                        placeholder="Additional notes..."
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-purple-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setPatchModalOar(null)}
+                      disabled={patchSubmitting}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={patchSubmitting}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {patchSubmitting ? (
+                        <>
+                          <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Creating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Create Patch WO</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );
 }
+
 

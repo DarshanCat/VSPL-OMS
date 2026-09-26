@@ -138,10 +138,10 @@ export async function manufacturingReleaseWorkOrder(woNumber: string, payload?: 
   return data;
 }
 
-// Rejection Tracking: Replacement Required
+// Rejection Tracking & OAR Shortfall: Replacement / Patch WO Required
 export interface ReplacementResult {
   success: boolean;
-  nc_number: string;
+  nc_number?: string;
   replacement_wo_number: string;
   original_wo_number: string;
   oar_number: string;
@@ -150,7 +150,14 @@ export interface ReplacementResult {
   message: string;
 }
 
-export async function createReplacement(payload: { nc_number: string; quantity: number; reason: string; remarks?: string }): Promise<ReplacementResult> {
+export async function createReplacement(payload: {
+  nc_number?: string;
+  oar_number?: string;
+  source_wo_number?: string;
+  quantity: number;
+  reason: string;
+  remarks?: string;
+}): Promise<ReplacementResult> {
   const { data } = await api.post("/api/v1/rejection/replacement", payload);
   return data;
 }

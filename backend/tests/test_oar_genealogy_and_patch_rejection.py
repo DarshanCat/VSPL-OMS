@@ -439,3 +439,179 @@ def test_oar_genealogy_rest_api_endpoint(client: TestClient, auth_headers, test_
     assert "wo_type" in wo_item
     assert "final_good_contribution" in wo_item
     assert "rejected_qty" in wo_item
+
+
+def test_create_patch_wo_directly_from_oar_and_release_chain(client: TestClient, test_db: Session):
+    """Verifies creating a Patch WO directly from an OAR with shortfall,
+    verifying it is created as DRAFT/unreleased, enforcing the release gate,
+    releasing it through Engineering -> Manufacturing -> WO Release,
+    and recording production on the Patch WO."""
+    planner_headers = _auth(test_db, 'planner@vspl.com', UserRole.PLANNER)
+    eng_headers = _auth(test_db, 'eng@vspl.com', UserRole.ENGINEERING)
+    mfg_headers = _auth(test_db, 'mfg@vspl.com', UserRole.MANUFACTURING)
+    floor_headers = _auth(test_db, 'operator@vspl.com', UserRole.OPERATOR)
+
+    cust = Customer(customer_code="CUST-PATCH-TEST", name="Patch Test Customer", is_active=True)
+    part = Part(part_number="PART-PATCH-01", description="Patch Part", grade="SS304")
+    test_db.add_all([cust, part])
+    test_db.flush()
+
+    order = Order(
+        oar_number="OAR-PATCH-001",
+        customer_id=cust.id,
+        part_id=part.id,
+        customer_po="PO-PATCH-001",
+        po_qty=5,
+        max_batch_size=5,
+        status=OrderStatus.ACCEPT,
+        delivery_date=date.today()
+    )
+    test_db.add(order)
+    test_db.flush()
+
+    orig_wo = WorkOrder(
+        wo_number="WO-PATCH-ORIG",
+        order_id=order.id,
+        physical_wo_qty=5,
+        current_stage="F1",
+        projected_final_good=5,
+        status=WOStatus.IN_PRODUCTION,
+        is_replacement=False,
+        released_by="Planner",
+        release_date=datetime.now(),
+        engineering_released_at=datetime.now(),
+        manufacturing_released_at=datetime.now()
+    )
+    test_db.add(orig_wo)
+    test_db.flush()
+
+    route = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+    for seq, stg in enumerate(route, 1):
+        test_db.add(WORoute(work_order_id=orig_wo.id, stage=stg, sequence=seq, stage_target_qty=5))
+    test_db.add(StageWIP(
+        work_order_id=orig_wo.id, stage="F1", ent_qty=5, ok_qty=0, inproc_qty=5, onhand_qty=0, rejected_qty=0, available_wip=5
+    ))
+    test_db.commit()
+
+    # Step 1: Record production on original WO at F1: Good = 2, Rejected = 3
+    prod_resp = client.post(
+        "/api/v1/production/entry",
+        headers=floor_headers,
+        json={
+            "wo_number": "WO-PATCH-ORIG",
+            "stage": "F1",
+            "good_qty": 2,
+            "rejected_quantity": 3,
+            "defect_code": "DEF-POROSITY",
+            "remarks": "F1 trial scrap 3 pieces"
+        }
+    )
+    assert prod_resp.status_code == 200
+
+    # Verify OAR state: Shortfall = 3 (or 5 before terminal completion)
+    oar_resp = client.get(f"/api/v1/operations/oars/{order.oar_number}/genealogy", headers=planner_headers)
+    assert oar_resp.status_code == 200
+    assert oar_resp.json()["total_produced"] == 5
+    assert oar_resp.json()["total_good"] == 2
+    assert oar_resp.json()["total_rejected"] == 3
+    shortfall = oar_resp.json()["oar_shortfall"]
+    assert shortfall >= 3
+
+    # Step 2: Create Patch WO via /api/v1/rejection/replacement using oar_number
+    patch_resp = client.post(
+        "/api/v1/rejection/replacement",
+        headers=planner_headers,
+        json={
+            "oar_number": order.oar_number,
+            "source_wo_number": orig_wo.wo_number,
+            "quantity": 3,
+            "reason": "Replacement for F1 rejections",
+            "remarks": "Created from OAR genealogy shortfall action"
+        }
+    )
+    assert patch_resp.status_code == 200
+    patch_data = patch_resp.json()
+    patch_wo_num = patch_data["replacement_wo_number"]
+    assert patch_data["quantity"] == 3
+    assert patch_data["original_wo_number"] == "WO-PATCH-ORIG"
+    assert patch_data["oar_number"] == order.oar_number
+
+    # Step 3: Verify Patch WO is DRAFT / unreleased
+    patch_wo = test_db.query(WorkOrder).filter(WorkOrder.wo_number == patch_wo_num).first()
+    assert patch_wo is not None
+    assert patch_wo.is_replacement is True
+    assert patch_wo.physical_wo_qty == 3
+    assert patch_wo.release_date is None
+    assert patch_wo.released_by is None
+    assert patch_wo.engineering_released_at is None
+    assert patch_wo.manufacturing_released_at is None
+
+    # Step 4: Attempting production before release must fail
+    blocked_prod = client.post(
+        "/api/v1/production/entry",
+        headers=floor_headers,
+        json={
+            "wo_number": patch_wo_num,
+            "stage": "F1",
+            "good_qty": 3,
+            "rejected_quantity": 0
+        }
+    )
+    assert blocked_prod.status_code == 400
+    assert "blocked pending Engineering Release" in blocked_prod.json()["detail"]
+
+    # Step 5: Engineering Release
+    eng_res = client.post(
+        f"/api/v1/operations/wo/{patch_wo_num}/engineering-release",
+        headers=eng_headers,
+        json={"remarks": "Engineering drawing approved"}
+    )
+    assert eng_res.status_code == 200
+
+    # Step 6: Manufacturing Release
+    mfg_res = client.post(
+        f"/api/v1/operations/wo/{patch_wo_num}/manufacturing-release",
+        headers=mfg_headers,
+        json={"remarks": "Tooling and setup verified"}
+    )
+    assert mfg_res.status_code == 200
+
+    # Step 7: WO Release
+    wo_rel_res = client.post(
+        "/api/v1/operations/wo-release",
+        headers=planner_headers,
+        json={
+            "wo_number": patch_wo_num,
+            "physical_wo_qty": 3,
+            "route_stages": ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"],
+            "remarks": "Patch WO Released for floor production"
+        }
+    )
+    assert wo_rel_res.status_code == 200
+
+    # Step 8: Production entry on Patch WO succeeds
+    patch_prod = client.post(
+        "/api/v1/production/entry",
+        headers=floor_headers,
+        json={
+            "wo_number": patch_wo_num,
+            "stage": "F1",
+            "good_qty": 3,
+            "rejected_quantity": 0,
+            "remarks": "Patch WO F1 production completed"
+        }
+    )
+    assert patch_prod.status_code == 200
+
+    # Step 9: Verify genealogy reflects both WOs under same OAR
+    final_gen = client.get(f"/api/v1/operations/oars/{order.oar_number}/genealogy", headers=planner_headers).json()
+    assert final_gen["num_wos"] == 2
+    assert final_gen["num_original_wos"] == 1
+    assert final_gen["num_patch_wos"] == 1
+    assert final_gen["total_produced"] == 8
+    assert final_gen["total_good"] == 5
+    assert final_gen["total_rejected"] == 3
+    assert len(final_gen["work_orders"]) == 2
+    assert final_gen["work_orders"][0]["wo_type"] == "ORIGINAL"
+    assert final_gen["work_orders"][1]["wo_type"] == "PATCH"
+

@@ -13,7 +13,7 @@ from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.order import Order, Customer
 from app.models.audit import AuditLog
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.roles import PLANNING_ROLES, QUALITY_APPROVAL_ROLES, MELTING_ENTRY_ROLES
 from app.schemas.rejection import (
     ExcessNonMovingCreate, DispositionCreate, DispositionResponse, DispositionOut,
@@ -569,29 +569,78 @@ class RejectionService:
         Release -> WO Release chain like any other WO before it can be produced --
         enforced by ProductionService._enforce_release_gate and
         OperationsService.release_work_order via WorkOrder.is_replacement."""
-        _require_role(current_user, QUALITY_APPROVAL_ROLES, "approve a replacement WO")
+        PATCH_WO_ROLES = QUALITY_APPROVAL_ROLES + PLANNING_ROLES + (UserRole.PRODUCTION_MANAGER,)
+        _require_role(current_user, PATCH_WO_ROLES, "approve a replacement / patch WO")
 
-        record = db.query(NCRecord).filter(NCRecord.nc_number == req.nc_number.strip()).with_for_update().first()
-        if not record:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Rejection Tracking record '{req.nc_number}' not found."
-            )
+        record = None
+        remaining = 0
+        original_wo = None
+        order = None
 
-        consumed = _consumed_qty(db, record.id)
-        remaining = record.qty - consumed
-        if req.quantity > remaining:
+        if req.nc_number and req.nc_number.strip():
+            record = db.query(NCRecord).filter(NCRecord.nc_number == req.nc_number.strip()).with_for_update().first()
+            if not record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Rejection Tracking record '{req.nc_number}' not found."
+                )
+
+            consumed = _consumed_qty(db, record.id)
+            remaining = record.qty - consumed
+            if req.quantity > remaining:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot replace {req.quantity} pieces. Only {remaining} pieces remain undispositioned on '{record.nc_number}' (source qty {record.qty}, already consumed {consumed})."
+                )
+
+            original_wo = record.work_order
+            if not original_wo:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not resolve the original Work Order for this record.")
+
+            order = db.query(Order).filter(Order.id == original_wo.order_id).with_for_update().first()
+        elif req.oar_number and req.oar_number.strip():
+            order = db.query(Order).filter(Order.oar_number == req.oar_number.strip()).with_for_update().first()
+            if not order:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Order with OAR number '{req.oar_number}' not found."
+                )
+            if req.source_wo_number and req.source_wo_number.strip():
+                original_wo = db.query(WorkOrder).filter(
+                    WorkOrder.wo_number == req.source_wo_number.strip(),
+                    WorkOrder.order_id == order.id
+                ).first()
+                if not original_wo:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Source Work Order '{req.source_wo_number}' not found for OAR '{req.oar_number}'."
+                    )
+            else:
+                original_wo = next((w for w in order.work_orders if not w.is_replacement), (order.work_orders[0] if order.work_orders else None))
+                if not original_wo:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"No Work Orders found for OAR '{req.oar_number}'."
+                    )
+
+            # Optionally link an open NCRecord from this source WO / OAR if available
+            candidate_ncs = db.query(NCRecord).filter(
+                NCRecord.work_order_id == original_wo.id,
+                NCRecord.status != "Closed"
+            ).order_by(NCRecord.date_raised.desc()).all()
+            for cand in candidate_ncs:
+                cand_consumed = _consumed_qty(db, cand.id)
+                cand_rem = cand.qty - cand_consumed
+                if cand_rem >= req.quantity:
+                    record = cand
+                    remaining = cand_rem
+                    break
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot replace {req.quantity} pieces. Only {remaining} pieces remain undispositioned on '{record.nc_number}' (source qty {record.qty}, already consumed {consumed})."
+                detail="Either 'nc_number' or 'oar_number' must be provided to create a replacement / patch Work Order."
             )
 
-        original_wo = record.work_order
-        if not original_wo:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not resolve the original Work Order for this record.")
-
-        # Atomic lock on the Order to prevent concurrent over-recovery
-        order = db.query(Order).filter(Order.id == original_wo.order_id).with_for_update().first()
         if not order:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Order associated with Work Order not found.")
 
@@ -654,43 +703,56 @@ class RejectionService:
             entry_stage="F1",
             quantity=req.quantity,
             reason=req.reason,
-            planner=current_user.full_name if current_user else "Quality",
-            nc_record_id=record.id
+            planner=current_user.full_name if current_user else "Planning/Quality",
+            nc_record_id=record.id if record else None
         )
         db.add(conv)
         db.flush()
 
-        disposition = RejectionDisposition(
-            nc_record_id=record.id,
-            action="REPLACEMENT",
-            quantity=req.quantity,
-            destination_wo_number=new_wo_num,
-            destination_part_number=original_wo.order.part.part_number if original_wo.order and original_wo.order.part else None,
-            conversion_id=conv.id,
-            authorized_by_id=current_user.id if current_user else None,
-            authorized_by_name=current_user.full_name if current_user else "System",
-            remarks=req.remarks or req.reason
-        )
-        db.add(disposition)
+        if record:
+            disposition = RejectionDisposition(
+                nc_record_id=record.id,
+                action="REPLACEMENT",
+                quantity=req.quantity,
+                destination_wo_number=new_wo_num,
+                destination_part_number=original_wo.order.part.part_number if original_wo.order and original_wo.order.part else None,
+                conversion_id=conv.id,
+                authorized_by_id=current_user.id if current_user else None,
+                authorized_by_name=current_user.full_name if current_user else "System",
+                remarks=req.remarks or req.reason
+            )
+            db.add(disposition)
 
-        new_remaining = remaining - req.quantity
-        if new_remaining <= 0 and record.status != "Closed":
-            record.status = "Closed"
-            record.date_closed = datetime.now()
-        if record.disposition is None:
-            record.disposition = "REPLACEMENT"
+            new_remaining = remaining - req.quantity
+            if new_remaining <= 0 and record.status != "Closed":
+                record.status = "Closed"
+                record.date_closed = datetime.now()
+            if record.disposition is None:
+                record.disposition = "REPLACEMENT"
 
-        audit = AuditLog(
-            user_id=current_user.id if current_user else None,
-            user_name=current_user.full_name if current_user else "System",
-            action="REJECTION_DISPOSITION_REPLACEMENT",
-            entity="NCRecord",
-            entity_id=record.nc_number,
-            old_value=f"Source WO: {original_wo.wo_number}, Remaining before: {remaining}",
-            new_value=f"Replacement WO: {new_wo_num}, Qty: {req.quantity}, Remaining after: {new_remaining}",
-            details=req.reason
-        )
-        db.add(audit)
+            audit = AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "System",
+                action="REJECTION_DISPOSITION_REPLACEMENT",
+                entity="NCRecord",
+                entity_id=record.nc_number,
+                old_value=f"Source WO: {original_wo.wo_number}, Remaining before: {remaining}",
+                new_value=f"Replacement WO: {new_wo_num}, Qty: {req.quantity}, Remaining after: {new_remaining}",
+                details=req.reason
+            )
+            db.add(audit)
+        else:
+            audit = AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "System",
+                action="PATCH_WO_CREATION",
+                entity="WorkOrder",
+                entity_id=new_wo_num,
+                old_value=f"OAR: {order.oar_number}, Shortfall before: {max_recoverable}",
+                new_value=f"Patch WO: {new_wo_num}, Qty: {req.quantity}, Shortfall after: {max(max_recoverable - req.quantity, 0)}",
+                details=req.reason
+            )
+            db.add(audit)
 
         db.commit()
         db.refresh(replacement_wo)
@@ -698,12 +760,12 @@ class RejectionService:
         order = original_wo.order
         return ReplacementResponse(
             success=True,
-            nc_number=record.nc_number,
+            nc_number=record.nc_number if record else "N/A",
             replacement_wo_number=new_wo_num,
             original_wo_number=original_wo.wo_number,
             oar_number=order.oar_number if order else "N/A",
             quantity=req.quantity,
-            remaining_qty=max(new_remaining, 0),
+            remaining_qty=max(max_recoverable - req.quantity, 0),
             message=f"Replacement Work Order '{new_wo_num}' created against OAR "
                     f"'{order.oar_number if order else 'N/A'}' for {req.quantity} pieces "
                     f"(source: {original_wo.wo_number}). It must follow the normal release "

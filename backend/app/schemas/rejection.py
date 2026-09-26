@@ -44,14 +44,16 @@ class RejectionTypeOut(BaseModel):
     updated_at: Optional[datetime] = None
 
 class ReplacementCreate(BaseModel):
-    nc_number: str = Field(..., description="Rejection Tracking record ID e.g. NC-00001")
+    nc_number: Optional[str] = Field(None, description="Rejection Tracking record ID e.g. NC-00001 (optional if oar_number is provided)")
+    oar_number: Optional[str] = Field(None, description="OAR Number e.g. OAR-00001 (optional if nc_number is provided)")
+    source_wo_number: Optional[str] = Field(None, description="Source Work Order Number")
     quantity: int = Field(..., gt=0, le=1_000_000)
     reason: str = Field(..., max_length=2000, description="Mandatory -- why a replacement WO is required")
     remarks: Optional[str] = Field(None, max_length=2000)
 
 class ReplacementResponse(BaseModel):
     success: bool
-    nc_number: str
+    nc_number: Optional[str] = "N/A"
     replacement_wo_number: str
     original_wo_number: str
     oar_number: str
