@@ -16,7 +16,7 @@ class ReportService:
         writer = csv.writer(output)
         
         stages = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
-        writer.writerow(["WO Number", "Customer", "Customer PO", "Part Number", "Current Stage", "Status", "Order Qty"] + stages + ["Total WIP"])
+        writer.writerow(["WO Number", "Customer", "Customer PO", "Part Number", "Delivery Date", "Current Stage", "Status", "Order Qty"] + stages + ["Total WIP"])
 
         active_wos = db.query(WorkOrder).filter(WorkOrder.status.notin_([WOStatus.CLOSED, WOStatus.DISPATCHED])).all()
         for wo in active_wos:
@@ -24,7 +24,10 @@ class ReportService:
             cust = order.customer.name if (order and order.customer) else "N/A"
             po = order.customer_po if order else "N/A"
             part = order.part.part_number if (order and order.part) else "N/A"
-            
+            # Authoritative delivery date from OMS order data -- never invented or
+            # derived from anything else.
+            delivery_date = order.delivery_date.strftime("%Y-%m-%d") if (order and order.delivery_date) else ""
+
             wips = {w.stage.upper(): w.available_wip for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
             if not wips:
                 wips[wo.current_stage.upper()] = wo.physical_wo_qty
@@ -34,6 +37,7 @@ class ReportService:
                 cust,
                 po,
                 part,
+                delivery_date,
                 wo.current_stage,
                 wo.status.value,
                 wo.physical_wo_qty

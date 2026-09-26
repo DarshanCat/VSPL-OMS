@@ -4,11 +4,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
 from app.models.user import User
-from app.models.production_movement import ProductionMovement
+from app.models.production_movement import ProductionMovement, StageWIP
+from app.models.work_order import WORoute
 from app.schemas.production import (
     MovePartsRequest, MovementResponse, MovementListItem,
     RecordStageProductionRequest, ProductionEntryResponse,
-    WIPMatrixResponse, PlantReconciliationResponse
+    WIPMatrixResponse, PlantReconciliationResponse, StageDashboard
 )
 from app.services.production_service import ProductionService
 from app.services.work_order_service import WorkOrderService
@@ -56,6 +57,24 @@ def list_movements(
     for m in movs:
         wo = m.work_order
         part = wo.order.part if (wo and wo.order) else None
+
+        # Live, deterministic context for the FROM stage -- same authoritative
+        # StageWIP/WORoute rows every other screen reads from (no new engine).
+        good_qty = target_qty = wip_qty = yet_to_produce = available_to_move = None
+        if wo:
+            wip = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id, StageWIP.stage == m.from_stage).first()
+            route_rec = db.query(WORoute).filter(WORoute.work_order_id == wo.id, WORoute.stage == m.from_stage).first()
+            if wip:
+                good_qty = wip.ok_qty
+                # WIP = physically-present-but-not-yet-produced material (inproc_qty)
+                # -- distinct from "Yet to Produce" below (see StageDashboard for the
+                # full rationale). Available-to-move (onhand_qty) is a separate figure.
+                wip_qty = wip.inproc_qty
+                available_to_move = wip.onhand_qty
+                target = route_rec.stage_target_qty if route_rec else wo.physical_wo_qty
+                target_qty = target
+                yet_to_produce = max(target - (wip.ok_qty + wip.rejected_qty), 0)
+
         results.append(MovementListItem(
             id=str(m.id),
             movement_id=m.movement_id,
@@ -75,9 +94,24 @@ def list_movements(
             movement_time=m.movement_time,
             remarks=m.remarks,
             created_by_name=m.creator.full_name if m.creator else None,
-            created_at=m.created_at
+            created_at=m.created_at,
+            good_qty=good_qty, target_qty=target_qty, wip_qty=wip_qty,
+            yet_to_produce=yet_to_produce, available_to_move=available_to_move
         ))
     return results
+
+@router.get("/stage-summary", response_model=StageDashboard)
+def get_stage_summary(
+    wo_number: str = Query(..., description="Work Order Number e.g. WO-1001"),
+    stage: str = Query(..., description="Stage e.g. F1, F2, F3, SP, FI"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """The ONE unified production summary -- Target, Produced, Rejected, Good, WIP, Yet
+    to Produce, and Remaining Movable Qty for a WO/stage, deterministically reused from
+    the same authoritative StageWIP/WORoute rows Entry, Move, and Tracking all read
+    from. Not a second quantity engine."""
+    return ProductionService.get_stage_dashboard(db, wo_number, stage)
 
 @router.get("/wip", response_model=WIPMatrixResponse)
 def get_wip_matrix(

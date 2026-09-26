@@ -145,7 +145,7 @@ def test_production_ok_and_rejected_tracked_separately(db_session):
     wo_num = res.wos_created[0]
 
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=40
+        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=40, defect_code="DEF-POROSITY"
     ))
 
     wo = db_session.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first()
@@ -164,7 +164,7 @@ def test_move_blocked_when_zero_movable_wip(db_session):
     ))
     wo_num = res.wos_created[0]
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=50
+        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=50, defect_code="DEF-POROSITY"
     ))
     with pytest.raises(HTTPException):
         ProductionService.move_parts(db_session, MovePartsRequest(
@@ -249,10 +249,10 @@ def test_wo_1004_style_root_cause_scenario(db_session):
     ))
 
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo_a, stage="F1", good_qty=30, rejected_quantity=2
+        wo_number=wo_a, stage="F1", good_qty=30, rejected_quantity=2, defect_code="DEF-POROSITY"
     ))
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo_a, stage="F1", good_qty=20, rejected_quantity=1
+        wo_number=wo_a, stage="F1", good_qty=20, rejected_quantity=1, defect_code="DEF-POROSITY"
     ))
 
     wo = db_session.query(WorkOrder).filter(WorkOrder.wo_number == wo_a).first()

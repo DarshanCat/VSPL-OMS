@@ -14,6 +14,10 @@ from app.models.master_data import (
     POMaster, POLine, ScheduleMaster,
     POStatus, ScheduleStatus, OrderSourceType, OARPOStatus
 )
+from app.models.machine import Machine
+from app.models.shift import Shift
+from app.models.operator import Operator
+from app.models.rejection_type import RejectionType
 
 __all__ = [
     "User",
@@ -45,4 +49,8 @@ __all__ = [
     "ScheduleStatus",
     "OrderSourceType",
     "OARPOStatus",
+    "Machine",
+    "Shift",
+    "Operator",
+    "RejectionType",
 ]

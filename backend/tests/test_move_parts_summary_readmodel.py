@@ -97,7 +97,7 @@ def test_state_b_partial_production(db_session):
 def test_production_plus_rejection_shown_separately(db_session):
     wo = _fresh_wo(db_session, po_qty=100)
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F1", good_qty=50, rejected_quantity=5
+        wo_number=wo, stage="F1", good_qty=50, rejected_quantity=5, defect_code="DEF-POROSITY"
     ))
     s = _state(db_session, wo)
     assert s["ok_completed_qty"] == 50
@@ -172,7 +172,7 @@ def test_state_d_additional_production_after_movement(db_session):
         wo_number=wo, from_stage="F1", to_stage="F2", quantity_moved=50, rejected_quantity=0
     ))
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F1", good_qty=45, rejected_quantity=5
+        wo_number=wo, stage="F1", good_qty=45, rejected_quantity=5, defect_code="DEF-POROSITY"
     ))
     s = _state(db_session, wo)
     assert s["ok_completed_qty"] == 95
@@ -208,7 +208,7 @@ def test_multiple_movements_accumulate_already_moved(db_session):
 def test_rejection_never_counted_as_movable(db_session):
     wo = _fresh_wo(db_session, po_qty=50)
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=50
+        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=50, defect_code="DEF-POROSITY"
     ))
     s = _state(db_session, wo)
     assert s["ok_completed_qty"] == 0
@@ -230,7 +230,7 @@ def test_cross_stage_values_remain_isolated(db_session):
         wo_number=wo, from_stage="F1", to_stage="F2", quantity_moved=100, rejected_quantity=0
     ))
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F2", good_qty=40, rejected_quantity=10
+        wo_number=wo, stage="F2", good_qty=40, rejected_quantity=10, defect_code="DEF-POROSITY"
     ))
 
     f1 = _state(db_session, wo, "F1")
@@ -257,7 +257,7 @@ def test_zero_wip_state_blocks_movement(db_session):
     from fastapi import HTTPException
     wo = _fresh_wo(db_session, po_qty=30)
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=30
+        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=30, defect_code="DEF-POROSITY"
     ))
     s = _state(db_session, wo)
     assert s["available_wip"] == 0

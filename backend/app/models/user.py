@@ -17,6 +17,8 @@ class UserRole(str, enum.Enum):
     STORE = "store"
     SALES = "sales"
     DATA_ANALYST = "data_analyst"
+    ENGINEERING = "engineering"
+    MANUFACTURING = "manufacturing"
 
 class User(Base):
     __tablename__ = "users"

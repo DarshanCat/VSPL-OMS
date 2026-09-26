@@ -28,6 +28,7 @@ from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.nc import NCRecord
+from app.services.seed_service import _seed_default_rejection_types
 
 from app.analytics.math_engine import (
     safe_div,
@@ -77,6 +78,8 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def db_session():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
+    _seed_default_rejection_types(db)
+    db.commit()
 
     # Seed Admin and Operators
     admin = User(

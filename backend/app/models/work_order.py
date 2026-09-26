@@ -37,12 +37,28 @@ class WorkOrder(Base):
     projected_final_good = Column(Integer, default=0)
     shortfall = Column(String, default="No")  # "YES" | "No"
     status = Column(Enum(WOStatus), nullable=False, default=WOStatus.IN_PRODUCTION)
+    # Release chain: OAR -> WO Created -> Engineering Release -> Manufacturing
+    # Release -> WO Released (released_by/release_date below, unchanged) -> Production.
+    # Each is set exactly once, by its own dedicated endpoint -- never inferred from
+    # any other field, and never set automatically by WO creation.
+    engineering_released_by = Column(String, nullable=True)
+    engineering_released_at = Column(DateTime(timezone=True), nullable=True)
+    manufacturing_released_by = Column(String, nullable=True)
+    manufacturing_released_at = Column(DateTime(timezone=True), nullable=True)
     released_by = Column(String, nullable=True)
     release_date = Column(DateTime(timezone=True), nullable=True)
+    # Rejection-replacement WO linkage. A replacement WO is a normal WO in every other
+    # respect (own route/release/production lifecycle) -- these three fields only
+    # record where it came from. The original WO's own history/target is never
+    # modified when a replacement is created.
+    source_wo_id = Column(GUID, ForeignKey("work_orders.id"), nullable=True)
+    is_replacement = Column(Boolean, nullable=False, default=False)
+    replacement_reason = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
 
     order = relationship("Order", back_populates="work_orders")
+    source_wo = relationship("WorkOrder", remote_side=[id], foreign_keys=[source_wo_id])
     routes = relationship("WORoute", back_populates="work_order", cascade="all, delete-orphan", order_by="WORoute.sequence")
     stage_wips = relationship("StageWIP", back_populates="work_order", cascade="all, delete-orphan")
     movements = relationship("ProductionMovement", back_populates="work_order", cascade="all, delete-orphan")

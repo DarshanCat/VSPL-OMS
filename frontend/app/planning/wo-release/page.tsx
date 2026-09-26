@@ -8,10 +8,12 @@ import {
   AlertTriangle,
   ArrowRight,
   Route,
-  Check
+  Check,
+  ClipboardCheck,
+  Wrench
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { getWorkOrders, releaseWorkOrder } from "@/lib/api";
+import { getWorkOrders, releaseWorkOrder, engineeringReleaseWorkOrder, manufacturingReleaseWorkOrder } from "@/lib/api";
 
 const ALL_POSSIBLE_STAGES = [
   { code: "F1", name: "F1 (Centrifugal Casting / Melt)", required: true },
@@ -41,6 +43,37 @@ export default function WOReleasePage() {
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
 
+  // Release chain: Engineering Release -> Manufacturing Release -> WO Release (below).
+  const [chainBusy, setChainBusy] = useState<"engineering" | "manufacturing" | null>(null);
+  const [chainError, setChainError] = useState("");
+  const [chainResult, setChainResult] = useState<{ engineering?: any; manufacturing?: any }>({});
+
+  const handleEngineeringRelease = async () => {
+    setChainError("");
+    setChainBusy("engineering");
+    try {
+      const res = await engineeringReleaseWorkOrder(selectedWO);
+      setChainResult((prev) => ({ ...prev, engineering: res }));
+    } catch (err: any) {
+      setChainError(err?.response?.data?.detail || "Failed to record Engineering Release.");
+    } finally {
+      setChainBusy(null);
+    }
+  };
+
+  const handleManufacturingRelease = async () => {
+    setChainError("");
+    setChainBusy("manufacturing");
+    try {
+      const res = await manufacturingReleaseWorkOrder(selectedWO);
+      setChainResult((prev) => ({ ...prev, manufacturing: res }));
+    } catch (err: any) {
+      setChainError(err?.response?.data?.detail || "Failed to record Manufacturing Release.");
+    } finally {
+      setChainBusy(null);
+    }
+  };
+
   useEffect(() => {
     getWorkOrders()
       .then((data) => {
@@ -56,6 +89,8 @@ export default function WOReleasePage() {
 
   const handleWOSelect = (woNum: string) => {
     setSelectedWO(woNum);
+    setChainResult({});
+    setChainError("");
     const found = wos.find((w) => w.wo_number === woNum);
     if (found) {
       setPhysicalQty(found.physical_wo_qty);
@@ -157,6 +192,42 @@ export default function WOReleasePage() {
             </div>
           </div>
         )}
+
+        {/* Release chain: Engineering Release -> Manufacturing Release -> WO Release */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-3">
+          <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+            Release Chain for <span className="font-mono">{selectedWO}</span>
+          </h3>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Engineering Release &rarr; Manufacturing Release &rarr; WO Release (below) &rarr; Production. Each step is optional for WOs that don&apos;t use this gated flow, but once started, all three are required before production.
+          </p>
+          {chainError && (
+            <div className="flex items-start gap-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{chainError}</span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleEngineeringRelease}
+              disabled={chainBusy !== null || !!chainResult.engineering}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              {chainResult.engineering ? "Engineering Released" : chainBusy === "engineering" ? "Releasing..." : "Engineering Release"}
+            </button>
+            <button
+              type="button"
+              onClick={handleManufacturingRelease}
+              disabled={chainBusy !== null || !!chainResult.manufacturing}
+              className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              {chainResult.manufacturing ? "Manufacturing Released" : chainBusy === "manufacturing" ? "Releasing..." : "Manufacturing Release"}
+            </button>
+          </div>
+        </div>
 
         {/* Form */}
         <form

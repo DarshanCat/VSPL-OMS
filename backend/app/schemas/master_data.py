@@ -104,6 +104,84 @@ class ScheduleOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Machine Master
+# ---------------------------------------------------------------------------
+
+class MachineCreate(BaseModel):
+    machine_code: str = Field(..., max_length=100)
+    machine_name: str = Field(..., max_length=300)
+    department: Optional[str] = Field(None, max_length=200)
+
+
+class MachineUpdate(BaseModel):
+    id: str
+    machine_name: Optional[str] = Field(None, max_length=300)
+    department: Optional[str] = Field(None, max_length=200)
+    is_active: Optional[bool] = None
+
+
+class MachineOut(BaseModel):
+    id: str
+    machine_code: str
+    machine_name: str
+    department: Optional[str] = None
+    is_active: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Shift Master
+# ---------------------------------------------------------------------------
+
+class ShiftCreate(BaseModel):
+    shift_code: str = Field(..., max_length=100)
+    shift_name: str = Field(..., max_length=300)
+    start_time: Optional[str] = Field(None, max_length=20)
+    end_time: Optional[str] = Field(None, max_length=20)
+
+
+class ShiftUpdate(BaseModel):
+    id: str
+    shift_name: Optional[str] = Field(None, max_length=300)
+    start_time: Optional[str] = Field(None, max_length=20)
+    end_time: Optional[str] = Field(None, max_length=20)
+    is_active: Optional[bool] = None
+
+
+class ShiftOut(BaseModel):
+    id: str
+    shift_code: str
+    shift_name: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    is_active: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Operator Master
+# ---------------------------------------------------------------------------
+
+class OperatorCreate(BaseModel):
+    user_id: Optional[str] = Field(None, description="Link to an existing authenticated User, if one exists")
+    employee_code: Optional[str] = Field(None, max_length=100)
+    display_name: str = Field(..., max_length=300)
+
+
+class OperatorUpdate(BaseModel):
+    id: str
+    employee_code: Optional[str] = Field(None, max_length=100)
+    display_name: Optional[str] = Field(None, max_length=300)
+    is_active: Optional[bool] = None
+
+
+class OperatorOut(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    employee_code: Optional[str] = None
+    display_name: str
+    is_active: bool = True
+
+
+# ---------------------------------------------------------------------------
 # PO <-> Schedule Matching
 # ---------------------------------------------------------------------------
 

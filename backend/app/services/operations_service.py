@@ -16,7 +16,8 @@ from app.schemas.operations import (
     OrderIntakeCreate, OrderIntakeResponse,
     WOReleaseCreate, WOReleaseResponse,
     ConversionCreate, ConversionResponse,
-    NCRecordCreate, NCRecordUpdate, NCRecordOut
+    NCRecordCreate, NCRecordUpdate, NCRecordOut,
+    EngineeringReleaseResponse, ManufacturingReleaseResponse
 )
 from app.services.oms_integration_service import (
     OMSIntegrationService,
@@ -226,12 +227,95 @@ class OperationsService:
         )
 
     @staticmethod
+    def engineering_release(db: Session, wo_number: str, current_user: Optional[User] = None) -> EngineeringReleaseResponse:
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).with_for_update().first()
+        if not wo:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
+        if wo.engineering_released_at is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Work Order '{wo.wo_number}' already has Engineering Release "
+                f"(by {wo.engineering_released_by} at {wo.engineering_released_at})."
+            )
+
+        actor = current_user.full_name if current_user else "Engineering"
+        wo.engineering_released_by = actor
+        wo.engineering_released_at = datetime.now()
+
+        db.add(AuditLog(
+            user_id=current_user.id if current_user else None, user_name=actor,
+            action="ENGINEERING_RELEASE", entity="WorkOrder", entity_id=wo.wo_number,
+            new_value=f"Engineering released by {actor} at {wo.engineering_released_at.isoformat()}"
+        ))
+        db.commit()
+        db.refresh(wo)
+
+        return EngineeringReleaseResponse(
+            success=True, wo_number=wo.wo_number,
+            engineering_released_by=wo.engineering_released_by,
+            engineering_released_at=wo.engineering_released_at,
+            message=f"Engineering Release recorded for '{wo.wo_number}'."
+        )
+
+    @staticmethod
+    def manufacturing_release(db: Session, wo_number: str, current_user: Optional[User] = None) -> ManufacturingReleaseResponse:
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).with_for_update().first()
+        if not wo:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
+        if wo.engineering_released_at is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Work Order '{wo.wo_number}' cannot receive Manufacturing Release before Engineering Release."
+            )
+        if wo.manufacturing_released_at is not None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Work Order '{wo.wo_number}' already has Manufacturing Release "
+                f"(by {wo.manufacturing_released_by} at {wo.manufacturing_released_at})."
+            )
+
+        actor = current_user.full_name if current_user else "Manufacturing"
+        wo.manufacturing_released_by = actor
+        wo.manufacturing_released_at = datetime.now()
+
+        db.add(AuditLog(
+            user_id=current_user.id if current_user else None, user_name=actor,
+            action="MANUFACTURING_RELEASE", entity="WorkOrder", entity_id=wo.wo_number,
+            new_value=f"Manufacturing released by {actor} at {wo.manufacturing_released_at.isoformat()}"
+        ))
+        db.commit()
+        db.refresh(wo)
+
+        return ManufacturingReleaseResponse(
+            success=True, wo_number=wo.wo_number,
+            manufacturing_released_by=wo.manufacturing_released_by,
+            manufacturing_released_at=wo.manufacturing_released_at,
+            message=f"Manufacturing Release recorded for '{wo.wo_number}'."
+        )
+
+    @staticmethod
     def release_work_order(db: Session, req: WOReleaseCreate, current_user: Optional[User] = None) -> WOReleaseResponse:
         wo = db.query(WorkOrder).filter(WorkOrder.wo_number == req.wo_number.strip()).with_for_update().first()
         if not wo:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Work Order '{req.wo_number}' not found."
+            )
+
+        # WO Released is the last step of the release chain (Engineering Release ->
+        # Manufacturing Release -> WO Released). Backward-compatible activation for
+        # ORDINARY WOs: this only applies once a WO has actually entered the new
+        # release-gated flow (Engineering Release recorded) -- a WO that never uses it
+        # (the existing intake-and-release flow) is completely unaffected. Replacement
+        # WOs are the one exception: they ALWAYS require the full chain (see
+        # RejectionService.create_replacement, which never sets these fields itself).
+        if (wo.is_replacement or wo.engineering_released_at is not None) and (
+            wo.engineering_released_at is None or wo.manufacturing_released_at is None
+        ):
+            missing = "Engineering Release" if wo.engineering_released_at is None else "Manufacturing Release"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' cannot be released until {missing} is complete."
             )
 
         stages = [s.strip().upper() for s in req.route_stages if s.strip()]

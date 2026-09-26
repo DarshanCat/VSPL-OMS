@@ -59,16 +59,22 @@ def _stage_state(client, headers, wo, stage):
 
 
 def _produce(client, headers, wo, stage, good, rejected=0):
+    payload = {"wo_number": wo, "stage": stage, "good_qty": good, "rejected_quantity": rejected}
+    if rejected > 0:
+        payload["defect_code"] = "DEF-POROSITY"
     return client.post(
         "/api/v1/production/entry", headers=headers,
-        json={"wo_number": wo, "stage": stage, "good_qty": good, "rejected_quantity": rejected},
+        json=payload,
     )
 
 
 def _move(client, headers, wo, from_stage, to_stage, qty, rejected=0):
+    payload = {"wo_number": wo, "from_stage": from_stage, "to_stage": to_stage, "quantity_moved": qty, "rejected_quantity": rejected}
+    if rejected > 0:
+        payload["defect_code"] = "DEF-POROSITY"
     return client.post(
         "/api/v1/production/move", headers=headers,
-        json={"wo_number": wo, "from_stage": from_stage, "to_stage": to_stage, "quantity_moved": qty, "rejected_quantity": rejected},
+        json=payload,
     )
 
 

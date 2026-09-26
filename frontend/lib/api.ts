@@ -117,6 +117,167 @@ export async function setUserStatus(userId: string, isActive: boolean): Promise<
   return data;
 }
 
+// Release chain: Engineering Release -> Manufacturing Release -> WO Release -> Production
+export async function engineeringReleaseWorkOrder(woNumber: string) {
+  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/engineering-release`);
+  return data;
+}
+
+export async function manufacturingReleaseWorkOrder(woNumber: string) {
+  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/manufacturing-release`);
+  return data;
+}
+
+// Rejection Tracking: Replacement Required
+export interface ReplacementResult {
+  success: boolean;
+  nc_number: string;
+  replacement_wo_number: string;
+  original_wo_number: string;
+  oar_number: string;
+  quantity: number;
+  remaining_qty: number;
+  message: string;
+}
+
+export async function createReplacement(payload: { nc_number: string; quantity: number; reason: string; remarks?: string }): Promise<ReplacementResult> {
+  const { data } = await api.post("/api/v1/rejection/replacement", payload);
+  return data;
+}
+
+// Unified production stage summary (Target / Produced / Rejected / Good / WIP / Yet to Produce / Remaining Movable)
+export interface StageDashboard {
+  wo_number: string;
+  stage: string;
+  target_qty: number;
+  total_produced: number;
+  total_rejected: number;
+  total_good: number;
+  wip_qty: number;
+  yet_to_produce: number;
+  remaining_movable_qty: number;
+}
+
+export async function getStageSummary(woNumber: string, stage: string): Promise<StageDashboard> {
+  const { data } = await api.get("/api/v1/production/stage-summary", { params: { wo_number: woNumber, stage } });
+  return data;
+}
+
+// Master Data -- Machine
+export interface MasterMachine {
+  id: string;
+  machine_code: string;
+  machine_name: string;
+  department?: string | null;
+  is_active: boolean;
+}
+
+export async function getMasterMachines(): Promise<MasterMachine[]> {
+  const { data } = await api.get("/api/v1/masters/machines");
+  return data;
+}
+
+export async function createMasterMachine(payload: { machine_code: string; machine_name: string; department?: string }): Promise<MasterMachine> {
+  const { data } = await api.post("/api/v1/masters/machines", payload);
+  return data;
+}
+
+export async function updateMasterMachine(payload: { id: string; machine_name?: string; department?: string; is_active?: boolean }): Promise<MasterMachine> {
+  const { data } = await api.put("/api/v1/masters/machines", payload);
+  return data;
+}
+
+// Master Data -- Shift
+export interface MasterShift {
+  id: string;
+  shift_code: string;
+  shift_name: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  is_active: boolean;
+}
+
+export async function getShifts(): Promise<MasterShift[]> {
+  const { data } = await api.get("/api/v1/masters/shifts");
+  return data;
+}
+
+export async function createShift(payload: { shift_code: string; shift_name: string; start_time?: string; end_time?: string }): Promise<MasterShift> {
+  const { data } = await api.post("/api/v1/masters/shifts", payload);
+  return data;
+}
+
+export async function updateShift(payload: { id: string; shift_name?: string; start_time?: string; end_time?: string; is_active?: boolean }): Promise<MasterShift> {
+  const { data } = await api.put("/api/v1/masters/shifts", payload);
+  return data;
+}
+
+// Master Data -- Operator
+export interface MasterOperator {
+  id: string;
+  user_id?: string | null;
+  employee_code?: string | null;
+  display_name: string;
+  is_active: boolean;
+}
+
+export async function getOperators(): Promise<MasterOperator[]> {
+  const { data } = await api.get("/api/v1/masters/operators");
+  return data;
+}
+
+export async function createOperator(payload: { user_id?: string; employee_code?: string; display_name: string }): Promise<MasterOperator> {
+  const { data } = await api.post("/api/v1/masters/operators", payload);
+  return data;
+}
+
+export async function updateOperator(payload: { id: string; employee_code?: string; display_name?: string; is_active?: boolean }): Promise<MasterOperator> {
+  const { data } = await api.put("/api/v1/masters/operators", payload);
+  return data;
+}
+
+// Rejection Type master
+export interface MasterRejectionType {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  created_by?: string | null;
+  updated_by?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export async function getRejectionTypes(includeInactive = false): Promise<MasterRejectionType[]> {
+  const { data } = await api.get("/api/v1/rejection/types", { params: { include_inactive: includeInactive } });
+  return data;
+}
+
+export async function createRejectionType(payload: { code: string; name: string; description?: string }): Promise<MasterRejectionType> {
+  const { data } = await api.post("/api/v1/rejection/types", payload);
+  return data;
+}
+
+export async function updateRejectionType(payload: { id: string; name?: string; description?: string; is_active?: boolean }): Promise<MasterRejectionType> {
+  const { data } = await api.put("/api/v1/rejection/types", payload);
+  return data;
+}
+
+// Roles & Responsibilities (read-only reference)
+export interface RoleInfo {
+  role: string;
+  display_name: string;
+  department: string;
+  permissions: string[];
+  allowed_modules: string[];
+}
+
+export async function getRoles(): Promise<RoleInfo[]> {
+  const { data } = await api.get("/api/v1/roles");
+  return data;
+}
+
 // Dashboard
 export async function getDashboardStats() {
   const { data } = await api.get("/api/v1/dashboard/stats");

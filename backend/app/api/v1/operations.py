@@ -8,12 +8,16 @@ from app.schemas.operations import (
     OrderIntakeCreate, OrderIntakeResponse,
     WOReleaseCreate, WOReleaseResponse,
     ConversionCreate, ConversionResponse,
-    NCRecordCreate, NCRecordUpdate, NCRecordOut
+    NCRecordCreate, NCRecordUpdate, NCRecordOut,
+    EngineeringReleaseResponse, ManufacturingReleaseResponse
 )
 from app.schemas.work_order import OARListItem
 from app.services.operations_service import OperationsService
 from app.services.work_order_service import WorkOrderService
-from app.core.roles import PLANNING_ROLES, WO_RELEASE_ROLES, CONVERSION_MODULE_ROLES, QUALITY_APPROVAL_ROLES
+from app.core.roles import (
+    PLANNING_ROLES, WO_RELEASE_ROLES, CONVERSION_MODULE_ROLES, QUALITY_APPROVAL_ROLES,
+    ENGINEERING_RELEASE_ROLES, MANUFACTURING_RELEASE_ROLES
+)
 
 router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
 
@@ -49,6 +53,25 @@ def list_oars(
         limit=limit,
         offset=offset
     )
+
+@router.post("/wo/{wo_number}/engineering-release", response_model=EngineeringReleaseResponse)
+def engineering_release(
+    wo_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*ENGINEERING_RELEASE_ROLES))
+):
+    """First step of the release chain: OAR -> WO Created -> Engineering Release ->
+    Manufacturing Release -> WO Released -> Production."""
+    return OperationsService.engineering_release(db, wo_number, current_user=user)
+
+@router.post("/wo/{wo_number}/manufacturing-release", response_model=ManufacturingReleaseResponse)
+def manufacturing_release(
+    wo_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*MANUFACTURING_RELEASE_ROLES))
+):
+    """Second step of the release chain -- requires Engineering Release to already be recorded."""
+    return OperationsService.manufacturing_release(db, wo_number, current_user=user)
 
 @router.post("/wo-release", response_model=WOReleaseResponse)
 def release_work_order(

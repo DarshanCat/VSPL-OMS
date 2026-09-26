@@ -33,6 +33,9 @@ class PackingTransaction(Base):
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False)
     client_request_id = Column(String, unique=True, nullable=True, index=True)
+    # Assigned once, at creation of this packing transaction -- unique and immutable
+    # for its lifetime. Never regenerated or reassigned.
+    packing_unit_code = Column(String, unique=True, nullable=True, index=True)
     packed_quantity = Column(Integer, nullable=False)
     box_count = Column(Integer, nullable=True)
     package_type = Column(String, nullable=True)

@@ -32,7 +32,11 @@ import {
   Users as UsersIcon,
   Building2,
   CalendarClock,
-  GitMerge
+  GitMerge,
+  Cog,
+  Clock,
+  UserCircle,
+  AlertOctagon
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -147,6 +151,26 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <CalendarClock className="h-4 w-4 text-amber-500" />,
         roles: ["admin", "planner"],
       },
+      {
+        name: "Machine Master",
+        href: "/masters/machines",
+        icon: <Cog className="h-4 w-4 text-indigo-500" />,
+      },
+      {
+        name: "Shift Master",
+        href: "/masters/shifts",
+        icon: <Clock className="h-4 w-4 text-indigo-500" />,
+      },
+      {
+        name: "Operator Master",
+        href: "/masters/operators",
+        icon: <UserCircle className="h-4 w-4 text-indigo-500" />,
+      },
+      {
+        name: "Rejection Type Master",
+        href: "/masters/rejection-types",
+        icon: <AlertOctagon className="h-4 w-4 text-indigo-500" />,
+      },
     ],
   },
   {
@@ -214,6 +238,11 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/admin/users",
         icon: <UsersIcon className="h-4 w-4 text-zinc-500" />,
         roles: ["admin"],
+      },
+      {
+        name: "Roles & Responsibilities",
+        href: "/roles",
+        icon: <ShieldAlert className="h-4 w-4 text-zinc-500" />,
       },
     ],
   },

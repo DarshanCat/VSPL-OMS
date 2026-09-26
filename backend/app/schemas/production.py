@@ -82,6 +82,28 @@ class MovementListItem(BaseModel):
     remarks: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: datetime
+    # Deterministic, live-at-read-time context for the FROM stage -- reused directly
+    # from StageWIP/WORoute (no new quantity engine). Optional so existing consumers
+    # of this schema are unaffected.
+    good_qty: Optional[int] = None
+    target_qty: Optional[int] = None
+    wip_qty: Optional[int] = None
+    yet_to_produce: Optional[int] = None
+    available_to_move: Optional[int] = None
+
+class StageDashboard(BaseModel):
+    """Deterministic, single-source stage summary -- reused directly from
+    StageWIP/WORoute (the same authoritative tables Entry/Move/Tracking all read
+    from). Not a new quantity engine."""
+    wo_number: str
+    stage: str
+    target_qty: int
+    total_produced: int  # good + rejected actually processed at this stage
+    total_rejected: int
+    total_good: int
+    wip_qty: int  # inproc + onhand
+    yet_to_produce: int  # max(target - total_produced, 0) -- NOT part of WIP
+    remaining_movable_qty: int  # onhand_qty -- completed good available to move downstream
 
 class StageWIPDetail(BaseModel):
     stage: str

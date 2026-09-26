@@ -97,3 +97,12 @@ DISPATCH_EXECUTION_ROLES = (UserRole.ADMIN, UserRole.DISPATCH)
 # passwords, activating/deactivating, role assignment. Matches the existing
 # /auth/register gate (require_roles(UserRole.ADMIN)) -- Super Admin only.
 USER_MANAGEMENT_ROLES = (UserRole.ADMIN,)
+
+# Engineering Release: first step of the release chain (Engineering Release ->
+# Manufacturing Release -> WO Release -> Production). Super Admin may administer
+# every release step per existing admin policy.
+ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
+
+# Manufacturing Release: second step of the release chain -- the service layer also
+# enforces that Engineering Release must already be recorded before this can happen.
+MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING)

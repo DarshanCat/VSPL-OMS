@@ -10,6 +10,23 @@ from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.packing import PackingQueueItem, PackingUpdateRequest, PackingUpdateResponse
 
+
+def _get_next_packing_unit_code(db: Session) -> str:
+    """Assigned once per packing transaction, at creation -- unique and immutable.
+    Same parse-max-and-increment convention as every other generated code in this
+    codebase (movement_id, wo_number, nc_number, schedule_number)."""
+    max_num = 0
+    for (code,) in db.query(PackingTransaction.packing_unit_code).all():
+        if code and code.startswith("PKU-"):
+            try:
+                num = int(code.split("-")[1])
+                if num > max_num:
+                    max_num = num
+            except (IndexError, ValueError):
+                pass
+    return f"PKU-{max_num + 1:06d}"
+
+
 class PackingService:
     @staticmethod
     def get_packing_queue(db: Session) -> List[PackingQueueItem]:
@@ -61,6 +78,7 @@ class PackingService:
                     success=True,
                     wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
                     client_request_id=existing_txn.client_request_id,
+                    packing_unit_code=existing_txn.packing_unit_code,
                     packed_this_batch=existing_txn.packed_quantity,
                     total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
                     remaining_pending=pr_existing.pending_qty if pr_existing else 0,
@@ -125,10 +143,13 @@ class PackingService:
         else:
             packing_rec.status = "In-Packing"
 
-        # Record immutable packing transaction ledger entry
+        # Record immutable packing transaction ledger entry, each with its own unique,
+        # immutable Packing Unit Code -- retains full context (part/qty/OAR/WO via the
+        # WO/order relationship, created_by, created_at, and the parent record's status).
         txn = PackingTransaction(
             work_order_id=wo.id,
             client_request_id=req.client_request_id.strip() if req.client_request_id else None,
+            packing_unit_code=_get_next_packing_unit_code(db),
             packed_quantity=req.packed_quantity,
             box_count=req.box_count,
             package_type=req.package_type,
@@ -136,6 +157,7 @@ class PackingService:
             created_by=current_user.id if current_user else None
         )
         db.add(txn)
+        db.flush()
 
         # Create audit log
         audit = AuditLog(
@@ -166,6 +188,7 @@ class PackingService:
                 success=True,
                 wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
                 client_request_id=existing_txn.client_request_id,
+                packing_unit_code=existing_txn.packing_unit_code,
                 packed_this_batch=existing_txn.packed_quantity,
                 total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
                 remaining_pending=pr_existing.pending_qty if pr_existing else 0,
@@ -178,6 +201,7 @@ class PackingService:
             success=True,
             wo_number=wo.wo_number,
             client_request_id=req.client_request_id,
+            packing_unit_code=txn.packing_unit_code,
             packed_this_batch=req.packed_quantity,
             total_packed=packing_rec.packed_qty,
             remaining_pending=packing_rec.pending_qty,

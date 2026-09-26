@@ -48,6 +48,15 @@ class DispatchService:
 
     @staticmethod
     def execute_dispatch(db: Session, req: DispatchRequest, current_user: Optional[User] = None) -> DispatchResponse:
+        # Invoice Number is mandatory before dispatch completion -- enforced here, not
+        # only by the frontend/schema, so a blank/whitespace-only value can never slip
+        # through regardless of caller.
+        if not req.invoice_number or not req.invoice_number.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invoice Number is required before dispatch can be completed."
+            )
+
         # 1. Idempotency Check: Prevent duplicate submissions on double-click / network retry
         if req.client_request_id:
             existing_dispatch = db.query(Dispatch).filter(

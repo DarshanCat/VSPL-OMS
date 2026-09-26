@@ -71,9 +71,12 @@ def _intake_wo(client, token, po_qty=100):
 
 
 def _produce(client, admin_token, wo, good_qty, rejected=0):
+    payload = {"wo_number": wo, "stage": "F1", "good_qty": good_qty, "rejected_quantity": rejected}
+    if rejected > 0:
+        payload["defect_code"] = "DEF-POROSITY"
     resp = client.post(
         "/api/v1/production/entry", headers=_auth(admin_token),
-        json={"wo_number": wo, "stage": "F1", "good_qty": good_qty, "rejected_quantity": rejected}
+        json=payload
     )
     assert resp.status_code == 200, resp.text
     return resp.json()

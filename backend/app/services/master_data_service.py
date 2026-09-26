@@ -3,12 +3,18 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.order import Customer, Part, Order
 from app.models.master_data import POMaster, POLine, ScheduleMaster, POStatus, ScheduleStatus
+from app.models.machine import Machine
+from app.models.shift import Shift
+from app.models.operator import Operator
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterOut, POLineOut,
     ScheduleCreate, ScheduleOut,
+    MachineCreate, MachineUpdate, MachineOut,
+    ShiftCreate, ShiftUpdate, ShiftOut,
+    OperatorCreate, OperatorUpdate, OperatorOut,
 )
 
 
@@ -190,3 +196,156 @@ class ScheduleMasterService:
         db.commit()
         db.refresh(schedule)
         return ScheduleMasterService._schedule_out(schedule)
+
+
+def _machine_out(m: Machine) -> MachineOut:
+    return MachineOut(id=str(m.id), machine_code=m.machine_code, machine_name=m.machine_name,
+                       department=m.department, is_active=m.is_active)
+
+
+class MachineMasterService:
+    @staticmethod
+    def list_machines(db: Session) -> List[MachineOut]:
+        rows = db.query(Machine).order_by(Machine.machine_code).all()
+        return [_machine_out(m) for m in rows]
+
+    @staticmethod
+    def create_machine(db: Session, req: MachineCreate, current_user: Optional[User] = None) -> MachineOut:
+        code = req.machine_code.strip().upper()
+        if db.query(Machine).filter(Machine.machine_code == code).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Machine code '{code}' already exists.")
+        machine = Machine(
+            machine_code=code, machine_name=req.machine_name.strip(), department=req.department,
+            created_by_id=current_user.id if current_user else None,
+            created_by_name=current_user.full_name if current_user else "System",
+        )
+        db.add(machine)
+        db.flush()
+        _audit(db, current_user, "MACHINE_CREATED", "Machine", str(machine.id), details=code)
+        db.commit()
+        db.refresh(machine)
+        return _machine_out(machine)
+
+    @staticmethod
+    def update_machine(db: Session, req: MachineUpdate, current_user: Optional[User] = None) -> MachineOut:
+        machine = db.query(Machine).filter(Machine.id == req.id).first()
+        if not machine:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found.")
+        if req.machine_name is not None:
+            machine.machine_name = req.machine_name.strip()
+        if req.department is not None:
+            machine.department = req.department
+        if req.is_active is not None:
+            # Never physically deleted -- historical production/movement transactions
+            # keep resolving by machine_code regardless of active status.
+            machine.is_active = req.is_active
+        _audit(db, current_user, "MACHINE_UPDATED", "Machine", str(machine.id))
+        db.commit()
+        db.refresh(machine)
+        return _machine_out(machine)
+
+
+def _shift_out(s: Shift) -> ShiftOut:
+    return ShiftOut(id=str(s.id), shift_code=s.shift_code, shift_name=s.shift_name,
+                     start_time=s.start_time, end_time=s.end_time, is_active=s.is_active)
+
+
+class ShiftMasterService:
+    @staticmethod
+    def list_shifts(db: Session) -> List[ShiftOut]:
+        rows = db.query(Shift).order_by(Shift.shift_code).all()
+        return [_shift_out(s) for s in rows]
+
+    @staticmethod
+    def create_shift(db: Session, req: ShiftCreate, current_user: Optional[User] = None) -> ShiftOut:
+        code = req.shift_code.strip().upper()
+        if db.query(Shift).filter(Shift.shift_code == code).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Shift code '{code}' already exists.")
+        shift = Shift(
+            shift_code=code, shift_name=req.shift_name.strip(),
+            start_time=req.start_time, end_time=req.end_time,
+            created_by_id=current_user.id if current_user else None,
+            created_by_name=current_user.full_name if current_user else "System",
+        )
+        db.add(shift)
+        db.flush()
+        _audit(db, current_user, "SHIFT_CREATED", "Shift", str(shift.id), details=code)
+        db.commit()
+        db.refresh(shift)
+        return _shift_out(shift)
+
+    @staticmethod
+    def update_shift(db: Session, req: ShiftUpdate, current_user: Optional[User] = None) -> ShiftOut:
+        shift = db.query(Shift).filter(Shift.id == req.id).first()
+        if not shift:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found.")
+        if req.shift_name is not None:
+            shift.shift_name = req.shift_name.strip()
+        if req.start_time is not None:
+            shift.start_time = req.start_time
+        if req.end_time is not None:
+            shift.end_time = req.end_time
+        if req.is_active is not None:
+            shift.is_active = req.is_active
+        _audit(db, current_user, "SHIFT_UPDATED", "Shift", str(shift.id))
+        db.commit()
+        db.refresh(shift)
+        return _shift_out(shift)
+
+
+def _operator_out(o: Operator) -> OperatorOut:
+    return OperatorOut(id=str(o.id), user_id=str(o.user_id) if o.user_id else None,
+                        employee_code=o.employee_code, display_name=o.display_name, is_active=o.is_active)
+
+
+class OperatorMasterService:
+    @staticmethod
+    def list_operators(db: Session) -> List[OperatorOut]:
+        rows = db.query(Operator).order_by(Operator.display_name).all()
+        return [_operator_out(o) for o in rows]
+
+    @staticmethod
+    def create_operator(db: Session, req: OperatorCreate, current_user: Optional[User] = None) -> OperatorOut:
+        # Never create a duplicate employee identity if the authenticated User system
+        # already contains this person -- link to it instead of copying.
+        user_ref = None
+        if req.user_id:
+            user_ref = db.query(User).filter(User.id == req.user_id).first()
+            if not user_ref:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{req.user_id}' not found.")
+        code = req.employee_code.strip().upper() if req.employee_code else None
+        if code and db.query(Operator).filter(Operator.employee_code == code).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Operator employee code '{code}' already exists.")
+
+        operator = Operator(
+            user_id=user_ref.id if user_ref else None, employee_code=code,
+            display_name=req.display_name.strip(),
+            created_by_id=current_user.id if current_user else None,
+            created_by_name=current_user.full_name if current_user else "System",
+        )
+        db.add(operator)
+        db.flush()
+        _audit(db, current_user, "OPERATOR_CREATED", "Operator", str(operator.id),
+               details=f"user_id={req.user_id or 'None'}")
+        db.commit()
+        db.refresh(operator)
+        return _operator_out(operator)
+
+    @staticmethod
+    def update_operator(db: Session, req: OperatorUpdate, current_user: Optional[User] = None) -> OperatorOut:
+        operator = db.query(Operator).filter(Operator.id == req.id).first()
+        if not operator:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operator not found.")
+        if req.employee_code is not None:
+            code = req.employee_code.strip().upper() if req.employee_code else None
+            if code and db.query(Operator).filter(Operator.employee_code == code, Operator.id != operator.id).first():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Operator employee code '{code}' already exists.")
+            operator.employee_code = code
+        if req.display_name is not None:
+            operator.display_name = req.display_name.strip()
+        if req.is_active is not None:
+            operator.is_active = req.is_active
+        _audit(db, current_user, "OPERATOR_UPDATED", "Operator", str(operator.id))
+        db.commit()
+        db.refresh(operator)
+        return _operator_out(operator)

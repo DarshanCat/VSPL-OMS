@@ -257,7 +257,7 @@ def test_move_response_reports_only_the_requested_delta(db_session):
 def test_no_wip_created_from_rejected_quantity(db_session):
     wo = _fresh_wo(db_session, po_qty=100)
     ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
-        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=30
+        wo_number=wo, stage="F1", good_qty=0, rejected_quantity=30, defect_code="DEF-POROSITY"
     ))
     wip = _wip(db_session, wo)
     assert wip.ok_qty == 0

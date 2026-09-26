@@ -2,16 +2,58 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
+from app.core.roles import QUALITY_APPROVAL_ROLES
 from app.models.user import User
 from app.schemas.rejection import (
     ExcessNonMovingCreate, DispositionCreate, DispositionResponse,
     RejectionListItem, RejectionDetail, RejectionSummary, CWODetail,
-    MeltingEntryCreate, MeltingEntryResponse
+    MeltingEntryCreate, MeltingEntryResponse,
+    ReplacementCreate, ReplacementResponse,
+    RejectionTypeCreate, RejectionTypeUpdate, RejectionTypeOut
 )
-from app.services.rejection_service import RejectionService
+from app.services.rejection_service import RejectionService, RejectionTypeService
 
 router = APIRouter(prefix="/api/v1/rejection", tags=["rejection-tracking"])
+
+
+# ---------------------------------------------------------------------------
+# Rejection Type master. List is open to any authenticated user (Production
+# Entry must be able to populate its dropdown) but only returns ACTIVE types
+# unless the caller is in QUALITY_APPROVAL_ROLES and explicitly asks for
+# inactive ones too -- mutation is QUALITY_APPROVAL_ROLES-only either way.
+# ---------------------------------------------------------------------------
+
+@router.get("/types", response_model=List[RejectionTypeOut])
+def list_rejection_types(
+    include_inactive: bool = Query(False, description="QUALITY/ADMIN only -- include deactivated types"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    if include_inactive and user.role not in QUALITY_APPROVAL_ROLES:
+        include_inactive = False
+    return RejectionTypeService.list_types(db, include_inactive=include_inactive)
+
+
+@router.post("/types", response_model=RejectionTypeOut)
+def create_rejection_type(
+    payload: RejectionTypeCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*QUALITY_APPROVAL_ROLES))
+):
+    return RejectionTypeService.create_type(db, payload, current_user=user)
+
+
+@router.put("/types", response_model=RejectionTypeOut)
+def update_rejection_type(
+    payload: RejectionTypeUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*QUALITY_APPROVAL_ROLES))
+):
+    """Update or deactivate a Rejection Type. Never physically deleted -- historical
+    NCRecord.defect_code values are never rewritten and keep resolving regardless
+    of active status."""
+    return RejectionTypeService.update_type(db, payload, current_user=user)
 
 @router.get("/cwo/{wo_number}", response_model=CWODetail)
 def get_cwo_detail(
@@ -97,6 +139,20 @@ def create_disposition(
     DEVIATION_ACCEPT) against a Rejection Tracking record. Authorization is enforced
     per-action inside the service, independent of any frontend restriction."""
     return RejectionService.create_disposition(db, payload, current_user=user)
+
+@router.post("/replacement", response_model=ReplacementResponse)
+def create_replacement(
+    payload: ReplacementCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Quality marks a rejection as 'Replacement Required': creates a brand-new WO
+    against the same OAR, linked back to the source WO. Never auto-generated from a
+    rejection entry -- only ever created by this explicit action -- and never
+    auto-released; it must follow the normal Engineering/Manufacturing/WO release
+    chain before production. Authorization (QUALITY_APPROVAL_ROLES) is enforced inside
+    the service, independent of any frontend restriction."""
+    return RejectionService.create_replacement(db, payload, current_user=user)
 
 @router.post("/melting-entry", response_model=MeltingEntryResponse)
 def record_melting_entry(

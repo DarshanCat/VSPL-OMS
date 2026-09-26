@@ -108,6 +108,13 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall VARCHAR DEFAULT 'No';",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS released_by VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS release_date TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_by VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_at TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_released_by VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_released_at TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_wo_id UUID;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS is_replacement BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS replacement_reason VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
@@ -252,7 +259,15 @@ def auto_migrate_schema():
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_movements_client_request_id ON production_movements (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_updates_client_request_id ON production_updates (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_dispatches_client_request_id ON dispatches (client_request_id) WHERE client_request_id IS NOT NULL;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;",
+
+        # Packing Unit Code: assigned once per packing transaction, at creation --
+        # unique and immutable. ADD COLUMN alone does not carry the model's unique=True
+        # onto an EXISTING table (only a fresh create_all() would), so a partial unique
+        # index enforces it at the DB level while still allowing multiple NULLs for
+        # rows that predate this column.
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packing_unit_code VARCHAR;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_packing_unit_code ON packing_transactions (packing_unit_code) WHERE packing_unit_code IS NOT NULL;",
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used

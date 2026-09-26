@@ -34,6 +34,7 @@ from app.schemas.production import (
 from app.schemas.packing import PackingUpdateRequest
 from app.schemas.dispatch import DispatchRequest
 from app.analytics.math_engine import reconciliation_variance
+from app.services.seed_service import _seed_default_rejection_types
 
 TEST_DB_URL = "sqlite:///:memory:"
 
@@ -44,6 +45,8 @@ def db():
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = Session()
+    _seed_default_rejection_types(session)
+    session.commit()
 
     cust = Customer(customer_code="CUST-PH2", name="Phase 2 Industrial Corp")
     part = Part(part_number="BRZ-PH2-BUSH", grade="PB2 / CuSn11P", description="High Precision Bushing")
@@ -153,8 +156,8 @@ def test_scenario_29_complete_execution_and_reconciliation(db):
         stage="F2",
         good_qty=40,
         rejected_quantity=10,
-        machine_id="M-LATHE-01",
         defect_code="DEF-POROSITY",
+        machine_id="M-LATHE-01",
         remarks="Gas porosity defect",
         operator_name="Operator Suresh",
         client_request_id="REQ-PROD-02"
@@ -328,6 +331,7 @@ def test_production_entry_idempotency(db):
         stage="F1",
         good_qty=20,
         rejected_quantity=2,
+        defect_code="DEF-POROSITY",
         client_request_id=req_id
     ))
     assert res1.good_qty == 20
@@ -339,6 +343,7 @@ def test_production_entry_idempotency(db):
         stage="F1",
         good_qty=20,
         rejected_quantity=2,
+        defect_code="DEF-POROSITY",
         client_request_id=req_id
     ))
     assert res2.entry_id == res1.entry_id
@@ -355,6 +360,7 @@ def test_production_entry_excess_quantity(db):
             stage="F1",
             good_qty=25,
             rejected_quantity=10, # 25 + 10 = 35 > 30
+            defect_code="DEF-POROSITY",
             client_request_id="REQ-PROD-EXCESS"
         ))
     assert exc.value.status_code == 400

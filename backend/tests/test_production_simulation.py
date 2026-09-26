@@ -261,10 +261,10 @@ def test_immutable_movement_ledger(db_session):
         to_stage="F3",
         quantity_moved=100,
         rejected_quantity=2,
+        defect_code="DEF-POROSITY",
         machine_id="M-LATHE-02",
         operator_name="Devanand",
         shift="Shift B",
-        defect_code="DEF-POROSITY",
         remarks="Batch run test"
     ))
     assert res.success is True

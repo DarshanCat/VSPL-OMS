@@ -43,6 +43,7 @@ def test_partial_movement_updates_wip(db_session):
         to_stage="F3",
         quantity_moved=200,
         rejected_quantity=5,
+        defect_code="DEF-POROSITY",
         machine_id="M-LATHE-01",
         operator_name="Operator Test",
         shift="Shift A"

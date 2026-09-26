@@ -10,10 +10,46 @@ from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.nc import NCRecord
+from app.models.rejection_type import RejectionType
 from app.services.oms_integration_service import calculate_stage_targets
 
 def _is_production() -> bool:
     return settings.ENVIRONMENT.lower() == "production"
+
+# The same defect codes already used historically across this codebase (the demo
+# NC records seeded below, and the legacy hardcoded frontend dropdown they came
+# from) -- seeding these as the initial Rejection Type master rows means
+# Production Entry's mandatory validation gate (see
+# rejection_service.validate_active_rejection_type) never blocks on an empty,
+# unconfigured master. Quality can still add/edit/deactivate types afterward;
+# this only guarantees a safe, working starting set.
+_DEFAULT_REJECTION_TYPES = [
+    ("DEF-POROSITY", "Porosity", "Gas/shrinkage cavity"),
+    ("DEF-DIM-OUT", "Dimensional Out of Spec", "Dimensional out of specification"),
+    ("DEF-SURFACE", "Surface Defect", "Surface roughness/blemish"),
+    ("DEF-CRACK", "Crack", "Thermal/handling crack"),
+    ("DEF-HARDNESS", "Hardness Mismatch", "Hardness out of spec"),
+    ("DEF-INCLUSION", "Inclusion", "Slag/sand particle inclusion"),
+    ("DEF-BLOWHOLE", "Blowhole", "Casting blowhole defect"),
+    ("DEF-CMM-OUT", "CMM Out of Tolerance", "Final inspection (CMM) dimensional failure"),
+    ("DEF-SURF-BLOW", "Surface Blow", "Surface blow defect"),
+]
+
+def _seed_default_rejection_types(db: Session) -> None:
+    """Additive/idempotent: a no-op the moment any RejectionType row exists (so
+    Quality's own edits/additions/deactivations are never touched or reset).
+    Runs in EVERY environment, including production -- unlike the demo Users/
+    Orders/WorkOrders seeded below, this is real master data every deployment
+    needs for Production Entry's rejection validation to function at all, not a
+    dev/UAT-only convenience."""
+    if db.query(RejectionType).first():
+        return
+    for code, name, description in _DEFAULT_REJECTION_TYPES:
+        db.add(RejectionType(
+            code=code, name=name, description=description, is_active=True,
+            created_by="system:seed", updated_by="system:seed",
+        ))
+    db.flush()
 
 def _bootstrap_production_admin(db: Session) -> None:
     """In production, no demo user with a known password is ever created. The only
@@ -40,6 +76,10 @@ def _bootstrap_production_admin(db: Session) -> None:
     db.flush()
 
 def seed_database_if_empty(db: Session):
+    # Runs first, in every environment: real master data (see docstring above),
+    # not a demo/UAT convenience like everything else in this function.
+    _seed_default_rejection_types(db)
+
     if _is_production():
         # Production never auto-creates demo/seed accounts with known passwords.
         _bootstrap_production_admin(db)

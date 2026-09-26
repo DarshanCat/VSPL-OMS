@@ -56,6 +56,20 @@ class WOReleaseResponse(BaseModel):
     stage_targets: dict[str, int]
     message: str
 
+class EngineeringReleaseResponse(BaseModel):
+    success: bool
+    wo_number: str
+    engineering_released_by: str
+    engineering_released_at: datetime
+    message: str
+
+class ManufacturingReleaseResponse(BaseModel):
+    success: bool
+    wo_number: str
+    manufacturing_released_by: str
+    manufacturing_released_at: datetime
+    message: str
+
 class ConversionCreate(BaseModel):
     conversion_wo_number: str = Field(..., max_length=100, description="Unique planner-assigned ID e.g. C-0021")
     source_wo_number: str

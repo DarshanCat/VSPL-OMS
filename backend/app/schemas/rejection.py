@@ -21,6 +21,44 @@ class DispositionCreate(BaseModel):
     reason: str = Field(..., max_length=2000)
     remarks: Optional[str] = Field(None, max_length=2000)
 
+class RejectionTypeCreate(BaseModel):
+    code: str = Field(..., max_length=100, description="Stable natural key, e.g. DEF-POROSITY")
+    name: str = Field(..., max_length=300)
+    description: Optional[str] = Field(None, max_length=1000)
+
+class RejectionTypeUpdate(BaseModel):
+    id: str
+    name: Optional[str] = Field(None, max_length=300)
+    description: Optional[str] = Field(None, max_length=1000)
+    is_active: Optional[bool] = None
+
+class RejectionTypeOut(BaseModel):
+    id: str
+    code: str
+    name: str
+    description: Optional[str] = None
+    is_active: bool = True
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+class ReplacementCreate(BaseModel):
+    nc_number: str = Field(..., description="Rejection Tracking record ID e.g. NC-00001")
+    quantity: int = Field(..., gt=0, le=1_000_000)
+    reason: str = Field(..., max_length=2000, description="Mandatory -- why a replacement WO is required")
+    remarks: Optional[str] = Field(None, max_length=2000)
+
+class ReplacementResponse(BaseModel):
+    success: bool
+    nc_number: str
+    replacement_wo_number: str
+    original_wo_number: str
+    oar_number: str
+    quantity: int
+    remaining_qty: int
+    message: str
+
 class DispositionOut(BaseModel):
     id: str
     action: str

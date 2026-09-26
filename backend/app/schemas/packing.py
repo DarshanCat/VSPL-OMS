@@ -36,6 +36,7 @@ class PackingUpdateResponse(BaseModel):
     success: bool
     wo_number: str
     client_request_id: Optional[str] = None
+    packing_unit_code: Optional[str] = None
     packed_this_batch: int
     total_packed: int
     remaining_pending: int

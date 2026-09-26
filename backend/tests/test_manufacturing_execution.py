@@ -18,6 +18,7 @@ from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
+from app.services.seed_service import _seed_default_rejection_types
 from app.models.nc import NCRecord
 
 from app.services.production_service import ProductionService
@@ -52,6 +53,8 @@ def db():
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = Session()
+    _seed_default_rejection_types(session)
+    session.commit()
 
     cust = Customer(customer_code="CUST-BHEL", name="Bharat Heavy Electricals Ltd")
     part = Part(part_number="BRZ-BUSH-100", grade="PB2 / CuSn11P", description="Heavy Duty Bushing")
@@ -128,6 +131,7 @@ def test_stage_production_entry_vs_movement(db):
         stage="F1",
         good_qty=40,
         rejected_quantity=10,
+        defect_code="DEF-POROSITY",
         machine_id="M-CC01",
         remarks="First casting batch"
     ))
@@ -518,7 +522,8 @@ def test_authoritative_get_current_stage_state(db):
 
     # Move 40 to F2, reject 10 at F1
     ProductionService.move_parts(db, MovePartsRequest(
-        wo_number="WO-STA-001", from_stage="F1", to_stage="F2", quantity_moved=40, rejected_quantity=10
+        wo_number="WO-STA-001", from_stage="F1", to_stage="F2", quantity_moved=40, rejected_quantity=10,
+        defect_code="DEF-POROSITY"
     ))
 
     # Check F1 state

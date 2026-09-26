@@ -15,6 +15,7 @@ from app.schemas.production import (
     MovePartsRequest, MovementResponse,
     RecordStageProductionRequest, ProductionEntryResponse
 )
+from app.services.rejection_service import validate_active_rejection_type
 from app.services.oms_integration_service import (
     OMSIntegrationService,
     match_route_stage,
@@ -26,6 +27,83 @@ def _get_next_movement_id(db: Session) -> str:
     return f"MOV-{count + 1:06d}"
 
 class ProductionService:
+    @staticmethod
+    def _enforce_release_gate(wo: WorkOrder) -> None:
+        """Production is blocked until the release chain (Engineering Release ->
+        Manufacturing Release -> WO Released) is complete.
+
+        Backward-compatible activation for ORDINARY WOs: the chain only applies once a
+        WO has actually entered it (Engineering Release recorded) -- a WO that never
+        uses it (the existing intake-and-produce flow) is completely unaffected, so
+        existing production facts and tests are never silently changed.
+
+        Replacement WOs are the one exception: `is_replacement` WOs ALWAYS require the
+        full chain, starting from creation -- a replacement WO must never be producible
+        before Engineering Release, even though it was never explicitly put through
+        Engineering Release yet (that's the whole point: it's blocked until someone
+        does)."""
+        requires_full_chain = wo.is_replacement or wo.engineering_released_at is not None
+        if not requires_full_chain:
+            return
+        if wo.engineering_released_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending Engineering Release."
+            )
+        if wo.manufacturing_released_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending Manufacturing Release."
+            )
+        if wo.release_date is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending WO Release."
+            )
+
+    @staticmethod
+    def get_stage_dashboard(db: Session, wo_number: str, stage: str):
+        """Deterministic unified summary for one WO/stage -- Target, Produced, Rejected,
+        Good, WIP, Yet to Produce, Remaining Movable -- reused directly from the same
+        authoritative StageWIP/WORoute rows Entry/Move/Tracking already read from. No
+        new quantity engine; purely a read/reshape."""
+        from app.schemas.production import StageDashboard
+
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).first()
+        if not wo:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
+
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        route_stages = [r.stage for r in routes]
+        matched_stage = match_route_stage(stage, route_stages) or stage.strip().upper()
+
+        route_rec = next((r for r in routes if r.stage == matched_stage), None)
+        wip = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id, StageWIP.stage == matched_stage).first()
+
+        target = route_rec.stage_target_qty if route_rec else wo.physical_wo_qty
+        good = wip.ok_qty if wip else 0
+        rejected = wip.rejected_qty if wip else 0
+        produced = good + rejected
+        # WIP = material physically present at this stage that hasn't been produced
+        # yet (StageWIP.inproc_qty = ent - ok - rej) -- NOT the same figure as "Yet
+        # to Produce" below, even though they can coincide numerically at a stage
+        # whose entered quantity already equals its full target. They diverge
+        # wherever entered quantity lags the target (e.g. a downstream stage before
+        # upstream has finished feeding it): WIP reflects what has physically
+        # arrived, Yet to Produce reflects what is still owed against the overall
+        # target regardless of whether it has arrived yet.
+        wip_qty = wip.inproc_qty if wip else 0
+        yet_to_produce = max(target - produced, 0)
+        # Remaining Movable = completed good sitting on-hand, not yet moved
+        # downstream (StageWIP.onhand_qty) -- rejected quantity is never included.
+        remaining_movable = wip.onhand_qty if wip else 0
+
+        return StageDashboard(
+            wo_number=wo.wo_number, stage=matched_stage, target_qty=target,
+            total_produced=produced, total_rejected=rejected, total_good=good,
+            wip_qty=wip_qty, yet_to_produce=yet_to_produce, remaining_movable_qty=remaining_movable
+        )
+
     @staticmethod
     def move_parts(db: Session, req: MovePartsRequest, current_user: Optional[User] = None) -> MovementResponse:
         now = datetime.now()
@@ -83,6 +161,9 @@ class ProductionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot move parts for Work Order '{req.wo_number}' with status '{wo.status.value}'."
             )
+        ProductionService._enforce_release_gate(wo)
+        if req.rejected_quantity > 0:
+            validate_active_rejection_type(db, req.defect_code)
 
         # 3. Validate Work Order Route
         routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
@@ -381,7 +462,10 @@ class ProductionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot record production for Work Order '{req.wo_number}' with status '{wo.status.value}'."
             )
-        
+        ProductionService._enforce_release_gate(wo)
+        if req.rejected_quantity > 0:
+            validate_active_rejection_type(db, req.defect_code)
+
         routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
         route_stages = [r.stage for r in routes]
         matched_stage = match_route_stage(req.stage, route_stages)

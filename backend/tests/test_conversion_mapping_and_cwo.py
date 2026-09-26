@@ -58,7 +58,8 @@ def _reject_wo(db, part_number, po_qty=100, rejected_qty=40):
     ))
     wo_num = res.wos_created[0]
     ProductionService.record_stage_production(db, RecordStageProductionRequest(
-        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=rejected_qty
+        wo_number=wo_num, stage="F1", good_qty=0, rejected_quantity=rejected_qty,
+        defect_code="DEF-POROSITY"
     ))
     nc = db.query(NCRecord).filter(
         NCRecord.work_order_id == db.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first().id
