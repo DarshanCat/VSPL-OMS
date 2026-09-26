@@ -31,7 +31,8 @@ from app.services.work_order_service import WorkOrderService
 from app.services.oms_integration_service import OMSIntegrationService
 from app.schemas.operations import OrderIntakeCreate
 from app.schemas.production import RecordStageProductionRequest, MovePartsRequest
-from app.models.work_order import WorkOrder
+from app.models.work_order import WorkOrder, WORoute
+from app.models.production_movement import StageWIP
 
 TEST_DB_URL = "sqlite:///:memory:"
 
@@ -262,3 +263,118 @@ def test_movement_quantity_is_independent_delta_not_cumulative(db_session):
     assert r1.quantity_moved == 15
     assert r2.quantity_moved == 10
     assert r1.movement_id != r2.movement_id
+
+
+# ---------------------------------------------------------------------------
+# TEST 8: Exact user scenario: Interleaved partial production and movement
+# ---------------------------------------------------------------------------
+
+def test_exact_user_interleaved_production_and_movement_steps(db_session):
+    """Verifies the exact user sequence:
+    WO Quantity = 10
+
+    STEP 1:
+    Production Entry: WO = same WO, Stage = F1, Quantity = 5
+    Expected:
+      Target = 10, Produced = 5, Yet To Produce = 5, F1 WIP = 5 (on-hand / movable)
+
+    STEP 2:
+    Move Parts: F1 -> F2, Quantity = 5
+    Expected:
+      F1 WIP = 0 (on-hand), F2 WIP = 5 (in-process), Produced = 5, Yet To Produce = 5
+
+    CRITICAL (Step 2b):
+    Go back to Production Entry. Select same WO, Stage = F1.
+    Production quantity field is still enabled.
+    Enter Quantity = 5.
+    Expected:
+      Production succeeds.
+      Target = 10, Produced = 10, Yet To Produce = 0, F1 WIP = 5 (on-hand), F2 WIP = 5 (in-process)
+
+    STEP 3:
+    Move F1 -> F2, Quantity = 5
+    Expected:
+      F1 WIP = 0, F2 WIP = 10
+
+    STEP 4:
+    Try Production Entry again: Quantity = 1 at F1
+    Expected:
+      REJECTED (400)
+      Target already fulfilled. Remaining to produce = 0.
+    """
+    wo_num = _fresh_wo(db_session, po_qty=10)
+    wo = db_session.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first()
+    wo.physical_wo_qty = 10
+    for r in db_session.query(WORoute).filter(WORoute.work_order_id == wo.id).all():
+        r.stage_target_qty = 10
+    for w in db_session.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all():
+        if w.stage == "F1":
+            w.ent_qty = 10
+            w.inproc_qty = 10
+            w.available_wip = 10
+    db_session.flush()
+    OMSIntegrationService.recompute_work_order(db_session, wo)
+
+    # STEP 1: Production Entry at F1 for 5 pcs
+    p1 = ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
+        wo_number=wo_num, stage="F1", good_qty=5, rejected_quantity=0
+    ))
+    assert p1.good_qty == 5
+
+    f1_state_1 = _stage_state(db_session, wo_num, "F1")
+    assert f1_state_1["target_qty"] == 10
+    assert f1_state_1["ok_completed_qty"] == 5
+    assert f1_state_1["not_yet_produced"] == 5
+    assert f1_state_1["remaining_to_produce"] == 5
+    assert f1_state_1["on_hand_qty"] == 5
+    assert f1_state_1["in_process_qty"] == 5  # physically unprocessed ceiling for next entry
+
+    # STEP 2: Move Parts F1 -> F2 for 5 pcs
+    m1 = ProductionService.move_parts(db_session, MovePartsRequest(
+        wo_number=wo_num, from_stage="F1", to_stage="F2", quantity_moved=5, rejected_quantity=0
+    ))
+    assert m1.quantity_moved == 5
+
+    f1_state_2 = _stage_state(db_session, wo_num, "F1")
+    f2_state_2 = _stage_state(db_session, wo_num, "F2")
+    assert f1_state_2["on_hand_qty"] == 0
+    assert f2_state_2["in_process_qty"] == 5
+    assert f1_state_2["ok_completed_qty"] == 5
+    assert f1_state_2["not_yet_produced"] == 5
+    assert f1_state_2["remaining_to_produce"] == 5
+    assert f1_state_2["in_process_qty"] == 5  # F1 still has 5 pcs to produce!
+
+    # CRITICAL: Go back to Production Entry, select same WO, select F1, enter Quantity = 5
+    p2 = ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
+        wo_number=wo_num, stage="F1", good_qty=5, rejected_quantity=0
+    ))
+    assert p2.good_qty == 5
+
+    f1_state_3 = _stage_state(db_session, wo_num, "F1")
+    f2_state_3 = _stage_state(db_session, wo_num, "F2")
+    assert f1_state_3["target_qty"] == 10
+    assert f1_state_3["ok_completed_qty"] == 10
+    assert f1_state_3["not_yet_produced"] == 0
+    assert f1_state_3["remaining_to_produce"] == 0
+    assert f1_state_3["on_hand_qty"] == 5
+    assert f2_state_3["in_process_qty"] == 5
+
+    # STEP 3: Move F1 -> F2 for 5 pcs
+    m2 = ProductionService.move_parts(db_session, MovePartsRequest(
+        wo_number=wo_num, from_stage="F1", to_stage="F2", quantity_moved=5, rejected_quantity=0
+    ))
+    assert m2.quantity_moved == 5
+
+    f1_state_4 = _stage_state(db_session, wo_num, "F1")
+    f2_state_4 = _stage_state(db_session, wo_num, "F2")
+    assert f1_state_4["on_hand_qty"] == 0
+    assert f2_state_4["in_process_qty"] == 10
+
+    # STEP 4: Try Production Entry again with Quantity = 1
+    with pytest.raises(HTTPException) as exc_info:
+        ProductionService.record_stage_production(db_session, RecordStageProductionRequest(
+            wo_number=wo_num, stage="F1", good_qty=1, rejected_quantity=0
+        ))
+    assert exc_info.value.status_code == 400
+    assert "Only 0 pieces of unprocessed material remain at stage 'F1'" in str(exc_info.value.detail)
+

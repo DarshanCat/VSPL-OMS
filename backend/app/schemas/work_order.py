@@ -113,15 +113,25 @@ class WorkOrderTrackingDetail(BaseModel):
     created_at: datetime
 
 class OARWorkOrderSummary(BaseModel):
+    wo_id: str
     wo_number: str
+    wo_type: str = "ORIGINAL"  # "ORIGINAL" | "PATCH"
+    is_replacement: bool = False
+    source_wo_id: Optional[str] = None
+    source_wo_number: Optional[str] = None
+    replacement_qty: int = 0
     allocated_qty: int
+    production_qty: int = 0
+    good_qty: int = 0
+    rejected_qty: int = 0
+    final_good_contribution: int = 0
     release_status: str
     current_stage: str
     wo_status: str
-    ok_completed: int
-    rejected: int
-    movable_wip: int
-    dispatched_qty: int
+    ok_completed: int = 0
+    rejected: int = 0
+    movable_wip: int = 0
+    dispatched_qty: int = 0
 
 class OARListItem(BaseModel):
     oar_number: str
@@ -134,6 +144,34 @@ class OARListItem(BaseModel):
     allocated_qty: int
     remaining_qty: int
     num_wos: int
+    num_original_wos: int = 0
+    num_patch_wos: int = 0
+    total_produced: int = 0
+    total_good: int = 0
+    total_rejected: int = 0
+    oar_fulfilled: int = 0
+    oar_shortfall: int = 0
+    status: str
+    delivery_date: Optional[date] = None
+    created_at: datetime
+    work_orders: List[OARWorkOrderSummary]
+
+class OARGenealogyResponse(BaseModel):
+    oar_number: str
+    order_id: str
+    customer_code: str
+    customer_name: str
+    customer_po: str
+    part_number: str
+    oar_qty: int
+    num_wos: int
+    num_original_wos: int
+    num_patch_wos: int
+    total_produced: int
+    total_good: int
+    total_rejected: int
+    oar_fulfilled: int
+    oar_shortfall: int
     status: str
     delivery_date: Optional[date] = None
     created_at: datetime

@@ -43,8 +43,16 @@ class WorkOrder(Base):
     # any other field, and never set automatically by WO creation.
     engineering_released_by = Column(String, nullable=True)
     engineering_released_at = Column(DateTime(timezone=True), nullable=True)
+    engineering_document_name = Column(String(255), nullable=True)
+    engineering_document_url = Column(String(1000), nullable=True)
+    engineering_document_revision = Column(String(50), nullable=True)
+    engineering_remarks = Column(String, nullable=True)
     manufacturing_released_by = Column(String, nullable=True)
     manufacturing_released_at = Column(DateTime(timezone=True), nullable=True)
+    manufacturing_document_name = Column(String(255), nullable=True)
+    manufacturing_document_url = Column(String(1000), nullable=True)
+    manufacturing_document_revision = Column(String(50), nullable=True)
+    manufacturing_remarks = Column(String, nullable=True)
     released_by = Column(String, nullable=True)
     release_date = Column(DateTime(timezone=True), nullable=True)
     # Rejection-replacement WO linkage. A replacement WO is a normal WO in every other

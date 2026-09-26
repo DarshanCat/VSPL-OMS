@@ -10,10 +10,11 @@ from app.models.production import ProductionUpdate
 from app.models.order import Order, Customer, Part
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
+from app.models.nc import NCRecord
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
     WorkOrderRouteResponse, TransactionHistoryItem,
-    OARListItem, OARWorkOrderSummary
+    OARListItem, OARWorkOrderSummary, OARGenealogyResponse
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -359,66 +360,172 @@ class WorkOrderService:
             query = query.filter(Order.status == status_filter)
 
         orders = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
-        results = []
+        return [WorkOrderService.build_oar_summary(db, order) for order in orders]
 
-        for order in orders:
-            wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.wo_number).all()
+    @staticmethod
+    def build_oar_summary(db: Session, order: Order) -> OARListItem:
+        """Authoritative OAR Genealogy & Production Aggregation:
+        Rolls up all Original and Patch/Replacement WOs created under this OAR,
+        including all production, stage rejections, final good contributions,
+        total OAR fulfillment, and remaining shortfall without double-counting."""
+        wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.created_at.asc(), WorkOrder.wo_number.asc()).all()
 
-            wo_summaries = []
-            allocated_total = 0
+        wo_summaries: List[OARWorkOrderSummary] = []
+        allocated_total = 0
 
-            for wo in wos:
-                allocated_total += wo.physical_wo_qty
+        for wo in wos:
+            allocated_total += wo.physical_wo_qty
 
-                routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
-                route_stages = [r.stage for r in routes] if routes else STANDARD_STAGES
-                cur_stage = wo.current_stage or route_stages[0]
+            routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+            route_stages = [r.stage for r in routes] if routes else STANDARD_STAGES
+            cur_stage = wo.current_stage or route_stages[0]
 
-                cur_wip_rec = db.query(StageWIP).filter(
-                    StageWIP.work_order_id == wo.id,
-                    StageWIP.stage == cur_stage
-                ).first()
-                movable_wip = cur_wip_rec.available_wip if cur_wip_rec else 0
+            cur_wip_rec = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage == cur_stage
+            ).first()
+            movable_wip = cur_wip_rec.available_wip if cur_wip_rec else 0
 
-                prod_ok = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).all()
-                ok_total = sum(p.good_qty or 0 for p in prod_ok)
-                rej_total = sum(p.reject_qty or 0 for p in prod_ok)
+            prod_entries = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).all()
+            wips = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()
+            movements = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).all()
 
-                dispatched_total = sum(
-                    d.dispatched_qty or 0
-                    for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
-                )
+            if prod_entries:
+                produced_qty = sum((p.good_qty or 0) + (p.reject_qty or 0) for p in prod_entries)
+                good_qty = sum(p.good_qty or 0 for p in prod_entries)
+            elif movements:
+                first_stg = route_stages[0] if route_stages else "F1"
+                first_moves = [m for m in movements if m.from_stage == first_stg]
+                produced_qty = sum(m.quantity_moved + m.rejected_quantity for m in first_moves)
+                good_qty = sum(m.quantity_moved for m in movements)
+            else:
+                produced_qty = 0
+                good_qty = 0
 
-                wo_summaries.append(OARWorkOrderSummary(
-                    wo_number=wo.wo_number,
-                    allocated_qty=wo.physical_wo_qty,
-                    release_status="Released" if wo.release_date else "Not Released",
-                    current_stage=cur_stage,
-                    wo_status=wo.status.value,
-                    ok_completed=ok_total,
-                    rejected=rej_total,
-                    movable_wip=movable_wip,
-                    dispatched_qty=dispatched_total
-                ))
+            # Total rejected on this WO across ALL stages
+            rejected_qty = sum(w.rejected_qty for w in wips) if wips else sum(nc.qty for nc in db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).all())
 
-            results.append(OARListItem(
-                oar_number=order.oar_number or "—",
-                order_id=str(order.id),
-                customer_code=order.customer.customer_code if order.customer else "N/A",
-                customer_name=order.customer.name if order.customer else "N/A",
-                customer_po=order.customer_po,
-                part_number=order.part.part_number if order.part else "N/A",
-                oar_qty=order.po_qty,
-                allocated_qty=allocated_total,
-                remaining_qty=order.po_qty - allocated_total,
-                num_wos=len(wos),
-                status=order.status.value,
-                delivery_date=order.delivery_date,
-                created_at=order.created_at or datetime.now(),
-                work_orders=wo_summaries
+            # Authoritative Final Good fulfillment contribution for this WO:
+            # Material ONLY counts as final good fulfillment when it has completed the entire route
+            # (i.e. reached Packing / BSR / Dispatch or completed the terminal stage of that specific route).
+            pr = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
+            if pr:
+                final_good = (pr.dispatched_qty or 0) + (pr.ready_for_dispatch_qty or 0) + (pr.packed_qty or 0)
+                if final_good == 0 and (pr.received_qty or 0) > 0:
+                    final_good = pr.received_qty or 0
+            else:
+                is_packing_route = any(s.upper() in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH") for s in route_stages)
+                if is_packing_route:
+                    # Route has a packing stage but material has not arrived there yet -> intermediate WIP, not yet fulfilled
+                    final_good = 0
+                else:
+                    # For custom routes terminating at FI or an earlier stage without packing
+                    terminal_stages = [s for s in route_stages if s.upper() not in ("DISPATCH",)]
+                    final_stage = terminal_stages[-1] if terminal_stages else (route_stages[-1] if route_stages else "F1")
+                    final_wip = next((sw for sw in wips if sw.stage.upper() == final_stage.upper()), None)
+                    if final_wip and final_wip.ok_qty > 0:
+                        final_good = final_wip.ok_qty
+                    else:
+                        final_good = 0
+
+            dispatched_total = sum(
+                d.dispatched_qty or 0
+                for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
+            )
+
+            if wo.released_by or wo.release_date:
+                rel_status = "RELEASED"
+            elif wo.manufacturing_released_by or wo.manufacturing_released_at:
+                rel_status = "AWAITING_WO_RELEASE"
+            elif wo.engineering_released_by or wo.engineering_released_at:
+                rel_status = "AWAITING_MFG_RELEASE"
+            else:
+                rel_status = "AWAITING_ENG_RELEASE"
+
+            wo_type = "PATCH" if wo.is_replacement else "ORIGINAL"
+            source_wo_num = wo.source_wo.wo_number if wo.source_wo else None
+
+            wo_summaries.append(OARWorkOrderSummary(
+                wo_id=str(wo.id),
+                wo_number=wo.wo_number,
+                wo_type=wo_type,
+                is_replacement=bool(wo.is_replacement),
+                source_wo_id=str(wo.source_wo_id) if wo.source_wo_id else None,
+                source_wo_number=source_wo_num,
+                replacement_qty=wo.physical_wo_qty if wo.is_replacement else 0,
+                allocated_qty=wo.physical_wo_qty,
+                production_qty=produced_qty,
+                good_qty=good_qty,
+                rejected_qty=rejected_qty,
+                final_good_contribution=final_good,
+                release_status=rel_status,
+                current_stage=cur_stage,
+                wo_status=wo.status.value,
+                ok_completed=good_qty,
+                rejected=rejected_qty,
+                movable_wip=movable_wip,
+                dispatched_qty=dispatched_total
             ))
 
-        return results
+        num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")
+        num_patch = sum(1 for w in wo_summaries if w.wo_type == "PATCH")
+        tot_produced = sum(w.production_qty for w in wo_summaries)
+        tot_good = sum(w.good_qty for w in wo_summaries)
+        tot_rejected = sum(w.rejected_qty for w in wo_summaries)
+        oar_fulfilled = sum(w.final_good_contribution for w in wo_summaries)
+        oar_shortfall = max(order.po_qty - oar_fulfilled, 0)
+
+        return OARListItem(
+            oar_number=order.oar_number or "—",
+            order_id=str(order.id),
+            customer_code=order.customer.customer_code if order.customer else "N/A",
+            customer_name=order.customer.name if order.customer else "N/A",
+            customer_po=order.customer_po,
+            part_number=order.part.part_number if order.part else "N/A",
+            oar_qty=order.po_qty,
+            allocated_qty=allocated_total,
+            remaining_qty=order.po_qty - allocated_total,
+            num_wos=len(wos),
+            num_original_wos=num_orig,
+            num_patch_wos=num_patch,
+            total_produced=tot_produced,
+            total_good=tot_good,
+            total_rejected=tot_rejected,
+            oar_fulfilled=oar_fulfilled,
+            oar_shortfall=oar_shortfall,
+            status=order.status.value,
+            delivery_date=order.delivery_date,
+            created_at=order.created_at or datetime.now(),
+            work_orders=wo_summaries
+        )
+
+    @staticmethod
+    def get_oar_genealogy(db: Session, oar_number: str) -> Optional[OARGenealogyResponse]:
+        order = db.query(Order).filter(Order.oar_number == oar_number.strip()).first()
+        if not order:
+            return None
+        summary = WorkOrderService.build_oar_summary(db, order)
+        return OARGenealogyResponse(
+            oar_number=summary.oar_number,
+            order_id=summary.order_id,
+            customer_code=summary.customer_code,
+            customer_name=summary.customer_name,
+            customer_po=summary.customer_po,
+            part_number=summary.part_number,
+            oar_qty=summary.oar_qty,
+            num_wos=summary.num_wos,
+            num_original_wos=summary.num_original_wos,
+            num_patch_wos=summary.num_patch_wos,
+            total_produced=summary.total_produced,
+            total_good=summary.total_good,
+            total_rejected=summary.total_rejected,
+            oar_fulfilled=summary.oar_fulfilled,
+            oar_shortfall=summary.oar_shortfall,
+            status=summary.status,
+            delivery_date=summary.delivery_date,
+            created_at=summary.created_at,
+            work_orders=summary.work_orders
+        )
 
     @staticmethod
     def get_wip_matrix(db: Session) -> WIPMatrixResponse:

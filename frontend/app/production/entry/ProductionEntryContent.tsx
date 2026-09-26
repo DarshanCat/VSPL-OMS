@@ -76,6 +76,7 @@ export function ProductionEntryContent() {
   const [woData, setWoData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [stageState, setStageState] = useState<any>(null);
+  const [selectedStage, setSelectedStage] = useState<string>("F1");
 
   // Form Fields
   const [goodQty, setGoodQty] = useState<number | "">("");
@@ -132,6 +133,26 @@ export function ProductionEntryContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rejectionTypes]);
 
+  const handleSelectStage = async (stage: string, currentWO?: any) => {
+    const activeWo = currentWO || woData;
+    setSelectedStage(stage);
+    setGoodQty("");
+    setRejectedQty(0);
+    setFormError("");
+    const matchingMach = MACHINES.find((m) => m.stage === stage);
+    if (matchingMach) setSelectedMachine(matchingMach.id);
+
+    if (activeWo?.wo_number) {
+      try {
+        const state = await getStageState(activeWo.wo_number, stage);
+        setStageState(state);
+      } catch {
+        setStageState(null);
+      }
+    }
+    setTimeout(() => inputGoodQtyRef.current?.focus(), 100);
+  };
+
   const lookupWO = async (woNum: string) => {
     if (!woNum || !woNum.trim()) return;
     const cleanWO = woNum.trim();
@@ -151,9 +172,13 @@ export function ProductionEntryContent() {
       setRouteData(route);
       setSearchTerm(tracking.wo_number);
 
-      // Fetch authoritative stage state for current stage
-      const curStage = tracking.current_stage || "F1";
-      const state = await getStageState(cleanWO, curStage).catch(() => null);
+      // Default stage: if currently selected stage is valid in timeline, keep it; otherwise use current_stage
+      const validStages = tracking.timeline?.map((s: any) => s.stage) || ["F1"];
+      const targetStage = validStages.includes(selectedStage) ? selectedStage : (tracking.current_stage || "F1");
+      setSelectedStage(targetStage);
+
+      // Fetch authoritative stage state for chosen stage
+      const state = await getStageState(cleanWO, targetStage).catch(() => null);
       setStageState(state);
 
       // Production entry fields represent a NEW transaction delta only — never prefill
@@ -163,7 +188,7 @@ export function ProductionEntryContent() {
       setRejectedQty(0);
 
       // Preset matching machine
-      const matchingMach = MACHINES.find((m) => m.stage === curStage);
+      const matchingMach = MACHINES.find((m) => m.stage === targetStage);
       if (matchingMach) setSelectedMachine(matchingMach.id);
 
       // Auto-focus Good Qty input
@@ -273,7 +298,7 @@ export function ProductionEntryContent() {
     // authority regardless of this client-side check.
     const remainingTarget = stageState?.in_process_qty ?? activeStage.in_process_qty ?? 0;
     if (totalProc > remainingTarget) {
-      setFormError(`Total quantity processed (${totalProc}) exceeds the remaining allowable target at ${woData.current_stage} (${remainingTarget} pcs remaining of target).`);
+      setFormError(`Total quantity processed (${totalProc}) exceeds the remaining allowable target at ${selectedStage} (${remainingTarget} pcs remaining of target).`);
       inputGoodQtyRef.current?.focus();
       return;
     }
@@ -287,7 +312,7 @@ export function ProductionEntryContent() {
     try {
       const res = await recordStageProduction({
         wo_number: woData.wo_number,
-        stage: woData.current_stage,
+        stage: selectedStage,
         good_qty: goodQtyNum,
         rejected_quantity: rejQtyNum,
         machine_id: selectedMachine,
@@ -462,31 +487,36 @@ export function ProductionEntryContent() {
               <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
-                    Authoritative Dynamic Route:
+                    Authoritative Dynamic Route (Click stage to log production):
                   </span>
                   <span className="text-[10px] text-zinc-500">
-                    Step {woData.timeline ? woData.timeline.findIndex((s: any) => s.stage === woData.current_stage) + 1 : 1} of {woData.timeline?.length || 1}
+                    Active: <strong className="text-emerald-600 font-mono">{selectedStage}</strong>
                   </span>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   {woData.timeline && woData.timeline.map((stg: any, idx: number) => {
+                    const isSelected = stg.stage === selectedStage;
                     const isCur = stg.stage === woData.current_stage;
                     const isDone = stg.is_completed;
                     return (
                       <React.Fragment key={stg.stage}>
-                        <div
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold transition-all ${
-                            isCur
-                              ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20 shadow-sm"
+                        <button
+                          type="button"
+                          onClick={() => handleSelectStage(stg.stage)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer ${
+                            isSelected
+                              ? "border-emerald-500 bg-emerald-500 text-white shadow-md ring-2 ring-emerald-500/30"
+                              : isCur
+                              ? "border-emerald-500/70 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                               : isDone
-                              ? "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500"
-                              : "border-zinc-200 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-950/30 text-zinc-400"
+                              ? "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 hover:border-zinc-400"
+                              : "border-zinc-200 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-950/30 text-zinc-400 hover:border-zinc-400"
                           }`}
                         >
                           <span>{stg.stage}</span>
-                          {isCur && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
-                        </div>
+                          {isCur && !isSelected && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                        </button>
                         {idx < woData.timeline.length - 1 && (
                           <ArrowRight className="h-3 w-3 text-zinc-400 shrink-0" />
                         )}
@@ -508,7 +538,7 @@ export function ProductionEntryContent() {
                         Active Stage State
                       </span>
                       <h3 className="text-3xl font-extrabold font-mono text-zinc-900 dark:text-zinc-50 mt-0.5">
-                        {woData.current_stage}
+                        {selectedStage}
                       </h3>
                     </div>
                     <Badge variant="green" size="md">

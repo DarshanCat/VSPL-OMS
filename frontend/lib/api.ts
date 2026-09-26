@@ -12,6 +12,9 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Prevent browser caching of API responses across page transitions
+  config.headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+  config.headers["Pragma"] = "no-cache";
   return config;
 });
 
@@ -118,13 +121,20 @@ export async function setUserStatus(userId: string, isActive: boolean): Promise<
 }
 
 // Release chain: Engineering Release -> Manufacturing Release -> WO Release -> Production
-export async function engineeringReleaseWorkOrder(woNumber: string) {
-  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/engineering-release`);
+export interface ReleaseEvidencePayload {
+  document_name?: string;
+  document_url?: string;
+  document_revision?: string;
+  remarks?: string;
+}
+
+export async function engineeringReleaseWorkOrder(woNumber: string, payload?: ReleaseEvidencePayload) {
+  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/engineering-release`, payload || {});
   return data;
 }
 
-export async function manufacturingReleaseWorkOrder(woNumber: string) {
-  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/manufacturing-release`);
+export async function manufacturingReleaseWorkOrder(woNumber: string, payload?: ReleaseEvidencePayload) {
+  const { data } = await api.post(`/api/v1/operations/wo/${encodeURIComponent(woNumber)}/manufacturing-release`, payload || {});
   return data;
 }
 
@@ -586,14 +596,67 @@ export async function confirmMatch(payload: {
   return data;
 }
 
+export interface OARWorkOrderSummary {
+  wo_id: string;
+  wo_number: string;
+  wo_type: "ORIGINAL" | "PATCH";
+  is_replacement: boolean;
+  source_wo_id?: string | null;
+  source_wo_number?: string | null;
+  replacement_qty: number;
+  allocated_qty: number;
+  production_qty: number;
+  good_qty: number;
+  rejected_qty: number;
+  final_good_contribution: number;
+  release_status: string;
+  current_stage: string;
+  wo_status: string;
+  ok_completed: number;
+  rejected: number;
+  movable_wip: number;
+  dispatched_qty: number;
+}
+
+export interface OARListItem {
+  oar_number: string;
+  order_id: string;
+  customer_code: string;
+  customer_name: string;
+  customer_po: string;
+  part_number: string;
+  oar_qty: number;
+  allocated_qty: number;
+  remaining_qty: number;
+  num_wos: number;
+  num_original_wos: number;
+  num_patch_wos: number;
+  total_produced: number;
+  total_good: number;
+  total_rejected: number;
+  oar_fulfilled: number;
+  oar_shortfall: number;
+  status: string;
+  delivery_date?: string | null;
+  created_at: string;
+  work_orders: OARWorkOrderSummary[];
+}
+
+export interface OARGenealogyResponse extends OARListItem {}
+
 export async function getOarList(params?: {
   search?: string;
   status_filter?: string;
   customer_code?: string;
   limit?: number;
   offset?: number;
-}) {
+}): Promise<OARListItem[]> {
   const { data } = await api.get("/api/v1/operations/oars", { params });
+  return data;
+}
+
+export async function getOarGenealogy(oarNumber: string): Promise<OARGenealogyResponse> {
+  const { data } = await api.get(`/api/v1/operations/oars/${encodeURIComponent(oarNumber)}/genealogy`);
   return data;
 }
 

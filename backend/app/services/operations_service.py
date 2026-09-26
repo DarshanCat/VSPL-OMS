@@ -28,6 +28,19 @@ from app.services.oms_integration_service import (
 )
 from app.services.conversion_mapping_service import ConversionMappingService
 
+def validate_document_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    cleaned = url.strip()
+    if not cleaned:
+        return None
+    if not cleaned.lower().startswith("https://"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document URL must be a valid secure HTTPS URL starting with 'https://'."
+        )
+    return cleaned
+
 class OperationsService:
     @staticmethod
     def create_order_intake(db: Session, req: OrderIntakeCreate, current_user: Optional[User] = None) -> OrderIntakeResponse:
@@ -227,7 +240,12 @@ class OperationsService:
         )
 
     @staticmethod
-    def engineering_release(db: Session, wo_number: str, current_user: Optional[User] = None) -> EngineeringReleaseResponse:
+    def engineering_release(
+        db: Session,
+        wo_number: str,
+        payload: Optional[ReleaseEvidenceCreate] = None,
+        current_user: Optional[User] = None
+    ) -> EngineeringReleaseResponse:
         wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).with_for_update().first()
         if not wo:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
@@ -238,9 +256,23 @@ class OperationsService:
                 f"(by {wo.engineering_released_by} at {wo.engineering_released_at})."
             )
 
+        doc_name = None
+        doc_url = None
+        doc_rev = None
+        doc_rem = None
+        if payload:
+            doc_name = payload.document_name.strip() if payload.document_name else None
+            doc_url = validate_document_url(payload.document_url)
+            doc_rev = payload.document_revision.strip() if payload.document_revision else None
+            doc_rem = payload.remarks.strip() if payload.remarks else None
+
         actor = current_user.full_name if current_user else "Engineering"
         wo.engineering_released_by = actor
         wo.engineering_released_at = datetime.now()
+        wo.engineering_document_name = doc_name
+        wo.engineering_document_url = doc_url
+        wo.engineering_document_revision = doc_rev
+        wo.engineering_remarks = doc_rem
 
         db.add(AuditLog(
             user_id=current_user.id if current_user else None, user_name=actor,
@@ -254,11 +286,20 @@ class OperationsService:
             success=True, wo_number=wo.wo_number,
             engineering_released_by=wo.engineering_released_by,
             engineering_released_at=wo.engineering_released_at,
+            engineering_document_name=wo.engineering_document_name,
+            engineering_document_url=wo.engineering_document_url,
+            engineering_document_revision=wo.engineering_document_revision,
+            engineering_remarks=wo.engineering_remarks,
             message=f"Engineering Release recorded for '{wo.wo_number}'."
         )
 
     @staticmethod
-    def manufacturing_release(db: Session, wo_number: str, current_user: Optional[User] = None) -> ManufacturingReleaseResponse:
+    def manufacturing_release(
+        db: Session,
+        wo_number: str,
+        payload: Optional[ReleaseEvidenceCreate] = None,
+        current_user: Optional[User] = None
+    ) -> ManufacturingReleaseResponse:
         wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).with_for_update().first()
         if not wo:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
@@ -274,9 +315,23 @@ class OperationsService:
                 f"(by {wo.manufacturing_released_by} at {wo.manufacturing_released_at})."
             )
 
+        doc_name = None
+        doc_url = None
+        doc_rev = None
+        doc_rem = None
+        if payload:
+            doc_name = payload.document_name.strip() if payload.document_name else None
+            doc_url = validate_document_url(payload.document_url)
+            doc_rev = payload.document_revision.strip() if payload.document_revision else None
+            doc_rem = payload.remarks.strip() if payload.remarks else None
+
         actor = current_user.full_name if current_user else "Manufacturing"
         wo.manufacturing_released_by = actor
         wo.manufacturing_released_at = datetime.now()
+        wo.manufacturing_document_name = doc_name
+        wo.manufacturing_document_url = doc_url
+        wo.manufacturing_document_revision = doc_rev
+        wo.manufacturing_remarks = doc_rem
 
         db.add(AuditLog(
             user_id=current_user.id if current_user else None, user_name=actor,
@@ -290,6 +345,10 @@ class OperationsService:
             success=True, wo_number=wo.wo_number,
             manufacturing_released_by=wo.manufacturing_released_by,
             manufacturing_released_at=wo.manufacturing_released_at,
+            manufacturing_document_name=wo.manufacturing_document_name,
+            manufacturing_document_url=wo.manufacturing_document_url,
+            manufacturing_document_revision=wo.manufacturing_document_revision,
+            manufacturing_remarks=wo.manufacturing_remarks,
             message=f"Manufacturing Release recorded for '{wo.wo_number}'."
         )
 

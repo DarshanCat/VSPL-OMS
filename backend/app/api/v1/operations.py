@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
@@ -9,9 +9,10 @@ from app.schemas.operations import (
     WOReleaseCreate, WOReleaseResponse,
     ConversionCreate, ConversionResponse,
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
+    ReleaseEvidenceCreate,
     EngineeringReleaseResponse, ManufacturingReleaseResponse
 )
-from app.schemas.work_order import OARListItem
+from app.schemas.work_order import OARListItem, OARGenealogyResponse
 from app.services.operations_service import OperationsService
 from app.services.work_order_service import WorkOrderService
 from app.core.roles import (
@@ -54,24 +55,41 @@ def list_oars(
         offset=offset
     )
 
+@router.get("/oars/{oar_number}/genealogy", response_model=OARGenealogyResponse)
+def get_oar_genealogy(
+    oar_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Authoritative OAR-level production genealogy across original and all patch/replacement WOs."""
+    genealogy = WorkOrderService.get_oar_genealogy(db, oar_number)
+    if not genealogy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"OAR '{oar_number}' not found."
+        )
+    return genealogy
+
 @router.post("/wo/{wo_number}/engineering-release", response_model=EngineeringReleaseResponse)
 def engineering_release(
     wo_number: str,
+    payload: Optional[ReleaseEvidenceCreate] = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*ENGINEERING_RELEASE_ROLES))
 ):
     """First step of the release chain: OAR -> WO Created -> Engineering Release ->
     Manufacturing Release -> WO Released -> Production."""
-    return OperationsService.engineering_release(db, wo_number, current_user=user)
+    return OperationsService.engineering_release(db, wo_number, payload=payload, current_user=user)
 
 @router.post("/wo/{wo_number}/manufacturing-release", response_model=ManufacturingReleaseResponse)
 def manufacturing_release(
     wo_number: str,
+    payload: Optional[ReleaseEvidenceCreate] = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*MANUFACTURING_RELEASE_ROLES))
 ):
     """Second step of the release chain -- requires Engineering Release to already be recorded."""
-    return OperationsService.manufacturing_release(db, wo_number, current_user=user)
+    return OperationsService.manufacturing_release(db, wo_number, payload=payload, current_user=user)
 
 @router.post("/wo-release", response_model=WOReleaseResponse)
 def release_work_order(

@@ -56,11 +56,21 @@ class WOReleaseResponse(BaseModel):
     stage_targets: dict[str, int]
     message: str
 
+class ReleaseEvidenceCreate(BaseModel):
+    document_name: Optional[str] = Field(None, max_length=255)
+    document_url: Optional[str] = Field(None, max_length=1000)
+    document_revision: Optional[str] = Field(None, max_length=50)
+    remarks: Optional[str] = Field(None, max_length=2000)
+
 class EngineeringReleaseResponse(BaseModel):
     success: bool
     wo_number: str
     engineering_released_by: str
     engineering_released_at: datetime
+    engineering_document_name: Optional[str] = None
+    engineering_document_url: Optional[str] = None
+    engineering_document_revision: Optional[str] = None
+    engineering_remarks: Optional[str] = None
     message: str
 
 class ManufacturingReleaseResponse(BaseModel):
@@ -68,6 +78,10 @@ class ManufacturingReleaseResponse(BaseModel):
     wo_number: str
     manufacturing_released_by: str
     manufacturing_released_at: datetime
+    manufacturing_document_name: Optional[str] = None
+    manufacturing_document_url: Optional[str] = None
+    manufacturing_document_revision: Optional[str] = None
+    manufacturing_remarks: Optional[str] = None
     message: str
 
 class ConversionCreate(BaseModel):

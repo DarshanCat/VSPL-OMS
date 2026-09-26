@@ -9,6 +9,8 @@ from app.models.rejection_type import RejectionType
 from app.models.conversion import Conversion
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
+from app.models.packing import PackingRecord
+from app.models.dispatch import Dispatch
 from app.models.order import Order, Customer
 from app.models.audit import AuditLog
 from app.models.user import User
@@ -587,6 +589,23 @@ class RejectionService:
         original_wo = record.work_order
         if not original_wo:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not resolve the original Work Order for this record.")
+
+        # Atomic lock on the Order to prevent concurrent over-recovery
+        order = db.query(Order).filter(Order.id == original_wo.order_id).with_for_update().first()
+        if not order:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Order associated with Work Order not found.")
+
+        # Compute authoritative OAR genealogy and shortfall across all WOs
+        from app.services.work_order_service import WorkOrderService
+        oar_summary = WorkOrderService.build_oar_summary(db, order)
+        total_good_produced = oar_summary.oar_fulfilled
+        max_recoverable = oar_summary.oar_shortfall
+
+        if req.quantity > max_recoverable:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot create replacement WO for {req.quantity} pieces. Maximum recoverable shortfall for OAR '{order.oar_number}' is {max_recoverable} pieces (Order Qty: {order.po_qty}, Good Produced: {total_good_produced})."
+            )
 
         # Same numbering convention as order intake / conversion WOs: parse-max-and-
         # increment against the real column, never a separate counter table.

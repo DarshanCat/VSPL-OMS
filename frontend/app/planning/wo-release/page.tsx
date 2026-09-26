@@ -48,11 +48,27 @@ export default function WOReleasePage() {
   const [chainError, setChainError] = useState("");
   const [chainResult, setChainResult] = useState<{ engineering?: any; manufacturing?: any }>({});
 
+  // Release Evidence inputs
+  const [docName, setDocName] = useState("");
+  const [docUrl, setDocUrl] = useState("");
+  const [docRevision, setDocRevision] = useState("");
+  const [releaseRemarks, setReleaseRemarks] = useState("");
+
   const handleEngineeringRelease = async () => {
     setChainError("");
+    if (docUrl && !docUrl.trim().toLowerCase().startsWith("https://")) {
+      setChainError("Document URL must start with 'https://'.");
+      return;
+    }
     setChainBusy("engineering");
     try {
-      const res = await engineeringReleaseWorkOrder(selectedWO);
+      const payload = {
+        document_name: docName.trim() || undefined,
+        document_url: docUrl.trim() || undefined,
+        document_revision: docRevision.trim() || undefined,
+        remarks: releaseRemarks.trim() || undefined,
+      };
+      const res = await engineeringReleaseWorkOrder(selectedWO, payload);
       setChainResult((prev) => ({ ...prev, engineering: res }));
     } catch (err: any) {
       setChainError(err?.response?.data?.detail || "Failed to record Engineering Release.");
@@ -63,9 +79,19 @@ export default function WOReleasePage() {
 
   const handleManufacturingRelease = async () => {
     setChainError("");
+    if (docUrl && !docUrl.trim().toLowerCase().startsWith("https://")) {
+      setChainError("Document URL must start with 'https://'.");
+      return;
+    }
     setChainBusy("manufacturing");
     try {
-      const res = await manufacturingReleaseWorkOrder(selectedWO);
+      const payload = {
+        document_name: docName.trim() || undefined,
+        document_url: docUrl.trim() || undefined,
+        document_revision: docRevision.trim() || undefined,
+        remarks: releaseRemarks.trim() || undefined,
+      };
+      const res = await manufacturingReleaseWorkOrder(selectedWO, payload);
       setChainResult((prev) => ({ ...prev, manufacturing: res }));
     } catch (err: any) {
       setChainError(err?.response?.data?.detail || "Failed to record Manufacturing Release.");
@@ -207,6 +233,68 @@ export default function WOReleasePage() {
               <span>{chainError}</span>
             </div>
           )}
+          {/* Document Evidence inputs */}
+          <div className="rounded-xl border border-zinc-100 dark:border-zinc-800/80 bg-zinc-50 dark:bg-zinc-800/40 p-3 space-y-2.5">
+            <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+              Release Document Evidence (Optional / Gated Releases)
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Drawing / Tech Spec"
+                  value={docName}
+                  onChange={(e) => setDocName(e.target.value)}
+                  className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document URL (HTTPS only)</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={docUrl}
+                  onChange={(e) => setDocUrl(e.target.value)}
+                  className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-mono text-[11px]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document Revision</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rev C"
+                  value={docRevision}
+                  onChange={(e) => setDocRevision(e.target.value)}
+                  className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Release Remarks</label>
+              <input
+                type="text"
+                placeholder="Remarks / approval notes..."
+                value={releaseRemarks}
+                onChange={(e) => setReleaseRemarks(e.target.value)}
+                className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
+              />
+            </div>
+            {docUrl && docUrl.startsWith("https://") && (
+              <div className="pt-1">
+                <a
+                  href={docUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  <span>Open Attached Document</span>
+                  <ArrowRight className="h-3 w-3" />
+                </a>
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
