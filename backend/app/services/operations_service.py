@@ -17,7 +17,8 @@ from app.schemas.operations import (
     WOReleaseCreate, WOReleaseResponse,
     ConversionCreate, ConversionResponse,
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
-    EngineeringReleaseResponse, ManufacturingReleaseResponse
+    EngineeringReleaseResponse, ManufacturingReleaseResponse,
+    ReleaseEvidenceCreate
 )
 from app.services.oms_integration_service import (
     OMSIntegrationService,
