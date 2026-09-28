@@ -973,6 +973,23 @@ export interface CustomerPartCrossReferenceOut {
   created_by_name?: string | null;
 }
 
+export interface CustomerPartCrossReferenceCreate {
+  customer_id?: string;
+  customer_code?: string;
+  customer_part_no: string;
+  part_id?: string;
+  internal_part_code?: string;
+  source?: string;
+  is_active?: boolean;
+}
+
+export interface CustomerPartCrossReferenceUpdate {
+  part_id?: string;
+  internal_part_code?: string;
+  source?: string;
+  is_active?: boolean;
+}
+
 export async function lookupCustomerPart(
   customerCode: string,
   customerPartNo: string
@@ -993,6 +1010,21 @@ export async function getPartCrossReferences(params?: {
   const { data } = await api.get("/api/v1/masters/part-cross-references", {
     params,
   });
+  return data;
+}
+
+export async function createPartCrossReference(
+  payload: CustomerPartCrossReferenceCreate
+): Promise<CustomerPartCrossReferenceOut> {
+  const { data } = await api.post("/api/v1/masters/part-cross-references", payload);
+  return data;
+}
+
+export async function updatePartCrossReference(
+  id: string,
+  payload: CustomerPartCrossReferenceUpdate
+): Promise<CustomerPartCrossReferenceOut> {
+  const { data } = await api.put(`/api/v1/masters/part-cross-references/${id}`, payload);
   return data;
 }
 

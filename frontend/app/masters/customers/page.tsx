@@ -1,8 +1,9 @@
 "use client";
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { getMasterCustomers, createMasterCustomer, updateMasterCustomer, MasterCustomer } from "@/lib/api";
-import { UserPlus, AlertTriangle, Building2 } from "lucide-react";
+import { UserPlus, AlertTriangle, Building2, Layers } from "lucide-react";
 
 export default function CustomerMasterPage() {
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
@@ -165,10 +166,24 @@ export default function CustomerMasterPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <button type="button" disabled={rowBusy === c.id} onClick={() => handleToggleActive(c)}
-                        className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors">
-                        {c.is_active ? "Deactivate" : "Activate"}
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Link
+                          href={`/masters/parts?customer_code=${encodeURIComponent(c.customer_code)}`}
+                          className="inline-flex items-center gap-1 rounded-lg bg-blue-50 dark:bg-blue-950/50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                          title="View customer parts in Part Master"
+                        >
+                          <Layers className="h-3 w-3" />
+                          View Parts
+                        </Link>
+                        <button
+                          type="button"
+                          disabled={rowBusy === c.id}
+                          onClick={() => handleToggleActive(c)}
+                          className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                        >
+                          {c.is_active ? "Deactivate" : "Activate"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
