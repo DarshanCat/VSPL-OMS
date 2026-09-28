@@ -346,6 +346,26 @@ def run(
             print(f"  -> Customers Auto-Created:      {len(created_customers)} ({', '.join(sorted(created_customers)[:10])}...)")
         print("=" * 75)
 
+        # Build audit summary dict
+        audit_summary = {
+            "source_file_name": master_p.name,
+            "source_file_sha256": master_sha,
+            "import_timestamp_utc": timestamp_str,
+            "source_data_rows": len(data_rows),
+            "valid_unique_count": len(valid_unique),
+            "identical_dupes_collapsed_count": len(identical_dupes),
+            "intra_customer_conflicts_count": len(conflict_groups),
+            "intra_customer_conflict_rows": sum(len(v) for _, v in conflict_groups),
+            "invalid_rows_count": len(invalid_records),
+            "cross_customer_shared_part_count": len(cross_customer_shared),
+            "existing_db_count": len(existing_refs),
+            "existing_identical_count": len(unchanged),
+            "existing_db_conflicts_count": len(prod_conflicts),
+            "missing_part_master_count": len(missing_parts),
+            "proposed_insert_count": len(to_insert),
+            "committed": commit,
+        }
+
         # Write reports
         if report_dir:
             out_dir = Path(report_dir)
@@ -382,24 +402,6 @@ def run(
                         w.writerow([pc["customer_code"], pc["customer_part_no"], pc["source_internal_part"], pc["db_existing_part"], pc["excel_row"]])
 
             # 5. Audit summary JSON
-            audit_summary = {
-                "source_file_name": master_p.name,
-                "source_file_sha256": master_sha,
-                "import_timestamp_utc": timestamp_str,
-                "source_data_rows": len(data_rows),
-                "valid_unique_count": len(valid_unique),
-                "identical_dupes_collapsed_count": len(identical_dupes),
-                "intra_customer_conflicts_count": len(conflict_groups),
-                "intra_customer_conflict_rows": sum(len(v) for _, v in conflict_groups),
-                "invalid_rows_count": len(invalid_records),
-                "cross_customer_shared_part_count": len(cross_customer_shared),
-                "existing_db_count": len(existing_refs),
-                "existing_identical_count": len(unchanged),
-                "existing_db_conflicts_count": len(prod_conflicts),
-                "missing_part_master_count": len(missing_parts),
-                "proposed_insert_count": len(to_insert),
-                "committed": commit,
-            }
             with open(out_dir / "audit_report.json", "w", encoding="utf-8") as f:
                 json.dump(audit_summary, f, indent=2)
 
