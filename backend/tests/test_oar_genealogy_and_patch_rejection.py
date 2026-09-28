@@ -611,7 +611,9 @@ def test_create_patch_wo_directly_from_oar_and_release_chain(client: TestClient,
     assert final_gen["total_produced"] == 8
     assert final_gen["total_good"] == 5
     assert final_gen["total_rejected"] == 3
-    assert len(final_gen["work_orders"]) == 2
-    assert final_gen["work_orders"][0]["wo_type"] == "ORIGINAL"
-    assert final_gen["work_orders"][1]["wo_type"] == "PATCH"
+    orig_item = next(w for w in final_gen["work_orders"] if w["wo_type"] == "ORIGINAL")
+    patch_item = next(w for w in final_gen["work_orders"] if w["wo_type"] == "PATCH")
+    assert orig_item["allocated_qty"] == 5
+    assert patch_item["allocated_qty"] == 3
+
 
