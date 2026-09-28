@@ -146,11 +146,6 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Layers className="h-4 w-4 text-indigo-500" />,
       },
       {
-        name: "Part Cross-References",
-        href: "/masters/part-cross-references",
-        icon: <Link2 className="h-4 w-4 text-blue-500" />,
-      },
-      {
         name: "PO Master",
         href: "/masters/pos",
         icon: <FileSpreadsheet className="h-4 w-4 text-emerald-500" />,
