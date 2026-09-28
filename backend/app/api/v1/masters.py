@@ -18,13 +18,21 @@ from app.schemas.customer_part_cross_reference import (
     CustomerPartCrossReferenceCreate,
     CustomerPartCrossReferenceUpdate,
     CustomerPartCrossReferenceOut,
+    CustomerPartCrossReferenceListResponse,
     PartLookupResponse,
+)
+from app.schemas.part_master import (
+    PartMasterItemOut,
+    PartMasterListResponse,
+    PartCreate,
+    PartUpdate,
 )
 from app.services.master_data_service import (
     CustomerMasterService, POMasterService, ScheduleMasterService,
     MachineMasterService, ShiftMasterService, OperatorMasterService,
 )
 from app.services.customer_part_cross_reference_service import CustomerPartCrossReferenceService
+from app.services.part_master_service import PartMasterService
 
 router = APIRouter(prefix="/api/v1/masters", tags=["masters"])
 
@@ -176,7 +184,7 @@ def update_operator(
 
 # --- Customer Part Cross-Reference Master ---
 
-@router.get("/part-cross-references", response_model=List[CustomerPartCrossReferenceOut])
+@router.get("/part-cross-references", response_model=CustomerPartCrossReferenceListResponse)
 def list_part_cross_references(
     customer_code: Optional[str] = Query(None, description="Filter by customer code"),
     part_number: Optional[str] = Query(None, description="Filter by internal part number"),
@@ -232,4 +240,59 @@ def update_part_cross_reference(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return CustomerPartCrossReferenceService.update_cross_reference(db, ref_id, payload, current_user=user)
+
+
+# --- Authoritative Internal Part Master ---
+
+@router.get("/parts", response_model=PartMasterListResponse)
+def list_master_parts(
+    search: Optional[str] = Query(None, description="Search part number, description, grade, or customer mappings"),
+    customer_code: Optional[str] = Query(None, description="Filter internal parts mapped to this customer"),
+    mapping_status: Optional[str] = Query(None, description="'all', 'mapped', or 'unmapped'"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Authoritative Internal Part Master listing.
+
+    Returns ALL internal parts from the Part table, with attached customer mappings and statistics.
+    """
+    return PartMasterService.list_parts(
+        db,
+        search=search,
+        customer_code=customer_code,
+        mapping_status=mapping_status,
+        limit=limit,
+        offset=offset,
+        include_stats=True,
+    )
+
+
+@router.get("/parts/{part_id}", response_model=PartMasterItemOut)
+def get_master_part(
+    part_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return PartMasterService.get_part(db, part_id)
+
+
+@router.post("/parts", response_model=PartMasterItemOut)
+def create_master_part(
+    payload: PartCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.create_part(db, payload, current_user=user)
+
+
+@router.put("/parts/{part_id}", response_model=PartMasterItemOut)
+def update_master_part(
+    part_id: UUID,
+    payload: PartUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.update_part(db, part_id, payload, current_user=user)
 

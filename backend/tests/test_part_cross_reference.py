@@ -451,3 +451,94 @@ def test_15_part_master_functionality_unchanged(client: TestClient):
     resp = client.get("/api/v1/admin/parts", headers=_auth(token))
     assert resp.status_code == 200
     assert isinstance(resp.json(), list)
+
+
+def test_16_list_part_cross_references_paginated_response(client: TestClient):
+    """16. GET /api/v1/masters/part-cross-references returns paginated response with total count."""
+    token = _login(client, "ADMIN")
+    resp = client.get("/api/v1/masters/part-cross-references?limit=10", headers=_auth(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert "limit" in data
+    assert "offset" in data
+    assert isinstance(data["items"], list)
+    assert isinstance(data["total"], int)
+    assert data["limit"] == 10
+    assert data["offset"] == 0
+
+
+def test_17_list_part_cross_references_customer_code_filter(client: TestClient):
+    """17. GET /api/v1/masters/part-cross-references?customer_code=XYZ filters strictly to that customer."""
+    token = _login(client, "ADMIN")
+    uid = uuid.uuid4().hex[:6].upper()
+    c_code_1 = f"C1-{uid}"
+    c_code_2 = f"C2-{uid}"
+    part_1 = f"P1-{uid}"
+    part_2 = f"P2-{uid}"
+
+    client.post("/api/v1/masters/customers", json={"customer_code": c_code_1, "name": "Cust One"}, headers=_auth(token))
+    client.post("/api/v1/masters/customers", json={"customer_code": c_code_2, "name": "Cust Two"}, headers=_auth(token))
+
+    db = SessionLocal()
+    try:
+        db.add(Part(part_number=part_1, description="Part 1", grade="SG 500"))
+        db.add(Part(part_number=part_2, description="Part 2", grade="SG 400"))
+        db.commit()
+    finally:
+        db.close()
+
+    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_1, "customer_part_no": "CP-A1", "internal_part_code": part_1}, headers=_auth(token))
+    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_1, "customer_part_no": "CP-A2", "internal_part_code": part_1}, headers=_auth(token))
+    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_2, "customer_part_no": "CP-B1", "internal_part_code": part_2}, headers=_auth(token))
+
+    # Query for C1
+    resp_c1 = client.get(f"/api/v1/masters/part-cross-references?customer_code={c_code_1}", headers=_auth(token))
+    assert resp_c1.status_code == 200
+    data_c1 = resp_c1.json()
+    assert data_c1["total"] == 2
+    assert len(data_c1["items"]) == 2
+    assert all(item["customer_code"] == c_code_1 for item in data_c1["items"])
+
+    # Query for C2
+    resp_c2 = client.get(f"/api/v1/masters/part-cross-references?customer_code={c_code_2.lower()}", headers=_auth(token))
+    assert resp_c2.status_code == 200
+    data_c2 = resp_c2.json()
+    assert data_c2["total"] == 1
+    assert len(data_c2["items"]) == 1
+    assert data_c2["items"][0]["customer_code"] == c_code_2
+
+
+def test_18_list_part_cross_references_search_and_customer_combined(client: TestClient):
+    """18. Customer filter and text search combine correctly with boolean AND."""
+    token = _login(client, "ADMIN")
+    uid = uuid.uuid4().hex[:6].upper()
+    c_code_1 = f"C1-{uid}"
+    c_code_2 = f"C2-{uid}"
+    part_1 = f"P1-{uid}"
+    part_2 = f"P2-{uid}"
+
+    client.post("/api/v1/masters/customers", json={"customer_code": c_code_1, "name": "Cust One"}, headers=_auth(token))
+    client.post("/api/v1/masters/customers", json={"customer_code": c_code_2, "name": "Cust Two"}, headers=_auth(token))
+
+    db = SessionLocal()
+    try:
+        db.add(Part(part_number=part_1, description="Alpha Bushing", grade="SG 500"))
+        db.add(Part(part_number=part_2, description="Beta Bushing", grade="SG 400"))
+        db.commit()
+    finally:
+        db.close()
+
+    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_1, "customer_part_no": "UNIQUE-123", "internal_part_code": part_1}, headers=_auth(token))
+    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_2, "customer_part_no": "UNIQUE-123", "internal_part_code": part_2}, headers=_auth(token))
+
+    # Filter by C1 + search UNIQUE-123 -> returns only C1
+    resp = client.get(f"/api/v1/masters/part-cross-references?customer_code={c_code_1}&search=UNIQUE-123", headers=_auth(token))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["customer_code"] == c_code_1
+    assert data["items"][0]["customer_part_no"] == "UNIQUE-123"
+    assert data["items"][0]["internal_part_code"] == part_1

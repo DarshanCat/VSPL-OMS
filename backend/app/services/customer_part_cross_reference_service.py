@@ -11,6 +11,7 @@ from app.schemas.customer_part_cross_reference import (
     CustomerPartCrossReferenceCreate,
     CustomerPartCrossReferenceUpdate,
     CustomerPartCrossReferenceOut,
+    CustomerPartCrossReferenceListResponse,
     PartLookupResponse,
 )
 
@@ -151,7 +152,7 @@ class CustomerPartCrossReferenceService:
         search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
-    ) -> List[CustomerPartCrossReferenceOut]:
+    ) -> CustomerPartCrossReferenceListResponse:
         query = (
             db.query(
                 CustomerPartCrossReference,
@@ -183,6 +184,7 @@ class CustomerPartCrossReferenceService:
                 )
             )
 
+        total = query.count()
         rows = query.order_by(Customer.customer_code, CustomerPartCrossReference.customer_part_no).offset(offset).limit(limit).all()
 
         results = []
@@ -205,7 +207,12 @@ class CustomerPartCrossReferenceService:
                     created_by_name=ref.created_by_name,
                 )
             )
-        return results
+        return CustomerPartCrossReferenceListResponse(
+            items=results,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     @classmethod
     def create_cross_reference(

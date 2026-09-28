@@ -46,6 +46,13 @@ class CustomerPartCrossReferenceOut(BaseModel):
     created_by_name: Optional[str] = None
 
 
+class CustomerPartCrossReferenceListResponse(BaseModel):
+    items: List[CustomerPartCrossReferenceOut]
+    total: int
+    limit: int
+    offset: int
+
+
 class PartLookupResponse(BaseModel):
     customer_code: str
     customer_name: Optional[str] = None

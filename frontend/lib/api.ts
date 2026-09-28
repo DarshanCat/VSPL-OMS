@@ -990,6 +990,13 @@ export interface CustomerPartCrossReferenceUpdate {
   is_active?: boolean;
 }
 
+export interface CustomerPartCrossReferenceListResponse {
+  items: CustomerPartCrossReferenceOut[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export async function lookupCustomerPart(
   customerCode: string,
   customerPartNo: string
@@ -1006,10 +1013,18 @@ export async function getPartCrossReferences(params?: {
   search?: string;
   limit?: number;
   offset?: number;
-}): Promise<CustomerPartCrossReferenceOut[]> {
+}): Promise<CustomerPartCrossReferenceListResponse> {
   const { data } = await api.get("/api/v1/masters/part-cross-references", {
     params,
   });
+  if (Array.isArray(data)) {
+    return {
+      items: data,
+      total: data.length,
+      limit: params?.limit || data.length,
+      offset: params?.offset || 0,
+    };
+  }
   return data;
 }
 
@@ -1025,6 +1040,78 @@ export async function updatePartCrossReference(
   payload: CustomerPartCrossReferenceUpdate
 ): Promise<CustomerPartCrossReferenceOut> {
   const { data } = await api.put(`/api/v1/masters/part-cross-references/${id}`, payload);
+  return data;
+}
+
+// --- Authoritative Internal Part Master ---
+
+export interface CustomerMappingBrief {
+  id: string;
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  customer_part_no: string;
+  source?: string | null;
+  is_active: boolean;
+}
+
+export interface PartMasterItemOut {
+  id: string;
+  part_number: string;
+  description?: string | null;
+  grade?: string | null;
+  is_active: boolean;
+  customer_count: number;
+  mapping_count: number;
+  customer_mappings: CustomerMappingBrief[];
+}
+
+export interface PartMasterStats {
+  total_parts: number;
+  mapped_parts: number;
+  unmapped_parts: number;
+  total_mappings: number;
+  total_customers: number;
+}
+
+export interface PartMasterListResponse {
+  items: PartMasterItemOut[];
+  total: number;
+  limit: number;
+  offset: number;
+  stats?: PartMasterStats | null;
+}
+
+export async function getMasterParts(params?: {
+  search?: string;
+  customer_code?: string;
+  mapping_status?: "all" | "mapped" | "unmapped";
+  limit?: number;
+  offset?: number;
+}): Promise<PartMasterListResponse> {
+  const { data } = await api.get("/api/v1/masters/parts", { params });
+  return data;
+}
+
+export async function getMasterPart(partId: string): Promise<PartMasterItemOut> {
+  const { data } = await api.get(`/api/v1/masters/parts/${partId}`);
+  return data;
+}
+
+export async function createMasterPart(payload: {
+  part_number: string;
+  description?: string;
+  grade?: string;
+}): Promise<PartMasterItemOut> {
+  const { data } = await api.post("/api/v1/masters/parts", payload);
+  return data;
+}
+
+export async function updateMasterPart(
+  partId: string,
+  payload: { description?: string; grade?: string }
+): Promise<PartMasterItemOut> {
+  const { data } = await api.put(`/api/v1/masters/parts/${partId}`, payload);
   return data;
 }
 

@@ -1,27 +1,27 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
-  getPartCrossReferences,
+  getMasterParts,
+  getMasterPart,
+  createMasterPart,
+  updateMasterPart,
   getMasterCustomers,
-  getParts,
   createPartCrossReference,
   updatePartCrossReference,
-  CustomerPartCrossReferenceOut,
+  PartMasterItemOut,
+  PartMasterStats,
   MasterCustomer,
-  AdminPart,
 } from "@/lib/api";
 import {
   Layers,
   Building2,
   Search,
   Plus,
-  Filter,
   ArrowRight,
   CheckCircle2,
-  XCircle,
   AlertTriangle,
   FileSpreadsheet,
   Check,
@@ -29,57 +29,106 @@ import {
   RefreshCw,
   Edit2,
   ShieldCheck,
-  ExternalLink,
+  Link as LinkIcon,
+  ChevronRight,
+  Eye,
+  Tag,
+  Package,
 } from "lucide-react";
 import Link from "next/link";
 
 function PartMasterContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const initialCustomerCode = searchParams.get("customer_code") || "";
+  const urlCustomerCode = searchParams.get("customer_code") || "";
+  const urlMappingStatus = (searchParams.get("mapping_status") as "all" | "mapped" | "unmapped") || "all";
+  const urlSearch = searchParams.get("search") || "";
 
-  const [mappings, setMappings] = useState<CustomerPartCrossReferenceOut[]>([]);
+  const [parts, setParts] = useState<PartMasterItemOut[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [stats, setStats] = useState<PartMasterStats | null>(null);
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
-  const [internalParts, setInternalParts] = useState<AdminPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Filters
-  const [search, setSearch] = useState("");
-  const [customerFilter, setCustomerFilter] = useState(initialCustomerCode);
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  // Filter States
+  const [search, setSearch] = useState(urlSearch);
+  const [customerFilter, setCustomerFilter] = useState(urlCustomerCode);
+  const [mappingStatus, setMappingStatus] = useState<"all" | "mapped" | "unmapped">(urlMappingStatus);
 
-  // Add / Edit Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [formSubmitting, setFormSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
+  // Detail / Drawer State for Selected Part
+  const [selectedPart, setSelectedPart] = useState<PartMasterItemOut | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const [formCustomerCode, setFormCustomerCode] = useState("");
-  const [formCustomerPartNo, setFormCustomerPartNo] = useState("");
-  const [formInternalPartCode, setFormInternalPartCode] = useState("");
-  const [formIsActive, setFormIsActive] = useState(true);
+  // Add / Edit Part Modal State
+  const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [isEditingPart, setIsEditingPart] = useState(false);
+  const [editPartId, setEditPartId] = useState<string | null>(null);
+  const [formPartNumber, setFormPartNumber] = useState("");
+  const [formDescription, setFormDescription] = useState("");
+  const [formGrade, setFormGrade] = useState("");
+  const [partSubmitting, setPartSubmitting] = useState(false);
+  const [partError, setPartError] = useState("");
 
-  // Status toggle in-progress row
+  // Link Customer Part Modal State
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [linkInternalPartCode, setLinkInternalPartCode] = useState("");
+  const [linkCustomerCode, setLinkCustomerCode] = useState("");
+  const [linkCustomerPartNo, setLinkCustomerPartNo] = useState("");
+  const [linkIsActive, setLinkIsActive] = useState(true);
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+  const [linkError, setLinkError] = useState("");
+
+  // Row status toggle state
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
 
-  async function loadData() {
+  // Sync state when URL query params change (e.g. from Customer Master navigation)
+  useEffect(() => {
+    const pCust = searchParams.get("customer_code") || "";
+    const pStatus = (searchParams.get("mapping_status") as "all" | "mapped" | "unmapped") || "all";
+    const pSearch = searchParams.get("search") || "";
+
+    if (pCust !== customerFilter) setCustomerFilter(pCust);
+    if (pStatus !== mappingStatus) setMappingStatus(pStatus);
+    if (pSearch !== search) setSearch(pSearch);
+  }, [searchParams]);
+
+  async function loadData(
+    overrideCustomer?: string,
+    overrideStatus?: "all" | "mapped" | "unmapped",
+    overrideSearch?: string
+  ) {
     setLoading(true);
     setError("");
+
+    const activeCust = overrideCustomer !== undefined ? overrideCustomer : customerFilter;
+    const activeStatus = overrideStatus !== undefined ? overrideStatus : mappingStatus;
+    const activeSearch = overrideSearch !== undefined ? overrideSearch : search;
+
     try {
-      const [refsData, custsData, partsData] = await Promise.all([
-        getPartCrossReferences({
-          search: search.trim() || undefined,
-          customer_code: customerFilter || undefined,
+      const [partsRes, custsData] = await Promise.all([
+        getMasterParts({
+          search: activeSearch.trim() || undefined,
+          customer_code: activeCust || undefined,
+          mapping_status: activeStatus !== "all" ? activeStatus : undefined,
           limit: 500,
         }),
         getMasterCustomers().catch(() => []),
-        getParts().catch(() => []),
       ]);
-      setMappings(refsData);
+
+      setParts(partsRes.items);
+      setTotalCount(partsRes.total);
+      if (partsRes.stats) {
+        setStats(partsRes.stats);
+      }
       setCustomers(custsData);
-      setInternalParts(partsData);
+
+      // If drawer is open, refresh selected part from new items list
+      if (selectedPart) {
+        const updated = partsRes.items.find((p) => p.id === selectedPart.id);
+        if (updated) setSelectedPart(updated);
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Could not load Part Master data.");
     } finally {
@@ -88,105 +137,158 @@ function PartMasterContent() {
   }
 
   useEffect(() => {
-    loadData();
-  }, [customerFilter]);
+    loadData(customerFilter, mappingStatus);
+  }, [customerFilter, mappingStatus]);
+
+  const updateUrlFilters = (
+    newCust: string,
+    newStatus: "all" | "mapped" | "unmapped",
+    newSearch: string
+  ) => {
+    const params = new URLSearchParams();
+    if (newCust) params.set("customer_code", newCust);
+    if (newStatus !== "all") params.set("mapping_status", newStatus);
+    if (newSearch.trim()) params.set("search", newSearch.trim());
+
+    const queryString = params.toString();
+    const target = queryString ? `/masters/parts?${queryString}` : "/masters/parts";
+    router.replace(target, { scroll: false });
+  };
+
+  const handleCustomerChange = (newCode: string) => {
+    setCustomerFilter(newCode);
+    updateUrlFilters(newCode, mappingStatus, search);
+  };
+
+  const handleStatusChange = (newStatus: "all" | "mapped" | "unmapped") => {
+    setMappingStatus(newStatus);
+    updateUrlFilters(customerFilter, newStatus, search);
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loadData();
+    updateUrlFilters(customerFilter, mappingStatus, search);
+    loadData(customerFilter, mappingStatus, search);
   };
 
-  // Selected internal part details preview for modal
-  const selectedPartDetails = useMemo(() => {
-    if (!formInternalPartCode) return null;
-    return internalParts.find(
-      (p) => p.part_number.toLowerCase() === formInternalPartCode.trim().toLowerCase()
-    );
-  }, [formInternalPartCode, internalParts]);
-
-  // Filtered mappings for status filter
-  const displayedMappings = useMemo(() => {
-    if (statusFilter === "all") return mappings;
-    if (statusFilter === "active") return mappings.filter((m) => m.is_active);
-    return mappings.filter((m) => !m.is_active);
-  }, [mappings, statusFilter]);
-
-  // Statistics
-  const stats = useMemo(() => {
-    const total = mappings.length;
-    const activeCount = mappings.filter((m) => m.is_active).length;
-    const distinctCustomers = new Set(mappings.map((m) => m.customer_code)).size;
-    const distinctInternalParts = new Set(mappings.map((m) => m.internal_part_code)).size;
-    return {
-      total,
-      activeCount,
-      distinctCustomers,
-      distinctInternalParts,
-    };
-  }, [mappings]);
-
-  const openAddModal = () => {
-    setIsEditing(false);
-    setEditId(null);
-    setFormCustomerCode(customerFilter || (customers[0]?.customer_code || ""));
-    setFormCustomerPartNo("");
-    setFormInternalPartCode("");
-    setFormIsActive(true);
-    setFormError("");
-    setIsModalOpen(true);
+  const handleClearAllFilters = () => {
+    setCustomerFilter("");
+    setMappingStatus("all");
+    setSearch("");
+    updateUrlFilters("", "all", "");
+    loadData("", "all", "");
   };
 
-  const openEditModal = (item: CustomerPartCrossReferenceOut) => {
-    setIsEditing(true);
-    setEditId(item.id);
-    setFormCustomerCode(item.customer_code);
-    setFormCustomerPartNo(item.customer_part_no);
-    setFormInternalPartCode(item.internal_part_code);
-    setFormIsActive(item.is_active);
-    setFormError("");
-    setIsModalOpen(true);
+  // Open Details Drawer
+  const openPartDetails = (part: PartMasterItemOut) => {
+    setSelectedPart(part);
+    setDrawerOpen(true);
   };
 
-  const handleModalSubmit = async (e: React.FormEvent) => {
+  // Add Part Modal
+  const openAddPartModal = () => {
+    setIsEditingPart(false);
+    setEditPartId(null);
+    setFormPartNumber("");
+    setFormDescription("");
+    setFormGrade("");
+    setPartError("");
+    setIsPartModalOpen(true);
+  };
+
+  // Edit Part Modal
+  const openEditPartModal = (part: PartMasterItemOut) => {
+    setIsEditingPart(true);
+    setEditPartId(part.id);
+    setFormPartNumber(part.part_number);
+    setFormDescription(part.description || "");
+    setFormGrade(part.grade || "");
+    setPartError("");
+    setIsPartModalOpen(true);
+  };
+
+  const handlePartModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setFormError("");
-    setFormSubmitting(true);
+    setPartError("");
+    setPartSubmitting(true);
 
     try {
-      if (isEditing && editId) {
-        await updatePartCrossReference(editId, {
-          internal_part_code: formInternalPartCode.trim(),
-          is_active: formIsActive,
+      if (isEditingPart && editPartId) {
+        await updateMasterPart(editPartId, {
+          description: formDescription.trim() || undefined,
+          grade: formGrade.trim() || undefined,
         });
-        setSuccessMsg(`Successfully updated Part Master mapping for ${formCustomerPartNo}`);
+        setSuccessMsg(`Successfully updated Internal Part ${formPartNumber}`);
       } else {
-        await createPartCrossReference({
-          customer_code: formCustomerCode.trim(),
-          customer_part_no: formCustomerPartNo.trim(),
-          internal_part_code: formInternalPartCode.trim(),
-          is_active: formIsActive,
+        await createMasterPart({
+          part_number: formPartNumber.trim(),
+          description: formDescription.trim() || undefined,
+          grade: formGrade.trim() || undefined,
         });
-        setSuccessMsg(`Successfully linked ${formCustomerPartNo} under ${formCustomerCode}`);
+        setSuccessMsg(`Successfully created Internal Part ${formPartNumber}`);
       }
-      setIsModalOpen(false);
+      setIsPartModalOpen(false);
       await loadData();
       setTimeout(() => setSuccessMsg(""), 5000);
     } catch (err: any) {
-      setFormError(err?.response?.data?.detail || "Failed to save Part Master entry.");
+      setPartError(err?.response?.data?.detail || "Failed to save Internal Part.");
     } finally {
-      setFormSubmitting(false);
+      setPartSubmitting(false);
     }
   };
 
-  const handleToggleStatus = async (item: CustomerPartCrossReferenceOut) => {
-    setBusyRowId(item.id);
+  // Open Link Customer Part Modal
+  const openLinkModal = (partNumber?: string) => {
+    setLinkInternalPartCode(partNumber || selectedPart?.part_number || "");
+    setLinkCustomerCode(customerFilter || (customers[0]?.customer_code || ""));
+    setLinkCustomerPartNo("");
+    setLinkIsActive(true);
+    setLinkError("");
+    setIsLinkModalOpen(true);
+  };
+
+  const handleLinkModalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLinkError("");
+    setLinkSubmitting(true);
+
     try {
-      await updatePartCrossReference(item.id, {
-        is_active: !item.is_active,
+      await createPartCrossReference({
+        customer_code: linkCustomerCode.trim(),
+        customer_part_no: linkCustomerPartNo.trim(),
+        internal_part_code: linkInternalPartCode.trim(),
+        is_active: linkIsActive,
+      });
+      setSuccessMsg(
+        `Successfully mapped ${linkCustomerPartNo} (${linkCustomerCode}) → ${linkInternalPartCode}`
+      );
+      setIsLinkModalOpen(false);
+      await loadData();
+      if (selectedPart) {
+        const refreshed = await getMasterPart(selectedPart.id);
+        setSelectedPart(refreshed);
+      }
+      setTimeout(() => setSuccessMsg(""), 5000);
+    } catch (err: any) {
+      setLinkError(err?.response?.data?.detail || "Failed to link customer part.");
+    } finally {
+      setLinkSubmitting(false);
+    }
+  };
+
+  const handleToggleMappingStatus = async (mappingId: string, currentActive: boolean) => {
+    setBusyRowId(mappingId);
+    try {
+      await updatePartCrossReference(mappingId, {
+        is_active: !currentActive,
       });
       await loadData();
+      if (selectedPart) {
+        const refreshed = await getMasterPart(selectedPart.id);
+        setSelectedPart(refreshed);
+      }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to update status.");
+      setError(err?.response?.data?.detail || "Failed to toggle mapping status.");
     } finally {
       setBusyRowId(null);
     }
@@ -200,11 +302,14 @@ function PartMasterContent() {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-                Masters
+                Authoritative Master
               </span>
               <span className="text-zinc-400 dark:text-zinc-500 text-xs">•</span>
               <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                <Link href="/masters/customers" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+                <Link
+                  href="/masters/customers"
+                  className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                >
                   Customer Master
                 </Link>
                 <ArrowRight className="h-3 w-3" />
@@ -213,16 +318,16 @@ function PartMasterContent() {
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 flex items-center gap-2.5">
               <Layers className="h-6 w-6 text-blue-600" />
-              Part Master
+              Internal Part Master
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              Customer-linked Part Master: Customer Part Numbers mapped to authoritative Internal Parts, auto-populating Grade, Description, and manufacturing routes.
+              Authoritative Internal Parts catalog with attached customer-specific part mappings (Grade, Description, and manufacturing routing).
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={loadData}
+              onClick={() => loadData()}
               disabled={loading}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60 transition-colors disabled:opacity-50"
             >
@@ -230,11 +335,11 @@ function PartMasterContent() {
               Refresh
             </button>
             <button
-              onClick={openAddModal}
+              onClick={openAddPartModal}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 shadow-sm transition-colors"
             >
               <Plus className="h-4 w-4" />
-              Link New Part
+              Add Internal Part
             </button>
           </div>
         </div>
@@ -253,29 +358,54 @@ function PartMasterContent() {
           </div>
         )}
 
-        {/* Statistics Cards */}
+        {/* Summary KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
-            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">Total Customer Parts</div>
-            <div className="text-2xl font-black text-zinc-900 dark:text-zinc-50 mt-1">{stats.total.toLocaleString()}</div>
-            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Authoritative active mappings</div>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
-            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">Mapped Customers</div>
-            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 mt-1">{stats.distinctCustomers}</div>
-            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Customer accounts linked</div>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
-            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">Internal Parts Linked</div>
-            <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{stats.distinctInternalParts}</div>
-            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">Authoritative Part Master codes</div>
-          </div>
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
-            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">Active Status</div>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
-              {stats.total > 0 ? `${Math.round((stats.activeCount / stats.total) * 100)}%` : "100%"}
+            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              Total Internal Parts
             </div>
-            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">{stats.activeCount} active mappings</div>
+            <div className="text-2xl font-black text-zinc-900 dark:text-zinc-50 mt-1">
+              {stats ? stats.total_parts.toLocaleString() : "..."}
+            </div>
+            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              Authoritative Internal Parts
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              Mapped Internal Parts
+            </div>
+            <div className="text-2xl font-black text-blue-600 dark:text-blue-400 mt-1">
+              {stats ? stats.mapped_parts.toLocaleString() : "..."}
+            </div>
+            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              Parts with Customer PO mappings
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              Unmapped Internal Parts
+            </div>
+            <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">
+              {stats ? stats.unmapped_parts.toLocaleString() : "..."}
+            </div>
+            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              Internal-only / unassigned
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
+            <div className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              Customer Part Mappings
+            </div>
+            <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">
+              {stats ? stats.total_mappings.toLocaleString() : "..."}
+            </div>
+            <div className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              Across {stats ? stats.total_customers : "..."} linked customers
+            </div>
           </div>
         </div>
 
@@ -283,11 +413,11 @@ function PartMasterContent() {
         <div className="rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/20 p-4 flex items-start gap-3">
           <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
           <div className="text-xs text-blue-900 dark:text-blue-200 leading-relaxed">
-            <span className="font-bold">Authoritative Part Relationship:</span> Each entry establishes a unique link between a <span className="font-semibold">Customer</span> and their <span className="font-semibold">Customer Part Number</span> to the authoritative <span className="font-semibold">Internal Part</span>. In Order Intake (OAR), selecting a customer and typing the customer part number automatically resolves the route, grade, and description.
+            <span className="font-bold">Authoritative Architecture:</span> Layer 1 is the Complete <span className="font-semibold">Internal Part Master</span> (5,483 authoritative internal parts). Layer 2 is the <span className="font-semibold">Customer Part Mapping</span> relationship (1,890 cross-references) attached to these parts. In Order Intake, customer part numbers resolve to these internal parts automatically.
           </div>
         </div>
 
-        {/* Filters and Controls */}
+        {/* Filters and Search Toolbar */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm space-y-3">
           <div className="flex flex-col md:flex-row md:items-center gap-3">
             {/* Search Form */}
@@ -297,7 +427,7 @@ function PartMasterContent() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by Customer Part No, Internal Part, Description, Grade, or Customer..."
+                placeholder="Search by Internal Part No, Description, Grade, Customer Part No, or Customer..."
                 className="w-full pl-9 pr-20 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               />
               <button
@@ -308,12 +438,12 @@ function PartMasterContent() {
               </button>
             </form>
 
-            {/* Customer Filter */}
+            {/* Customer Filter Dropdown */}
             <div className="flex items-center gap-2">
               <Building2 className="h-4 w-4 text-zinc-400 shrink-0" />
               <select
                 value={customerFilter}
-                onChange={(e) => setCustomerFilter(e.target.value)}
+                onChange={(e) => handleCustomerChange(e.target.value)}
                 className="py-2 px-3 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
               >
                 <option value="">All Customers ({customers.length})</option>
@@ -325,40 +455,40 @@ function PartMasterContent() {
               </select>
             </div>
 
-            {/* Status Filter */}
+            {/* Mapping Status Tabs */}
             <div className="flex items-center rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 p-0.5 text-xs font-semibold">
               <button
                 type="button"
-                onClick={() => setStatusFilter("all")}
+                onClick={() => handleStatusChange("all")}
                 className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  statusFilter === "all"
+                  mappingStatus === "all"
                     ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs"
                     : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
                 }`}
               >
-                All
+                All Parts
               </button>
               <button
                 type="button"
-                onClick={() => setStatusFilter("active")}
+                onClick={() => handleStatusChange("mapped")}
                 className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  statusFilter === "active"
-                    ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs"
+                  mappingStatus === "mapped"
+                    ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
                     : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
                 }`}
               >
-                Active
+                Mapped
               </button>
               <button
                 type="button"
-                onClick={() => setStatusFilter("inactive")}
+                onClick={() => handleStatusChange("unmapped")}
                 className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  statusFilter === "inactive"
-                    ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs"
+                  mappingStatus === "unmapped"
+                    ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 shadow-xs"
                     : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
                 }`}
               >
-                Inactive
+                Unmapped
               </button>
             </div>
           </div>
@@ -370,18 +500,21 @@ function PartMasterContent() {
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="h-4 w-4 text-blue-500" />
               <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                Customer-Linked Parts
+                Authoritative Internal Parts
               </h3>
               <span className="text-xs text-zinc-400 font-normal">
-                ({displayedMappings.length} items listed)
+                {totalCount > parts.length
+                  ? `(Showing ${parts.length} of ${totalCount.toLocaleString()} items)`
+                  : `(${totalCount.toLocaleString()} items listed)`}
               </span>
             </div>
-            {customerFilter && (
+            {(customerFilter || mappingStatus !== "all" || search) && (
               <button
-                onClick={() => setCustomerFilter("")}
+                type="button"
+                onClick={handleClearAllFilters}
                 className="text-[11px] font-medium text-blue-600 hover:underline flex items-center gap-1"
               >
-                Clear filter ({customerFilter})
+                Reset filters {customerFilter ? `(${customerFilter})` : ""}
               </button>
             )}
           </div>
@@ -389,63 +522,54 @@ function PartMasterContent() {
           {loading ? (
             <div className="p-12 text-center text-xs text-zinc-500">
               <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-500 mb-2" />
-              Loading Part Master records...
+              Loading Authoritative Part Master records...
             </div>
-          ) : displayedMappings.length === 0 ? (
+          ) : parts.length === 0 ? (
             <div className="p-12 text-center text-xs text-zinc-500">
-              No Part Master records found matching your filters.
+              No Internal Parts found matching your filters.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 font-semibold border-b border-zinc-100 dark:border-zinc-800">
                   <tr>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-4 py-3">Customer Part No</th>
                     <th className="px-4 py-3">Internal Part No</th>
                     <th className="px-4 py-3">Description</th>
                     <th className="px-4 py-3">Grade</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Customer Count</th>
+                    <th className="px-4 py-3">Customer Part Count</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {displayedMappings.map((m) => (
-                    <tr key={m.id} className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40 transition-colors">
-                      {/* Customer */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[11px]">
-                            {m.customer_code}
-                          </span>
-                          <span className="text-zinc-700 dark:text-zinc-300 font-medium truncate max-w-[150px]">
-                            {m.customer_name}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Customer Part No */}
-                      <td className="px-4 py-3 font-mono font-bold text-zinc-900 dark:text-zinc-100">
-                        {m.customer_part_no}
-                      </td>
-
+                  {parts.map((p) => (
+                    <tr
+                      key={p.id}
+                      className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40 transition-colors"
+                    >
                       {/* Internal Part No */}
-                      <td className="px-4 py-3">
-                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {m.internal_part_code}
-                        </span>
+                      <td className="px-4 py-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        <button
+                          type="button"
+                          onClick={() => openPartDetails(p)}
+                          className="hover:underline flex items-center gap-1 text-left"
+                        >
+                          {p.part_number}
+                          <ChevronRight className="h-3 w-3 opacity-60" />
+                        </button>
                       </td>
 
                       {/* Description */}
-                      <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                        {m.part_description || <span className="text-zinc-400 italic">-</span>}
+                      <td className="px-4 py-3 text-zinc-700 dark:text-zinc-300 max-w-xs truncate">
+                        {p.description || <span className="text-zinc-400 italic">-</span>}
                       </td>
 
                       {/* Grade */}
                       <td className="px-4 py-3">
-                        {m.part_grade ? (
+                        {p.grade ? (
                           <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 text-[10px] font-bold border border-amber-200 dark:border-amber-900/40">
-                            {m.part_grade}
+                            {p.grade}
                           </span>
                         ) : (
                           <span className="text-zinc-400 italic">-</span>
@@ -454,25 +578,33 @@ function PartMasterContent() {
 
                       {/* Status */}
                       <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
-                            m.is_active
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-                              : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                          }`}
-                        >
-                          {m.is_active ? (
-                            <>
-                              <CheckCircle2 className="h-3 w-3" />
-                              Active
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="h-3 w-3" />
-                              Inactive
-                            </>
-                          )}
+                        <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                          <Check className="h-3 w-3" /> Active
                         </span>
+                      </td>
+
+                      {/* Customer Count */}
+                      <td className="px-4 py-3">
+                        {p.customer_count > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
+                            <Building2 className="h-3 w-3" />
+                            {p.customer_count} {p.customer_count === 1 ? "customer" : "customers"}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400 text-[11px]">0 customers</span>
+                        )}
+                      </td>
+
+                      {/* Customer Part Count */}
+                      <td className="px-4 py-3">
+                        {p.mapping_count > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 text-[11px] font-semibold">
+                            <Tag className="h-3 w-3" />
+                            {p.mapping_count} {p.mapping_count === 1 ? "mapping" : "mappings"}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400 text-[11px]">0 mappings</span>
+                        )}
                       </td>
 
                       {/* Actions */}
@@ -480,19 +612,29 @@ function PartMasterContent() {
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => openEditModal(m)}
-                            className="p-1 rounded-lg text-zinc-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
-                            title="Edit Internal Part Mapping"
+                            onClick={() => openPartDetails(p)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                            title="View Customer Mappings"
                           >
-                            <Edit2 className="h-3.5 w-3.5" />
+                            <Eye className="h-3 w-3" />
+                            Mappings ({p.mapping_count})
                           </button>
                           <button
                             type="button"
-                            disabled={busyRowId === m.id}
-                            onClick={() => handleToggleStatus(m)}
-                            className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                            onClick={() => openLinkModal(p.part_number)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                            title="Link a customer part number to this internal part"
                           >
-                            {m.is_active ? "Deactivate" : "Activate"}
+                            <LinkIcon className="h-3 w-3" />
+                            + Link
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditPartModal(p)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                            title="Edit Description & Grade"
+                          >
+                            <Edit2 className="h-3 w-3" />
                           </button>
                         </div>
                       </td>
@@ -504,122 +646,314 @@ function PartMasterContent() {
           )}
         </div>
 
-        {/* Modal: Link / Edit Part Master Entry */}
-        {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-            <div className="w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
-                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-                  <Layers className="h-5 w-5 text-blue-600" />
-                  {isEditing ? "Edit Part Master Mapping" : "Link Part to Customer"}
-                </h3>
+        {/* Selected Part Drawer / Detail View */}
+        {drawerOpen && selectedPart && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-end">
+            <div className="bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 w-full max-w-2xl h-full p-6 overflow-y-auto space-y-6 shadow-2xl">
+              {/* Header */}
+              <div className="flex items-start justify-between border-b border-zinc-100 dark:border-zinc-800 pb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-xl font-extrabold text-indigo-600 dark:text-indigo-400">
+                      {selectedPart.part_number}
+                    </span>
+                    <span className="rounded-md bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-0.5 text-[10px] font-bold uppercase">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                    Authoritative Internal Part Specification & Linked Customer Mappings
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                  onClick={() => setDrawerOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
                 >
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              {formError && (
-                <div className="flex items-start gap-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 p-3 text-xs text-rose-700 dark:text-rose-300">
+              {/* Part Properties */}
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800 text-xs">
+                <div>
+                  <span className="text-zinc-400 block text-[11px]">Grade</span>
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 inline-block">
+                    {selectedPart.grade || "Not Specified"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-zinc-400 block text-[11px]">Description</span>
+                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 mt-0.5 inline-block">
+                    {selectedPart.description || "-"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Customer Mappings Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-blue-600" />
+                    <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      Customer Part Mappings ({selectedPart.customer_mappings.length})
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openLinkModal(selectedPart.part_number)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-colors shadow-xs"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Link Customer Part
+                  </button>
+                </div>
+
+                {selectedPart.customer_mappings.length === 0 ? (
+                  <div className="p-8 text-center rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 text-xs text-zinc-400">
+                    No customer mappings currently attached to this internal part.
+                    <br />
+                    Click <span className="font-semibold text-blue-600">+ Link Customer Part</span> to associate a Customer Part Number.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 font-semibold border-b border-zinc-100 dark:border-zinc-800">
+                        <tr>
+                          <th className="px-3 py-2.5">Customer</th>
+                          <th className="px-3 py-2.5">Customer Part No</th>
+                          <th className="px-3 py-2.5">Source</th>
+                          <th className="px-3 py-2.5">Status</th>
+                          <th className="px-3 py-2.5 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {selectedPart.customer_mappings.map((m) => (
+                          <tr key={m.id} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
+                            <td className="px-3 py-2.5">
+                              <span className="font-mono font-bold text-blue-600">
+                                {m.customer_code}
+                              </span>
+                              <span className="text-zinc-500 dark:text-zinc-400 text-[11px] block">
+                                {m.customer_name}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                              {m.customer_part_no}
+                            </td>
+                            <td className="px-3 py-2.5 text-zinc-500">{m.source || "Fdata"}</td>
+                            <td className="px-3 py-2.5">
+                              <span
+                                className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                  m.is_active
+                                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400"
+                                    : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                }`}
+                              >
+                                {m.is_active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button
+                                type="button"
+                                disabled={busyRowId === m.id}
+                                onClick={() => handleToggleMappingStatus(m.id, m.is_active)}
+                                className="px-2 py-1 text-[10px] font-semibold rounded border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+                              >
+                                {m.is_active ? "Deactivate" : "Activate"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Intake Resolution Note */}
+              <div className="p-4 rounded-xl bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 text-xs text-indigo-900 dark:text-indigo-300">
+                <span className="font-bold">Order Intake Behavior:</span> When an intake line is created with any of the mapped customer part numbers above, OMS Engine will automatically resolve to <span className="font-mono font-bold">{selectedPart.part_number}</span> and auto-populate Grade (<span className="font-semibold">{selectedPart.grade || "N/A"}</span>) and Description.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Add / Edit Internal Part */}
+        {isPartModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Package className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                    {isEditingPart ? "Edit Internal Part" : "Add Internal Part"}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setIsPartModalOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {partError && (
+                <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>{formError}</span>
+                  <span>{partError}</span>
                 </div>
               )}
 
-              <form onSubmit={handleModalSubmit} className="space-y-4">
-                {/* Customer */}
+              <form onSubmit={handlePartModalSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
-                    Customer
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Internal Part Number
                   </label>
-                  {isEditing ? (
-                    <div className="px-3 py-2 text-xs font-bold rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-mono">
-                      {formCustomerCode}
-                    </div>
-                  ) : (
-                    <select
-                      required
-                      value={formCustomerCode}
-                      onChange={(e) => setFormCustomerCode(e.target.value)}
-                      className="w-full py-2 px-3 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    >
-                      <option value="">Select a Customer...</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.customer_code}>
-                          {c.customer_code} - {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <input
+                    type="text"
+                    value={formPartNumber}
+                    disabled={isEditingPart}
+                    onChange={(e) => setFormPartNumber(e.target.value)}
+                    placeholder="e.g. PMC95 or ACC37"
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-60 font-mono font-bold"
+                  />
                 </div>
 
-                {/* Customer Part No */}
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Grade
+                  </label>
+                  <input
+                    type="text"
+                    value={formGrade}
+                    onChange={(e) => setFormGrade(e.target.value)}
+                    placeholder="e.g. SG 500-B, CuSn12, PB2"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Dimensions / Component Description..."
+                    rows={3}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsPartModalOpen(false)}
+                    className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={partSubmitting}
+                    className="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-60 transition-colors shadow-sm"
+                  >
+                    {partSubmitting ? "Saving..." : isEditingPart ? "Update Part" : "Create Internal Part"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Link Customer Part */}
+        {isLinkModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                    Link Customer Part Number
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setIsLinkModalOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {linkError && (
+                <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{linkError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleLinkModalSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Internal Part Number
+                  </label>
+                  <input
+                    type="text"
+                    value={linkInternalPartCode}
+                    onChange={(e) => setLinkInternalPartCode(e.target.value)}
+                    placeholder="e.g. PMC95"
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Customer
+                  </label>
+                  <select
+                    value={linkCustomerCode}
+                    onChange={(e) => setLinkCustomerCode(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  >
+                    <option value="">Select Customer</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.customer_code}>
+                        {c.customer_code} - {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
                     Customer Part Number
                   </label>
                   <input
-                    required
-                    disabled={isEditing}
                     type="text"
-                    value={formCustomerPartNo}
-                    onChange={(e) => setFormCustomerPartNo(e.target.value)}
-                    placeholder="e.g. 50401234, CUST-BRK-01"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent text-zinc-900 dark:text-zinc-100 font-mono disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:opacity-75 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    value={linkCustomerPartNo}
+                    onChange={(e) => setLinkCustomerPartNo(e.target.value)}
+                    placeholder="e.g. 147 X 103 X 95 - PMC"
+                    required
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-mono"
                   />
                 </div>
 
-                {/* Internal Part No */}
-                <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
-                    Authoritative Internal Part No
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    value={formInternalPartCode}
-                    onChange={(e) => setFormInternalPartCode(e.target.value)}
-                    placeholder="e.g. 1001-A, F1-HUB-01"
-                    list="internal-parts-list"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-transparent text-zinc-900 dark:text-zinc-100 font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  />
-                  <datalist id="internal-parts-list">
-                    {internalParts.map((p) => (
-                      <option key={p.id} value={p.part_number}>
-                        {p.part_number} {p.description ? `- ${p.description}` : ""} {p.grade ? `(${p.grade})` : ""}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-
-                {/* Part Details Preview */}
-                {selectedPartDetails && (
-                  <div className="rounded-xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 p-3 text-xs space-y-1">
-                    <div className="font-semibold text-indigo-900 dark:text-indigo-200">
-                      Authoritative Part Details:
-                    </div>
-                    <div className="text-zinc-600 dark:text-zinc-400">
-                      Description: <span className="font-medium text-zinc-800 dark:text-zinc-200">{selectedPartDetails.description || "-"}</span>
-                    </div>
-                    <div className="text-zinc-600 dark:text-zinc-400">
-                      Grade: <span className="font-medium text-zinc-800 dark:text-zinc-200">{selectedPartDetails.grade || "-"}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Status Toggle */}
                 <div className="flex items-center gap-2 pt-1">
                   <input
                     type="checkbox"
-                    id="is_active_toggle"
-                    checked={formIsActive}
-                    onChange={(e) => setFormIsActive(e.target.checked)}
+                    id="link_active_toggle"
+                    checked={linkIsActive}
+                    onChange={(e) => setLinkIsActive(e.target.checked)}
                     className="rounded text-blue-600 focus:ring-blue-500"
                   />
-                  <label htmlFor="is_active_toggle" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                  <label
+                    htmlFor="link_active_toggle"
+                    className="text-xs font-semibold text-zinc-700 dark:text-zinc-300"
+                  >
                     Active Mapping
                   </label>
                 </div>
@@ -627,17 +961,17 @@ function PartMasterContent() {
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={() => setIsLinkModalOpen(false)}
                     className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={formSubmitting}
+                    disabled={linkSubmitting}
                     className="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-60 transition-colors shadow-sm"
                   >
-                    {formSubmitting ? "Saving..." : isEditing ? "Update Mapping" : "Save Part Master Entry"}
+                    {linkSubmitting ? "Linking..." : "Save Customer Mapping"}
                   </button>
                 </div>
               </form>
@@ -656,7 +990,7 @@ export default function PartMasterPage() {
         <AppShell>
           <div className="p-12 text-center text-xs text-zinc-500">
             <RefreshCw className="h-6 w-6 animate-spin mx-auto text-blue-500 mb-2" />
-            Loading Part Master...
+            Loading Authoritative Part Master...
           </div>
         </AppShell>
       }
