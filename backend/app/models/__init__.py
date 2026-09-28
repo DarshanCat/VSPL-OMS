@@ -18,6 +18,7 @@ from app.models.machine import Machine
 from app.models.shift import Shift
 from app.models.operator import Operator
 from app.models.rejection_type import RejectionType
+from app.models.customer_part_cross_reference import CustomerPartCrossReference
 
 __all__ = [
     "User",
@@ -53,4 +54,6 @@ __all__ = [
     "Shift",
     "Operator",
     "RejectionType",
+    "CustomerPartCrossReference",
 ]
+

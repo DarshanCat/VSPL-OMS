@@ -276,6 +276,21 @@ def auto_migrate_schema():
         # rows that predate this column.
         "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packing_unit_code VARCHAR;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_packing_unit_code ON packing_transactions (packing_unit_code) WHERE packing_unit_code IS NOT NULL;",
+
+        # Customer Part Cross-References
+        "CREATE TABLE IF NOT EXISTS customer_part_cross_references ("
+        "    id UUID PRIMARY KEY,"
+        "    customer_id UUID NOT NULL REFERENCES customers(id),"
+        "    customer_part_no VARCHAR NOT NULL,"
+        "    part_id UUID NOT NULL REFERENCES parts(id),"
+        "    source VARCHAR,"
+        "    is_active BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    created_by_id UUID REFERENCES users(id),"
+        "    created_by_name VARCHAR"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_part_cross_ref ON customer_part_cross_references (customer_id, customer_part_no);",
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used

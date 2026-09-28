@@ -14,6 +14,7 @@ import {
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
   createOrderIntake, getMasterCustomers, getPOMasters, getSchedules, getParts,
+  lookupCustomerPart, PartLookupResponse,
   MasterCustomer, POMasterOut, ScheduleOut, AdminPart,
 } from "@/lib/api";
 
@@ -51,6 +52,9 @@ export default function OrderIntakePage() {
   const [customerCode, setCustomerCode] = useState("CUST-VALVE");
   const [customerName, setCustomerName] = useState("Flowserve Controls Ltd");
   const [customerPO, setCustomerPO] = useState("PO-2026-950");
+  const [customerPartNo, setCustomerPartNo] = useState("");
+  const [lookupStatus, setLookupStatus] = useState<PartLookupResponse | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
   const [partNumber, setPartNumber] = useState("BRZ-BUSH-100");
   const [grade, setGrade] = useState("PB2 / CuSn11P");
   const [partDesc, setPartDesc] = useState("Centrifugal Cast Bushing OD 120mm x ID 80mm");
@@ -114,6 +118,29 @@ export default function OrderIntakePage() {
     setCustomerCode(code);
     const found = customerOptions.find((c) => c.code === code);
     if (found) setCustomerName(found.name);
+    setLookupStatus(null);
+  };
+
+  const handleCustomerPartLookup = async (cpNo: string) => {
+    setCustomerPartNo(cpNo);
+    if (!cpNo.trim() || !customerCode) {
+      setLookupStatus(null);
+      return;
+    }
+    setLookupLoading(true);
+    try {
+      const res = await lookupCustomerPart(customerCode, cpNo.trim());
+      setLookupStatus(res);
+      if (res.is_matched && res.part_number) {
+        handlePartChange(res.part_number);
+        if (res.grade) setGrade(res.grade);
+        if (res.description) setPartDesc(res.description);
+      }
+    } catch {
+      setLookupStatus(null);
+    } finally {
+      setLookupLoading(false);
+    }
   };
 
   const handlePartChange = (num: string) => {
@@ -403,10 +430,84 @@ export default function OrderIntakePage() {
             )}
           </div>
 
+          {/* Customer Part Cross-Reference Resolution */}
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <Building className="h-3.5 w-3.5 text-blue-500" />
+                <span>Customer Part Number (Cross-Reference Resolution)</span>
+              </label>
+              <span className="text-[10px] font-semibold text-zinc-400">Customer-Specific</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customerPartNo}
+                onChange={(e) => setCustomerPartNo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCustomerPartLookup(customerPartNo);
+                  }
+                }}
+                placeholder="Enter Customer Part No to auto-resolve (e.g. CSTGMEHM1001, RC47NN...)"
+                className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => handleCustomerPartLookup(customerPartNo)}
+                disabled={lookupLoading || !customerPartNo.trim()}
+                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold transition-colors shrink-0"
+              >
+                {lookupLoading ? "Resolving..." : "Resolve"}
+              </button>
+            </div>
+
+            {lookupStatus && (
+              <div className="text-xs">
+                {lookupStatus.is_matched ? (
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/50 p-2 text-emerald-700 dark:text-emerald-300 font-semibold">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>
+                      {lookupStatus.match_type === "cross_reference" ? "Resolved via Cross-Reference: " : "Direct Part Master Match: "}
+                      <strong>{lookupStatus.part_number}</strong>
+                      {lookupStatus.grade ? ` (${lookupStatus.grade})` : ""}
+                    </span>
+                  </div>
+                ) : lookupStatus.match_type === "ambiguous" ? (
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50 p-2 text-amber-700 dark:text-amber-300 font-semibold">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <div>
+                      <span>{lookupStatus.message}</span>
+                      {lookupStatus.candidate_parts.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {lookupStatus.candidate_parts.map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => handlePartChange(p)}
+                              className="px-2 py-0.5 rounded bg-amber-200 dark:bg-amber-900/60 font-mono text-[11px] font-bold text-amber-900 dark:text-amber-200 hover:underline"
+                            >
+                              Select {p}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
+                    {lookupStatus.message || "No cross-reference found. Select directly from Part Master below."}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                Part Number{" "}
+                Internal Part Number (Authoritative OMS Part Master){" "}
                 <span className="font-normal text-zinc-400">({partOptions.length} in Part Master)</span>
               </label>
               {!(sourceType === "po" ? !!selectedPoLineId : !!selectedScheduleId) && (

@@ -36,7 +36,8 @@ import {
   Cog,
   Clock,
   UserCircle,
-  AlertOctagon
+  AlertOctagon,
+  Link2
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -170,6 +171,11 @@ const NAV_GROUPS: NavGroup[] = [
         name: "Rejection Type Master",
         href: "/masters/rejection-types",
         icon: <AlertOctagon className="h-4 w-4 text-indigo-500" />,
+      },
+      {
+        name: "Part Cross-References",
+        href: "/masters/part-cross-references",
+        icon: <Link2 className="h-4 w-4 text-blue-500" />,
       },
     ],
   },

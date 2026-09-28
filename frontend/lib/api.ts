@@ -939,3 +939,60 @@ export async function downloadFile(url: string, filename: string): Promise<void>
   link.remove();
   window.URL.revokeObjectURL(blobUrl);
 }
+
+// --- Customer Part Cross-Reference Master & Lookup ---
+
+export interface PartLookupResponse {
+  customer_code: string;
+  customer_name?: string | null;
+  customer_part_no: string;
+  part_id?: string | null;
+  part_number?: string | null;
+  grade?: string | null;
+  description?: string | null;
+  is_matched: boolean;
+  match_type: "cross_reference" | "direct_internal" | "ambiguous" | "none";
+  candidate_parts: string[];
+  message?: string | null;
+}
+
+export interface CustomerPartCrossReferenceOut {
+  id: string;
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  customer_part_no: string;
+  part_id: string;
+  internal_part_code: string;
+  part_description?: string | null;
+  part_grade?: string | null;
+  source?: string | null;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+  created_by_name?: string | null;
+}
+
+export async function lookupCustomerPart(
+  customerCode: string,
+  customerPartNo: string
+): Promise<PartLookupResponse> {
+  const { data } = await api.get("/api/v1/masters/part-cross-references/lookup", {
+    params: { customer_code: customerCode, customer_part_no: customerPartNo },
+  });
+  return data;
+}
+
+export async function getPartCrossReferences(params?: {
+  customer_code?: string;
+  part_number?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<CustomerPartCrossReferenceOut[]> {
+  const { data } = await api.get("/api/v1/masters/part-cross-references", {
+    params,
+  });
+  return data;
+}
+

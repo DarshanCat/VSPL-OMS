@@ -569,7 +569,7 @@ class RejectionService:
         Release -> WO Release chain like any other WO before it can be produced --
         enforced by ProductionService._enforce_release_gate and
         OperationsService.release_work_order via WorkOrder.is_replacement."""
-        PATCH_WO_ROLES = QUALITY_APPROVAL_ROLES + PLANNING_ROLES + (UserRole.PRODUCTION_MANAGER,)
+        PATCH_WO_ROLES = QUALITY_APPROVAL_ROLES + PLANNING_ROLES
         _require_role(current_user, PATCH_WO_ROLES, "approve a replacement / patch WO")
 
         record = None

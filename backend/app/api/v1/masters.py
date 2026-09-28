@@ -1,3 +1,4 @@
+from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -13,12 +14,20 @@ from app.schemas.master_data import (
     ShiftCreate, ShiftUpdate, ShiftOut,
     OperatorCreate, OperatorUpdate, OperatorOut,
 )
+from app.schemas.customer_part_cross_reference import (
+    CustomerPartCrossReferenceCreate,
+    CustomerPartCrossReferenceUpdate,
+    CustomerPartCrossReferenceOut,
+    PartLookupResponse,
+)
 from app.services.master_data_service import (
     CustomerMasterService, POMasterService, ScheduleMasterService,
     MachineMasterService, ShiftMasterService, OperatorMasterService,
 )
+from app.services.customer_part_cross_reference_service import CustomerPartCrossReferenceService
 
 router = APIRouter(prefix="/api/v1/masters", tags=["masters"])
+
 
 
 # --- Customer Master ---
@@ -163,3 +172,64 @@ def update_operator(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return OperatorMasterService.update_operator(db, payload, current_user=user)
+
+
+# --- Customer Part Cross-Reference Master ---
+
+@router.get("/part-cross-references", response_model=List[CustomerPartCrossReferenceOut])
+def list_part_cross_references(
+    customer_code: Optional[str] = Query(None, description="Filter by customer code"),
+    part_number: Optional[str] = Query(None, description="Filter by internal part number"),
+    search: Optional[str] = Query(None, description="Search by customer part no, code, or internal part"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return CustomerPartCrossReferenceService.list_cross_references(
+        db,
+        customer_code=customer_code,
+        part_number=part_number,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/part-cross-references/lookup", response_model=PartLookupResponse)
+def lookup_customer_part(
+    customer_code: str = Query(..., description="Customer code (e.g. SMN, HQP, CUST-VALVE)"),
+    customer_part_no: str = Query(..., description="Customer part number to resolve"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Customer-specific part lookup.
+
+    Resolves Customer + Customer Part No -> Internal Part.
+    Ambiguous mappings report ambiguity without guessing.
+    """
+    return CustomerPartCrossReferenceService.lookup_part(
+        db,
+        customer_code=customer_code,
+        customer_part_no=customer_part_no,
+    )
+
+
+@router.post("/part-cross-references", response_model=CustomerPartCrossReferenceOut)
+def create_part_cross_reference(
+    payload: CustomerPartCrossReferenceCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return CustomerPartCrossReferenceService.create_cross_reference(db, payload, current_user=user)
+
+
+@router.put("/part-cross-references/{ref_id}", response_model=CustomerPartCrossReferenceOut)
+def update_part_cross_reference(
+    ref_id: UUID,
+    payload: CustomerPartCrossReferenceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return CustomerPartCrossReferenceService.update_cross_reference(db, ref_id, payload, current_user=user)
+

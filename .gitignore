@@ -24,6 +24,8 @@ backend/.venv/
 backend/data/uploads/
 backend/data/reports/*.xlsx
 backend/data/reports/*.pdf
+reports/
+backend/reports/
 *.sqlite
 *.sqlite3
 *.db
