@@ -1,15 +1,17 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
+import { Modal } from "@/app/components/ui/Modal";
 import {
   getUsers,
   createUser,
   resetUserPassword,
   setUserStatus,
+  deleteUser,
   AdminUser,
   TemporaryPasswordResult,
 } from "@/lib/api";
-import { UserPlus, KeyRound, Copy, CheckCircle2, AlertTriangle, ShieldAlert } from "lucide-react";
+import { UserPlus, KeyRound, Copy, CheckCircle2, AlertTriangle, ShieldAlert, Trash2, Loader2 } from "lucide-react";
 
 const ROLES = [
   "admin", "ceo", "production_manager", "planner", "qa",
@@ -38,6 +40,13 @@ export default function AdminUsersPage() {
   const [tempResult, setTempResult] = useState<TemporaryPasswordResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+
+  const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteSuccess, setDeleteSuccess] = useState("");
+
 
   async function loadUsers() {
     setLoading(true);
@@ -100,6 +109,27 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!userToDelete) return;
+    if (confirmEmail.trim().toLowerCase() !== userToDelete.email.trim().toLowerCase()) {
+      setDeleteError("Email confirmation does not match the user's email address.");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const res = await deleteUser(userToDelete.id);
+      setDeleteSuccess(res.message || `User '${userToDelete.email}' was permanently deleted.`);
+      setUserToDelete(null);
+      setConfirmEmail("");
+      await loadUsers();
+    } catch (err: any) {
+      setDeleteError(err?.response?.data?.detail || "Could not delete user.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function copyTempPassword() {
     if (!tempResult) return;
     navigator.clipboard.writeText(tempResult.temporary_password).then(() => {
@@ -125,6 +155,23 @@ export default function AdminUsersPage() {
             new account must set its own permanent password on first login.
           </p>
         </div>
+
+        {deleteSuccess && (
+          <div className="flex items-center justify-between rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-4 py-3 text-xs text-emerald-800 dark:text-emerald-300 shadow-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>{deleteSuccess}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteSuccess("")}
+              className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline ml-4"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
 
         {/* Create User */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
@@ -278,6 +325,18 @@ export default function AdminUsersPage() {
                       >
                         {u.is_active ? "Deactivate" : "Activate"}
                       </button>
+                      <button
+                        type="button"
+                        disabled={rowBusy === u.id}
+                        onClick={() => {
+                          setUserToDelete(u);
+                          setConfirmEmail("");
+                          setDeleteError("");
+                        }}
+                        className="rounded-lg bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 disabled:opacity-50 transition-colors"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -285,6 +344,92 @@ export default function AdminUsersPage() {
             </table>
           )}
         </div>
+
+        {/* Delete User Confirmation Modal */}
+        <Modal
+          isOpen={!!userToDelete}
+          onClose={() => {
+            if (!deleting) {
+              setUserToDelete(null);
+              setConfirmEmail("");
+              setDeleteError("");
+            }
+          }}
+          title="Delete User Account"
+          subtitle="Permanent account removal"
+          maxWidth="md"
+        >
+          {userToDelete && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 p-3.5 text-xs text-rose-900 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+                <div>
+                  <p className="font-bold text-rose-950 dark:text-rose-200">Permanent Deletion Warning</p>
+                  <p className="mt-1 text-[11px] leading-relaxed">
+                    You are about to permanently delete the account for <strong className="font-semibold">{userToDelete.full_name}</strong>. This action cannot be undone.
+                  </p>
+                  <p className="mt-1.5 text-[11px] text-rose-700 dark:text-rose-400 leading-relaxed">
+                    <strong>Integrity Guard:</strong> If this user has recorded production, quality, dispatch, master, or audit activity, the system will block deletion to preserve historical integrity. Deactivation should be used instead.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-zinc-50 dark:bg-zinc-800/60 p-3.5 text-xs space-y-1.5 border border-zinc-200/70 dark:border-zinc-800">
+                <div className="flex justify-between"><span className="text-zinc-500 dark:text-zinc-400">Name:</span> <span className="font-semibold text-zinc-900 dark:text-zinc-100">{userToDelete.full_name}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500 dark:text-zinc-400">Email:</span> <span className="font-mono text-zinc-900 dark:text-zinc-100">{userToDelete.email}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500 dark:text-zinc-400">Role:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{roleLabel(userToDelete.role)}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500 dark:text-zinc-400">Department:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{userToDelete.department || "-"}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500 dark:text-zinc-400">Status:</span> <span className="font-medium text-zinc-900 dark:text-zinc-100">{userToDelete.is_active ? "Active" : "Inactive"}</span></div>
+              </div>
+
+              {deleteError && (
+                <div className="flex items-start gap-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 p-3 text-[11px] font-medium text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                  Type <span className="font-mono font-bold text-rose-600 dark:text-rose-400 select-all">{userToDelete.email}</span> to confirm:
+                </label>
+                <input
+                  type="email"
+                  value={confirmEmail}
+                  onChange={(e) => setConfirmEmail(e.target.value)}
+                  placeholder={userToDelete.email}
+                  disabled={deleting}
+                  autoFocus
+                  className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => {
+                    setUserToDelete(null);
+                    setConfirmEmail("");
+                    setDeleteError("");
+                  }}
+                  className="rounded-xl px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting || confirmEmail.trim().toLowerCase() !== userToDelete.email.trim().toLowerCase()}
+                  onClick={handleDelete}
+                  className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-600 transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {deleting ? "Deleting..." : "Permanently Delete User"}
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
       </div>
     </AppShell>
   );

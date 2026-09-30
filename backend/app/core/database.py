@@ -275,7 +275,10 @@ def auto_migrate_schema():
         # index enforces it at the DB level while still allowing multiple NULLs for
         # rows that predate this column.
         "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packing_unit_code VARCHAR;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packed_quantity INTEGER DEFAULT 0;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS created_by UUID;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_packing_unit_code ON packing_transactions (packing_unit_code) WHERE packing_unit_code IS NOT NULL;",
+
 
         # Customer Part Cross-References
         "CREATE TABLE IF NOT EXISTS customer_part_cross_references ("
@@ -291,7 +294,25 @@ def auto_migrate_schema():
         "    created_by_name VARCHAR"
         ");",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_part_cross_ref ON customer_part_cross_references (customer_id, customer_part_no);",
+
+        # Machines
+        "ALTER TABLE machines ADD COLUMN IF NOT EXISTS created_by_id UUID;",
+        "ALTER TABLE machines ADD COLUMN IF NOT EXISTS created_by_name VARCHAR;",
+
+        # Shifts
+        "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS created_by_id UUID;",
+        "ALTER TABLE shifts ADD COLUMN IF NOT EXISTS created_by_name VARCHAR;",
+
+        # Operators
+        "ALTER TABLE operators ADD COLUMN IF NOT EXISTS user_id UUID;",
+        "ALTER TABLE operators ADD COLUMN IF NOT EXISTS created_by_id UUID;",
+        "ALTER TABLE operators ADD COLUMN IF NOT EXISTS created_by_name VARCHAR;",
+
+        # Conversion part mappings
+        "ALTER TABLE conversion_part_mappings ADD COLUMN IF NOT EXISTS created_by_id UUID;",
+        "ALTER TABLE conversion_part_mappings ADD COLUMN IF NOT EXISTS updated_by_id UUID;",
     ]
+
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used
     # above (it's a Postgres-ism) -- on SQLite every one of those statements has always

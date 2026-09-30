@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
-from app.schemas.auth import AdminUserCreate, TempPasswordResult, UserOut, SetActiveRequest
+from app.schemas.auth import AdminUserCreate, TempPasswordResult, UserOut, SetActiveRequest, UserDeleteResponse
 from app.services.user_admin_service import UserAdminService
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
@@ -45,3 +45,13 @@ def set_status(
     user: User = Depends(get_current_user),
 ):
     return UserAdminService.set_active(db, user_id, payload.is_active, current_user=user)
+
+
+@router.delete("/{user_id}", response_model=UserDeleteResponse)
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return UserAdminService.delete_user(db, user_id, current_user=user)
+

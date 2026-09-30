@@ -1,7 +1,7 @@
 import axios from "axios";
 import Cookies from "js-cookie";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -120,7 +120,20 @@ export async function setUserStatus(userId: string, isActive: boolean): Promise<
   return data;
 }
 
+export interface UserDeleteResult {
+  success: boolean;
+  message: string;
+  user_id: string;
+  email: string;
+}
+
+export async function deleteUser(userId: string): Promise<UserDeleteResult> {
+  const { data } = await api.delete(`/api/v1/users/${encodeURIComponent(userId)}`);
+  return data;
+}
+
 // Release chain: Engineering Release -> Manufacturing Release -> WO Release -> Production
+
 export interface ReleaseEvidencePayload {
   document_name?: string;
   document_url?: string;

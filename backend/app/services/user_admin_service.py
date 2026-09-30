@@ -3,9 +3,21 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 from app.models.audit import AuditLog
+from app.models.conversion_mapping import ConversionPartMapping
+from app.models.customer_part_cross_reference import CustomerPartCrossReference
+from app.models.dispatch import Dispatch
+from app.models.machine import Machine
+from app.models.master_data import POMaster, ScheduleMaster
+from app.models.operator import Operator
+from app.models.packing import PackingTransaction
+from app.models.production import ProductionUpdate
+from app.models.production_movement import ProductionMovement
+from app.models.rejection_disposition import RejectionDisposition
+from app.models.shift import Shift
 from app.core.security import generate_temp_password, get_password_hash, verify_password, create_access_token
 from app.core.roles import USER_MANAGEMENT_ROLES
-from app.schemas.auth import AdminUserCreate, TempPasswordResult, ChangePasswordRequest, UserOut, Token
+from app.schemas.auth import AdminUserCreate, TempPasswordResult, ChangePasswordRequest, UserOut, Token, UserDeleteResponse
+
 
 
 def _require_admin(current_user: User, action_label: str) -> None:
@@ -94,6 +106,69 @@ class UserAdminService:
         return UserOut.model_validate(target)
 
     @staticmethod
+    def _user_has_references(db: Session, user_id) -> bool:
+        """Checks whether this user is referenced as a foreign key in any system table."""
+        checks = [
+            db.query(AuditLog.id).filter(AuditLog.user_id == user_id).first() is not None,
+            db.query(ConversionPartMapping.id).filter((ConversionPartMapping.created_by_id == user_id) | (ConversionPartMapping.updated_by_id == user_id)).first() is not None,
+            db.query(CustomerPartCrossReference.id).filter(CustomerPartCrossReference.created_by_id == user_id).first() is not None,
+            db.query(Dispatch.id).filter(Dispatch.created_by == user_id).first() is not None,
+            db.query(Machine.id).filter(Machine.created_by_id == user_id).first() is not None,
+            db.query(POMaster.id).filter(POMaster.created_by_id == user_id).first() is not None,
+            db.query(ScheduleMaster.id).filter(ScheduleMaster.created_by_id == user_id).first() is not None,
+            db.query(Operator.id).filter((Operator.user_id == user_id) | (Operator.created_by_id == user_id)).first() is not None,
+            db.query(PackingTransaction.id).filter(PackingTransaction.created_by == user_id).first() is not None,
+            db.query(ProductionUpdate.id).filter(ProductionUpdate.operator_id == user_id).first() is not None,
+            db.query(ProductionMovement.id).filter((ProductionMovement.operator_id == user_id) | (ProductionMovement.created_by == user_id)).first() is not None,
+            db.query(RejectionDisposition.id).filter((RejectionDisposition.authorized_by_id == user_id) | (RejectionDisposition.melting_sent_by_id == user_id)).first() is not None,
+            db.query(Shift.id).filter(Shift.created_by_id == user_id).first() is not None,
+        ]
+        return any(checks)
+
+    @staticmethod
+    def delete_user(db: Session, user_id: str, current_user: User) -> UserDeleteResponse:
+        _require_admin(current_user, "delete a user account")
+
+        target = db.query(User).filter(User.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+        if str(target.id) == str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Administrators cannot delete their own account.",
+            )
+
+        if target.role == UserRole.ADMIN and target.is_active:
+            active_admin_count = db.query(User).filter(User.role == UserRole.ADMIN, User.is_active == True).count()
+            if active_admin_count <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete the last active administrator account.",
+                )
+
+        if UserAdminService._user_has_references(db, target.id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This user has historical records and cannot be permanently deleted. Deactivate the user instead.",
+            )
+
+        target_id_str = str(target.id)
+        target_email = target.email
+        target_role = target.role.value
+
+        _audit(db, current_user, "USER_DELETED", target, details=f"email={target_email}, role={target_role}")
+        db.delete(target)
+        db.commit()
+
+        return UserDeleteResponse(
+            success=True,
+            message=f"User '{target_email}' was permanently deleted.",
+            user_id=target_id_str,
+            email=target_email,
+        )
+
+    @staticmethod
     def change_own_password(db: Session, current_user: User, req: ChangePasswordRequest) -> Token:
         """Self-service only -- deliberately takes no role/department fields, so a user
         can never change their own role or department through this (or any) endpoint."""
@@ -115,3 +190,4 @@ class UserAdminService:
         # against no longer verifies against anything (the hash was just replaced).
         token = create_access_token({"sub": current_user.email, "role": current_user.role.value})
         return Token(access_token=token)
+

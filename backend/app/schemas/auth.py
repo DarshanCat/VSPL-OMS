@@ -56,3 +56,10 @@ class ChangePasswordRequest(BaseModel):
 
 class SetActiveRequest(BaseModel):
     is_active: bool
+
+class UserDeleteResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: str
+    email: EmailStr
+
