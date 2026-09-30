@@ -41,7 +41,8 @@ def _auth(token):
 
 
 def _unique_email():
-    return f"onboard-{uuid.uuid4().hex[:10]}@vspl-test.com"
+    return f"onboard-{uuid.uuid4().hex[:10]}@vijayspheroidals.com"
+
 
 
 # ---------------------------------------------------------------------------

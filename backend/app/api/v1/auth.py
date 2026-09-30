@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token, validate_company_email
 from app.core.rate_limit import limiter
 from app.api.deps import require_roles, get_current_user
 from app.models.user import User, UserRole
@@ -23,20 +23,22 @@ def register(
     db: Session = Depends(get_db),
     admin: User = Depends(require_roles(UserRole.ADMIN)),
 ):
-    if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+    normalized_email = validate_company_email(payload.email)
+    if db.query(User).filter(User.email == normalized_email).first():
+        raise HTTPException(status_code=400, detail=f"A user with email '{normalized_email}' already exists. Not modified.")
     user = User(
-        full_name=payload.full_name,
-        email=payload.email,
+        full_name=payload.full_name.strip(),
+        email=normalized_email,
         hashed_password=hash_password(payload.password),
         role=payload.role,
-        department=payload.department,
+        department=payload.department.strip() if payload.department else None,
         is_active=payload.is_active,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
 
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")

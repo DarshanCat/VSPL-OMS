@@ -14,7 +14,7 @@ from app.models.production import ProductionUpdate
 from app.models.production_movement import ProductionMovement
 from app.models.rejection_disposition import RejectionDisposition
 from app.models.shift import Shift
-from app.core.security import generate_temp_password, get_password_hash, verify_password, create_access_token
+from app.core.security import generate_temp_password, get_password_hash, verify_password, create_access_token, validate_company_email
 from app.core.roles import USER_MANAGEMENT_ROLES
 from app.schemas.auth import AdminUserCreate, TempPasswordResult, ChangePasswordRequest, UserOut, Token, UserDeleteResponse
 
@@ -51,20 +51,22 @@ class UserAdminService:
     def create_user(db: Session, req: AdminUserCreate, current_user: User) -> TempPasswordResult:
         _require_admin(current_user, "create a user account")
 
-        existing = db.query(User).filter(User.email == req.email).first()
+        normalized_email = validate_company_email(req.email)
+
+        existing = db.query(User).filter(User.email == normalized_email).first()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"A user with email '{req.email}' already exists. Not modified.",
+                detail=f"A user with email '{normalized_email}' already exists. Not modified.",
             )
 
         temp_password = generate_temp_password()
         user = User(
-            full_name=req.full_name,
-            email=req.email,
+            full_name=req.full_name.strip(),
+            email=normalized_email,
             hashed_password=get_password_hash(temp_password),
             role=req.role,
-            department=req.department,
+            department=req.department.strip() if req.department else None,
             is_active=True,
             must_change_password=True,
         )
@@ -73,6 +75,7 @@ class UserAdminService:
         _audit(db, current_user, "USER_CREATED", user, details=f"role={req.role.value}, department={req.department or ''}")
         db.commit()
         db.refresh(user)
+
         return TempPasswordResult(user=UserOut.model_validate(user), temporary_password=temp_password)
 
     @staticmethod

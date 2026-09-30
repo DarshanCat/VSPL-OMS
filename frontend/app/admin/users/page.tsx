@@ -18,6 +18,15 @@ const ROLES = [
   "dispatch", "machine_operator", "operator", "packing", "store", "sales", "data_analyst",
 ];
 
+const ALLOWED_EMAIL_DOMAINS = ["vijayspheroidals.com", "vijayspheroidals.onmicrosoft.com"];
+
+function isValidCompanyEmail(emailStr: string): boolean {
+  const cleaned = emailStr.trim().toLowerCase();
+  const parts = cleaned.split("@");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  return ALLOWED_EMAIL_DOMAINS.includes(parts[1]);
+}
+
 function roleLabel(role: string) {
   return role
     .split("_")
@@ -68,9 +77,14 @@ export default function AdminUsersPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setCreateError("");
+    const trimmedEmail = email.trim();
+    if (!isValidCompanyEmail(trimmedEmail)) {
+      setCreateError("Only company email addresses ending with @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com are allowed.");
+      return;
+    }
     setCreating(true);
     try {
-      const result = await createUser({ full_name: fullName, email, department, role });
+      const result = await createUser({ full_name: fullName.trim(), email: trimmedEmail, department: department.trim() || undefined, role });
       setTempResult(result);
       setFullName("");
       setEmail("");
@@ -138,6 +152,9 @@ export default function AdminUsersPage() {
     });
   }
 
+  const isEmailTouched = email.trim().length > 0;
+  const isEmailValid = isValidCompanyEmail(email);
+
   return (
     <AppShell>
       <div className="max-w-5xl mx-auto space-y-6">
@@ -172,7 +189,6 @@ export default function AdminUsersPage() {
           </div>
         )}
 
-
         {/* Create User */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
           <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
@@ -192,14 +208,25 @@ export default function AdminUsersPage() {
               onChange={(e) => setFullName(e.target.value)}
               className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
             />
-            <input
-              required
-              type="email"
-              placeholder="Company email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-            />
+            <div className="space-y-1">
+              <input
+                required
+                type="email"
+                placeholder="Company email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={`w-full rounded-lg border bg-transparent px-3 py-2 text-xs transition-colors ${
+                  isEmailTouched && !isEmailValid
+                    ? "border-rose-400 dark:border-rose-600 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                    : "border-zinc-200 dark:border-zinc-700"
+                }`}
+              />
+              {isEmailTouched && !isEmailValid && (
+                <p className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                  Must be @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com
+                </p>
+              )}
+            </div>
             <input
               placeholder="Department"
               value={department}
@@ -215,15 +242,27 @@ export default function AdminUsersPage() {
                 <option key={r} value={r}>{roleLabel(r)}</option>
               ))}
             </select>
+
+            <div className="md:col-span-3 flex items-center gap-2 flex-wrap text-[11px] text-zinc-500 dark:text-zinc-400 self-center">
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300">Company email required:</span>
+              <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-[10px] font-mono text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-900">
+                • @vijayspheroidals.com
+              </span>
+              <span className="inline-flex items-center rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 text-[10px] font-mono text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-900">
+                • @vijayspheroidals.onmicrosoft.com
+              </span>
+            </div>
+
             <button
               type="submit"
-              disabled={creating}
-              className="md:col-span-4 justify-self-end rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors"
+              disabled={creating || !fullName.trim() || !email.trim() || !isEmailValid}
+              className="md:col-span-1 justify-self-end rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {creating ? "Creating..." : "Generate Temporary Password & Create User"}
+              {creating ? "Creating..." : "Generate Temp Password & Create User"}
             </button>
           </form>
         </div>
+
 
         {/* One-time temp password result */}
         {tempResult && (

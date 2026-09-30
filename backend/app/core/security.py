@@ -2,10 +2,52 @@ import secrets
 import string
 from datetime import datetime, timedelta
 import bcrypt
+from fastapi import HTTPException, status
 from jose import JWTError, jwt
 from app.core.config import settings
 
+ALLOWED_EMAIL_DOMAINS = {
+    "vijayspheroidals.com",
+    "vijayspheroidals.onmicrosoft.com",
+}
+
+def validate_company_email(email: str) -> str:
+    """Validates that an email belongs strictly to an allowed company domain.
+    Normalizes the email by stripping surrounding whitespace and lowercasing the domain.
+    Rejects lookalike domains, subdomain attachments, and unapproved domains with HTTP 400.
+    Returns the normalized email."""
+    if not email or not isinstance(email, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only company email addresses ending with @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com are allowed.",
+        )
+
+    cleaned = email.strip()
+    if "@" not in cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only company email addresses ending with @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com are allowed.",
+        )
+
+    parts = cleaned.rsplit("@", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only company email addresses ending with @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com are allowed.",
+        )
+
+    local_part, domain = parts[0], parts[1].lower()
+
+    if domain not in ALLOWED_EMAIL_DOMAINS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only company email addresses ending with @vijayspheroidals.com or @vijayspheroidals.onmicrosoft.com are allowed.",
+        )
+
+    return f"{local_part}@{domain}"
+
 _TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*-_="
+
 
 def generate_temp_password(length: int = 16) -> str:
     """A cryptographically random one-time password for admin-provisioned accounts --

@@ -51,7 +51,8 @@ def _auth(token):
 
 
 def _unique_email(prefix="delete-test"):
-    return f"{prefix}-{uuid.uuid4().hex[:10]}@vspl-test.com"
+    return f"{prefix}-{uuid.uuid4().hex[:10]}@vijayspheroidals.com"
+
 
 
 # ---------------------------------------------------------------------------
