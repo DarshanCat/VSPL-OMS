@@ -45,9 +45,24 @@ class CustomerOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 class POLineCreate(BaseModel):
-    part_number: str = Field(..., max_length=100)
+    # The authoritative, user-facing input -- the Internal Part Number is NEVER
+    # typed or chosen by the PO operator; it is resolved (or, for a genuinely new
+    # part, generated) server-side from this value. See
+    # MasterDataService.resolve_customer_part / POMasterService.create_po.
+    customer_part_number: Optional[str] = Field(None, max_length=200)
+    # Legacy/direct-API path only -- preserved so any existing caller that already
+    # supplies the literal internal part_number keeps working unchanged. The PO
+    # Master UI no longer sends this field.
+    part_number: Optional[str] = Field(None, max_length=100)
     po_qty: int = Field(..., gt=0, le=1_000_000)
     required_date: Optional[date] = None
+
+    # Deliberately NOT enforced here with a pydantic validator -- raising a plain
+    # ValueError from a model_validator embeds the exception object itself in the
+    # error's `ctx`, which this app's generic RequestValidationError handler
+    # (app/main.py) cannot JSON-serialize. Enforced instead in
+    # POMasterService.create_po, alongside its other HTTPException-raising
+    # business-rule checks.
 
 
 class POMasterCreate(BaseModel):
@@ -61,10 +76,31 @@ class POMasterCreate(BaseModel):
 class POLineOut(BaseModel):
     id: str
     part_number: str
+    customer_part_number: Optional[str] = None
     po_qty: int
     allocated_qty: int
     available_qty: int
     required_date: Optional[date] = None
+
+
+class CustomerPartOut(BaseModel):
+    customer_part_number: str
+    part_number: str
+    description: Optional[str] = None
+    grade: Optional[str] = None
+
+
+class ResolveCustomerPartRequest(BaseModel):
+    customer_code: str = Field(..., max_length=100)
+    customer_part_number: str = Field(..., max_length=200)
+
+
+class ResolveCustomerPartResponse(BaseModel):
+    customer_part_number: str
+    resolved: bool
+    part_number: Optional[str] = None
+    is_new: bool
+    message: str
 
 
 class POMasterOut(BaseModel):

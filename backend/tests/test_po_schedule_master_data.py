@@ -379,3 +379,98 @@ def test_non_planning_role_cannot_manage_masters_or_matching(client):
     assert client.post("/api/v1/masters/schedules", headers=headers, json={
         "customer_code": "CUST-VALVE", "part_number": "BRZ-BUSH-100", "scheduled_qty": 10,
     }).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Customer Part Number -> internal Part resolution (PO line intake)
+# ---------------------------------------------------------------------------
+
+def test_resolve_endpoint_reports_new_for_unmapped_customer_part(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    resp = client.get(
+        "/api/v1/masters/resolve-customer-part", headers=headers,
+        params={"customer_code": customer["customer_code"], "customer_part_number": "NEVER-SEEN-BEFORE-001"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resolved"] is False
+    assert body["is_new"] is True
+    assert body["part_number"] is None
+
+
+def test_po_line_with_new_customer_part_generates_next_internal_id_and_creates_mapping(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers, code=_unique_code("PMC"))
+    code = customer["customer_code"]
+
+    po1 = _create_po(client, headers, code, [{"customer_part_number": "CP-FIRST", "po_qty": 10}])
+    first_part_number = po1["lines"][0]["part_number"]
+    assert po1["lines"][0]["customer_part_number"] == "CP-FIRST"
+    assert first_part_number == f"{code}1"  # next_internal_part_number: {customer_code}{1}
+
+    po2 = _create_po(client, headers, code, [{"customer_part_number": "CP-SECOND", "po_qty": 5}])
+    second_part_number = po2["lines"][0]["part_number"]
+    assert second_part_number != first_part_number
+
+    parts_resp = client.get(
+        "/api/v1/masters/customer-parts", headers=headers, params={"customer_code": code},
+    )
+    assert parts_resp.status_code == 200, parts_resp.text
+    mapped = {row["customer_part_number"]: row["part_number"] for row in parts_resp.json()}
+    assert mapped == {"CP-FIRST": first_part_number, "CP-SECOND": second_part_number}
+
+
+def test_po_line_with_already_mapped_customer_part_resolves_to_same_internal_part(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    code = customer["customer_code"]
+
+    po1 = _create_po(client, headers, code, [{"customer_part_number": "CP-REPEAT", "po_qty": 10}])
+    resolved_part = po1["lines"][0]["part_number"]
+
+    po2 = _create_po(client, headers, code, [{"customer_part_number": "CP-REPEAT", "po_qty": 20}])
+    assert po2["lines"][0]["part_number"] == resolved_part  # resolved, not regenerated
+
+    preview = client.get(
+        "/api/v1/masters/resolve-customer-part", headers=headers,
+        params={"customer_code": code, "customer_part_number": "CP-REPEAT"},
+    )
+    assert preview.json()["resolved"] is True
+    assert preview.json()["part_number"] == resolved_part
+
+
+def test_po_line_blank_customer_part_number_is_rejected(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    resp = client.post(
+        "/api/v1/masters/pos", headers=headers,
+        json={
+            "po_number": f"PO-{uuid.uuid4().hex[:8].upper()}", "customer_code": customer["customer_code"],
+            "lines": [{"customer_part_number": "   ", "po_qty": 5}],
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_po_line_without_any_part_identifier_is_rejected(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    resp = client.post(
+        "/api/v1/masters/pos", headers=headers,
+        json={
+            "po_number": f"PO-{uuid.uuid4().hex[:8].upper()}", "customer_code": customer["customer_code"],
+            "lines": [{"po_qty": 5}],
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_po_line_legacy_direct_part_number_still_works(client):
+    """Backward compatibility: an existing/direct API caller supplying the literal
+    internal part_number (never customer_part_number) must keep working unchanged."""
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    po = _create_po(client, headers, customer["customer_code"], [{"part_number": "BRZ-BUSH-100", "po_qty": 7}])
+    assert po["lines"][0]["part_number"] == "BRZ-BUSH-100"
+    assert po["lines"][0]["customer_part_number"] is None

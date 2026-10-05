@@ -119,6 +119,7 @@ class OperationsService:
             max_batch_size=req.max_batch_size,
             delivery_date=req.delivery_date,
             order_type=req.order_type or "Standard",
+            order_classification=req.order_classification.value,
             status=req.status,
             source_type=source_type,
             po_line_id=po_line.id if po_line else None,
@@ -218,6 +219,7 @@ class OperationsService:
             total_qty=req.po_quantity,
             source_type=source_type,
             oar_po_status=oar_po_status,
+            order_classification=order.order_classification,
             message=(
                 f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
                 if source_type != "schedule"

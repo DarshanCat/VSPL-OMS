@@ -118,6 +118,7 @@ def auto_migrate_schema():
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS max_batch_size INTEGER DEFAULT 500;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR DEFAULT 'Standard';",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_classification VARCHAR DEFAULT 'regular';",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 

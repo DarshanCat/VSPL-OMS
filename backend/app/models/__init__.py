@@ -1,5 +1,5 @@
 from app.models.user import User, UserRole
-from app.models.order import Customer, Part, Order, OrderStatus
+from app.models.order import Customer, Part, Order, OrderStatus, OrderClassification
 from app.models.work_order import WorkOrder, WORoute, StageCode, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.packing import PackingRecord, PackingTransaction
@@ -14,6 +14,7 @@ from app.models.master_data import (
     POMaster, POLine, ScheduleMaster,
     POStatus, ScheduleStatus, OrderSourceType, OARPOStatus
 )
+from app.models.customer_part_mapping import CustomerPartMapping
 
 __all__ = [
     "User",
@@ -22,6 +23,7 @@ __all__ = [
     "Part",
     "Order",
     "OrderStatus",
+    "OrderClassification",
     "WorkOrder",
     "WORoute",
     "StageCode",
@@ -45,4 +47,5 @@ __all__ = [
     "ScheduleStatus",
     "OrderSourceType",
     "OARPOStatus",
+    "CustomerPartMapping",
 ]

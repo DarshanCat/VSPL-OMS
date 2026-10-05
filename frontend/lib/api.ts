@@ -252,6 +252,7 @@ export async function createOrderIntake(payload: {
   max_batch_size: number;
   delivery_date?: string;
   order_type?: string;
+  order_classification?: "regular" | "npd";
   wo_quantities?: number[];
   source_type?: string;
   po_line_id?: string;
@@ -310,6 +311,7 @@ export async function updateMasterCustomer(payload: {
 export interface POLineOut {
   id: string;
   part_number: string;
+  customer_part_number?: string | null;
   po_qty: number;
   allocated_qty: number;
   available_qty: number;
@@ -339,9 +341,36 @@ export async function createPOMaster(payload: {
   customer_code: string;
   po_date?: string;
   validity_date?: string;
-  lines: { part_number: string; po_qty: number; required_date?: string }[];
+  lines: { customer_part_number?: string; part_number?: string; po_qty: number; required_date?: string }[];
 }): Promise<POMasterOut> {
   const { data } = await api.post("/api/v1/masters/pos", payload);
+  return data;
+}
+
+export interface CustomerPartOut {
+  customer_part_number: string;
+  part_number: string;
+  description?: string | null;
+  grade?: string | null;
+}
+
+export async function getCustomerParts(customerCode: string): Promise<CustomerPartOut[]> {
+  const { data } = await api.get("/api/v1/masters/customer-parts", { params: { customer_code: customerCode } });
+  return data;
+}
+
+export interface ResolveCustomerPartResponse {
+  customer_part_number: string;
+  resolved: boolean;
+  part_number?: string | null;
+  is_new: boolean;
+  message: string;
+}
+
+export async function resolveCustomerPart(customerCode: string, customerPartNumber: string): Promise<ResolveCustomerPartResponse> {
+  const { data } = await api.get("/api/v1/masters/resolve-customer-part", {
+    params: { customer_code: customerCode, customer_part_number: customerPartNumber },
+  });
   return data;
 }
 
@@ -691,6 +720,232 @@ export async function runOMSCycle(formData: FormData) {
 
 export async function getLatestMaster() {
   const { data } = await api.get("/api/v1/oms/latest-master");
+  return data;
+}
+
+// --- Tracking & Search (read-only) ---
+
+export interface SearchHit {
+  type: "po" | "wo" | "part" | "oar" | "customer";
+  id: string;
+  label: string;
+  sublabel?: string | null;
+}
+
+export interface UnifiedSearchResponse {
+  query: string;
+  pos: SearchHit[];
+  wos: SearchHit[];
+  parts: SearchHit[];
+  oars: SearchHit[];
+  customers: SearchHit[];
+}
+
+export async function unifiedSearch(q: string): Promise<UnifiedSearchResponse> {
+  const { data } = await api.get("/api/v1/tracking/search", { params: { q } });
+  return data;
+}
+
+export interface PageMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface POTrackingListItem {
+  po_id: string;
+  po_number: string;
+  customer_code: string;
+  customer_name: string;
+  status: string;
+  po_date?: string | null;
+  validity_date?: string | null;
+  total_po_qty: number;
+  total_allocated_qty: number;
+  line_count: number;
+}
+
+export interface POTrackingLineWO {
+  wo_number: string;
+  oar_number?: string | null;
+  current_stage: string;
+  wo_status: string;
+  ok_completed: number;
+  rejected: number;
+  available_wip: number;
+  packing_status?: string | null;
+  dispatched_qty: number;
+}
+
+export interface POTrackingLine {
+  line_id: string;
+  part_number: string;
+  po_qty: number;
+  allocated_qty: number;
+  available_qty: number;
+  required_date?: string | null;
+  linked_oars: string[];
+  work_orders: POTrackingLineWO[];
+}
+
+export interface POTrackingDetail {
+  po_id: string;
+  po_number: string;
+  customer_code: string;
+  customer_name: string;
+  status: string;
+  po_date?: string | null;
+  validity_date?: string | null;
+  lines: POTrackingLine[];
+  total_po_qty: number;
+  total_allocated_qty: number;
+  total_remaining_qty: number;
+}
+
+export async function searchPOTracking(params: {
+  po_number?: string; customer?: string; part_number?: string; oar_number?: string;
+  status?: string; required_date?: string; limit?: number; offset?: number;
+}): Promise<POTrackingListItem[]> {
+  const { data } = await api.get("/api/v1/tracking/po", { params });
+  return data;
+}
+
+export async function getPOTrackingMeta(params: Record<string, any>): Promise<PageMeta> {
+  const { data } = await api.get("/api/v1/tracking/po/meta", { params });
+  return data;
+}
+
+export async function getPOTrackingDetail(poNumber: string): Promise<POTrackingDetail> {
+  const { data } = await api.get(`/api/v1/tracking/po/${encodeURIComponent(poNumber)}`);
+  return data;
+}
+
+export interface WOTrackingListItem {
+  wo_number: string;
+  oar_number?: string | null;
+  customer_po?: string | null;
+  customer_code: string;
+  customer_name: string;
+  part_number: string;
+  current_stage: string;
+  status: string;
+  physical_wo_qty: number;
+}
+
+export interface WORejectionHistoryItem {
+  nc_number: string;
+  stage?: string | null;
+  defect_code?: string | null;
+  qty: number;
+  status: string;
+  date_raised?: string | null;
+  date_closed?: string | null;
+}
+
+export async function searchWOTracking(params: {
+  wo_number?: string; oar_number?: string; po_number?: string; part_number?: string;
+  customer?: string; current_stage?: string; status?: string; limit?: number; offset?: number;
+}): Promise<WOTrackingListItem[]> {
+  const { data } = await api.get("/api/v1/tracking/wo", { params });
+  return data;
+}
+
+export async function getWOTrackingMeta(params: Record<string, any>): Promise<PageMeta> {
+  const { data } = await api.get("/api/v1/tracking/wo/meta", { params });
+  return data;
+}
+
+export async function getWORejectionHistory(woIdentifier: string): Promise<WORejectionHistoryItem[]> {
+  const { data } = await api.get(`/api/v1/tracking/wo/${encodeURIComponent(woIdentifier)}/rejections`);
+  return data;
+}
+
+export interface PartTrackingListItem {
+  part_number: string;
+  description?: string | null;
+  grade?: string | null;
+  wo_count: number;
+  customer_count: number;
+}
+
+export interface PartWOBreakdown {
+  wo_number: string;
+  oar_number?: string | null;
+  customer_code: string;
+  customer_name: string;
+  physical_wo_qty: number;
+  current_stage: string;
+  wo_status: string;
+  ok_completed: number;
+  rejected: number;
+  available_wip: number;
+  packing_status?: string | null;
+  dispatched_qty: number;
+}
+
+export interface PartTrackingDetail {
+  part_number: string;
+  description?: string | null;
+  grade?: string | null;
+  customers: string[];
+  active_po_lines: POTrackingLine[];
+  schedules: string[];
+  oars: string[];
+  work_orders: PartWOBreakdown[];
+}
+
+export async function searchPartTracking(params: {
+  part_number?: string; description?: string; limit?: number; offset?: number;
+}): Promise<PartTrackingListItem[]> {
+  const { data } = await api.get("/api/v1/tracking/part", { params });
+  return data;
+}
+
+export async function getPartTrackingMeta(params: Record<string, any>): Promise<PageMeta> {
+  const { data } = await api.get("/api/v1/tracking/part/meta", { params });
+  return data;
+}
+
+export async function getPartTrackingDetail(partNumber: string): Promise<PartTrackingDetail> {
+  const { data } = await api.get(`/api/v1/tracking/part/${encodeURIComponent(partNumber)}`);
+  return data;
+}
+
+export interface OARTrackingDetail {
+  oar_number: string;
+  customer_code: string;
+  customer_name: string;
+  source_type: string;
+  customer_po: string;
+  matched_po_number?: string | null;
+  schedule_number?: string | null;
+  oar_po_status?: string | null;
+  part_number: string;
+  oar_qty: number;
+  allocated_qty: number;
+  remaining_qty: number;
+  status: string;
+  work_orders: POTrackingLineWO[];
+}
+
+export async function getOARTrackingDetail(oarNumber: string): Promise<OARTrackingDetail> {
+  const { data } = await api.get(`/api/v1/tracking/oar/${encodeURIComponent(oarNumber)}`);
+  return data;
+}
+
+export interface CustomerTrackingDetail {
+  customer_code: string;
+  customer_name: string;
+  is_active: boolean;
+  active_pos: POTrackingListItem[];
+  schedules: string[];
+  oars: string[];
+  work_orders: WOTrackingListItem[];
+  parts: string[];
+}
+
+export async function getCustomerTrackingDetail(customerCode: string): Promise<CustomerTrackingDetail> {
+  const { data } = await api.get(`/api/v1/tracking/customer/${encodeURIComponent(customerCode)}`);
   return data;
 }
 

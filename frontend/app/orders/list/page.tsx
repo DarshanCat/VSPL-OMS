@@ -125,6 +125,7 @@ export default function OarWoListPage() {
                   <th className="py-2.5 px-3 text-right">Allocated</th>
                   <th className="py-2.5 px-3 text-right">Remaining</th>
                   <th className="py-2.5 px-3 text-center"># WOs</th>
+                  <th className="py-2.5 px-3">Type</th>
                   <th className="py-2.5 px-3">Status</th>
                 </tr>
               </thead>
@@ -164,6 +165,11 @@ export default function OarWoListPage() {
                         {oar.num_wos}
                       </td>
                       <td className="py-3 px-3">
+                        <Badge variant={(oar.order_classification || "regular") === "npd" ? "purple" : "gray"} size="sm">
+                          {(oar.order_classification || "regular") === "npd" ? "NPD" : "REGULAR"}
+                        </Badge>
+                      </td>
+                      <td className="py-3 px-3">
                         <Badge variant={getRAGVariant(oar.status)} size="sm">
                           {oar.status.toUpperCase()}
                         </Badge>
@@ -172,7 +178,7 @@ export default function OarWoListPage() {
 
                     {expanded[oar.oar_number] && (
                       <tr>
-                        <td colSpan={10} className="bg-zinc-50/60 dark:bg-zinc-950/40 p-0">
+                        <td colSpan={11} className="bg-zinc-50/60 dark:bg-zinc-950/40 p-0">
                           <div className="p-4">
                             {oar.work_orders.length === 0 ? (
                               <div className="text-[11px] text-zinc-400 px-2 py-1">

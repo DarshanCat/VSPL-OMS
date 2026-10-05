@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import date, datetime
 from pydantic import BaseModel, Field, ConfigDict
-from app.models.order import OrderStatus
+from app.models.order import OrderStatus, OrderClassification
 
 class OrderIntakeCreate(BaseModel):
     customer_code: str = Field(..., max_length=100)
@@ -14,6 +14,11 @@ class OrderIntakeCreate(BaseModel):
     max_batch_size: int = Field(..., gt=0, le=1_000_000)
     delivery_date: Optional[date] = None
     order_type: Optional[str] = Field("Standard", max_length=100)
+    # REGULAR (routine/repeat production) vs NPD (New Product Development) -- a
+    # separate classification from the free-text order_type above. Defaults to
+    # REGULAR so every existing caller (and every pre-existing OAR row) is
+    # unaffected; the Order Intake UI makes the operator choose explicitly.
+    order_classification: OrderClassification = OrderClassification.REGULAR
     status: OrderStatus = OrderStatus.ACCEPT
     remarks: Optional[str] = Field(None, max_length=2000)
     wo_quantities: Optional[List[int]] = Field(
@@ -40,6 +45,7 @@ class OrderIntakeResponse(BaseModel):
     total_qty: int
     source_type: str = "po"
     oar_po_status: Optional[str] = None
+    order_classification: str = "regular"
     message: str
 
 class WOReleaseCreate(BaseModel):

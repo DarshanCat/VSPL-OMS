@@ -1,41 +1,36 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { getMasterCustomers, getPOMasters, createPOMaster, getParts, MasterCustomer, POMasterOut, AdminPart } from "@/lib/api";
+import {
+  getMasterCustomers, getPOMasters, createPOMaster, getCustomerParts, resolveCustomerPart,
+  MasterCustomer, POMasterOut, CustomerPartOut,
+} from "@/lib/api";
 import { FilePlus, AlertTriangle, FileSpreadsheet, Trash2, Plus } from "lucide-react";
 
 interface LineDraft {
-  part_number: string;
-  part_search: string;
+  customer_part_number: string;
   po_qty: string;
   required_date: string;
+  // Resolution state -- display-only, never submitted. The internal Part Number
+  // is NEVER typed or chosen by the operator: it is resolved (existing part) or
+  // generated (genuinely new part) entirely server-side on submit, via the same
+  // resolve_customer_part() the preview below calls.
+  resolving: boolean;
+  resolvedPartNumber: string | null;
+  isNew: boolean | null; // null = not yet resolved
 }
 
 function emptyLine(): LineDraft {
-  return { part_number: "", part_search: "", po_qty: "", required_date: "" };
-}
-
-// Matches by either the authoritative internal Part Number (Unique Internal Code)
-// or the Customer Part No. (AdminPart.description) -- an operator confirming a part
-// "exists in the Part Master" is just as likely to be reading the customer-facing
-// number off a drawing/PO as the internal code, and only the internal code is a
-// valid `part_number` for the PO line.
-function filterParts(parts: AdminPart[], search: string): AdminPart[] {
-  const q = search.trim().toLowerCase();
-  const matches = q
-    ? parts.filter(
-        (p) =>
-          p.part_number.toLowerCase().includes(q) ||
-          (p.description || "").toLowerCase().includes(q)
-      )
-    : parts;
-  return matches.slice(0, 300);
+  return {
+    customer_part_number: "", po_qty: "", required_date: "",
+    resolving: false, resolvedPartNumber: null, isNew: null,
+  };
 }
 
 export default function POMasterPage() {
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
   const [pos, setPOs] = useState<POMasterOut[]>([]);
-  const [masterParts, setMasterParts] = useState<AdminPart[]>([]);
+  const [customerParts, setCustomerParts] = useState<CustomerPartOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
 
@@ -60,11 +55,6 @@ export default function POMasterPage() {
     } finally {
       setLoading(false);
     }
-    // Loaded independently of the PO/customer list above -- a Part Master outage
-    // must not block viewing or creating POs, only falls back to free-text entry.
-    getParts()
-      .then(setMasterParts)
-      .catch(() => setMasterParts([]));
   }
 
   useEffect(() => {
@@ -72,8 +62,36 @@ export default function POMasterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function updateLine(idx: number, field: keyof LineDraft, value: string) {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
+  // Known Customer Part Numbers for the selected customer -- populates the
+  // per-line <datalist> suggestions. Re-fetched whenever the customer changes,
+  // and whenever a PO is successfully created (a new mapping may have appeared).
+  useEffect(() => {
+    if (!customerCode) {
+      setCustomerParts([]);
+      return;
+    }
+    getCustomerParts(customerCode)
+      .then(setCustomerParts)
+      .catch(() => setCustomerParts([]));
+  }, [customerCode]);
+
+  function updateLine(idx: number, patch: Partial<LineDraft>) {
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  async function resolveLine(idx: number, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed || !customerCode) {
+      updateLine(idx, { resolvedPartNumber: null, isNew: null });
+      return;
+    }
+    updateLine(idx, { resolving: true });
+    try {
+      const result = await resolveCustomerPart(customerCode, trimmed);
+      updateLine(idx, { resolving: false, resolvedPartNumber: result.part_number || null, isNew: result.is_new });
+    } catch {
+      updateLine(idx, { resolving: false, resolvedPartNumber: null, isNew: null });
+    }
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -87,9 +105,9 @@ export default function POMasterPage() {
         po_date: poDate || undefined,
         validity_date: validityDate || undefined,
         lines: lines
-          .filter((l) => l.part_number && l.po_qty)
+          .filter((l) => l.customer_part_number && l.po_qty)
           .map((l) => ({
-            part_number: l.part_number,
+            customer_part_number: l.customer_part_number.trim(),
             po_qty: Number(l.po_qty),
             required_date: l.required_date || undefined,
           })),
@@ -99,6 +117,7 @@ export default function POMasterPage() {
       setValidityDate("");
       setLines([emptyLine()]);
       await loadAll();
+      if (customerCode) getCustomerParts(customerCode).then(setCustomerParts).catch(() => {});
     } catch (err: any) {
       setCreateError(err?.response?.data?.detail || "Could not create PO.");
     } finally {
@@ -133,68 +152,89 @@ export default function POMasterPage() {
             </div>
           )}
           <form onSubmit={handleCreate} className="mt-3 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <input required placeholder="PO number" value={poNumber} onChange={(e) => setPoNumber(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-              <select required value={customerCode} onChange={(e) => setCustomerCode(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs">
-                <option value="" disabled>Select customer</option>
+            {/* Step 1: Customer must be selected FIRST -- Customer Part Mapping (below)
+                is customer-specific, so nothing part-related can be entered before this. */}
+            <div>
+              <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">1. Customer / Party Name *</label>
+              <select required value={customerCode}
+                onChange={(e) => { setCustomerCode(e.target.value); setLines([emptyLine()]); }}
+                className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs">
+                <option value="" disabled>Select customer...</option>
                 {customers.map((c) => (
                   <option key={c.id} value={c.customer_code}>{c.customer_code} — {c.name}</option>
                 ))}
               </select>
-              <input type="date" placeholder="PO date" value={poDate} onChange={(e) => setPoDate(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-              <input type="date" placeholder="Validity date" value={validityDate} onChange={(e) => setValidityDate(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">2. Customer PO Number *</label>
+                <input required placeholder="e.g. PO-2026-950" value={poNumber} onChange={(e) => setPoNumber(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">3. PO Date *</label>
+                <input required type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">4. Validity Date</label>
+                <input type="date" value={validityDate} onChange={(e) => setValidityDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+              </div>
             </div>
 
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
-              <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">PO Lines</p>
-              {lines.map((l, idx) => {
-                const filteredParts = filterParts(masterParts, l.part_search);
-                return (
+              <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">5-6. Customer Part Number &amp; Quantity</p>
+              {!customerCode ? (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
+                  Select a Customer above first -- Customer Part Number lookup is specific to that customer.
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-400">
+                  Enter the Customer Part Number (as it appears on the customer's PO/drawing) -- the
+                  authoritative internal Part Number is resolved automatically, never typed here.
+                </p>
+              )}
+              <datalist id="customer-part-options">
+                {customerParts.map((p) => (
+                  <option key={p.customer_part_number} value={p.customer_part_number}>
+                    {p.part_number}
+                  </option>
+                ))}
+              </datalist>
+              {lines.map((l, idx) => (
                 <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
-                  {masterParts.length === 0 ? (
-                    // Part Master list failed to load -- fall back to free text rather
-                    // than blocking PO creation entirely. The backend still validates
-                    // the part_number against Part Master on submit either way.
-                    <input required placeholder="Part number" value={l.part_number}
-                      onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-                  ) : (
-                    <div className="space-y-1">
-                      <input
-                        type="text"
-                        placeholder="Search part no. or customer part no..."
-                        value={l.part_search}
-                        onChange={(e) => updateLine(idx, "part_search", e.target.value)}
-                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 text-[11px]"
-                      />
-                      <select
-                        required
-                        value={l.part_number}
-                        onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
-                      >
-                        <option value="" disabled>Select part...</option>
-                        {l.part_number && !filteredParts.some((p) => p.part_number === l.part_number) && (
-                          <option value={l.part_number}>{l.part_number}</option>
-                        )}
-                        {filteredParts.map((p) => (
-                          <option key={p.id} value={p.part_number}>
-                            {p.part_number} — {p.description || "No customer part no."}
-                            {p.grade ? ` (${p.grade})` : ""}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="space-y-1">
+                    <input
+                      required
+                      disabled={!customerCode}
+                      list="customer-part-options"
+                      placeholder="Customer Part Number"
+                      value={l.customer_part_number}
+                      onChange={(e) => updateLine(idx, { customer_part_number: e.target.value, resolvedPartNumber: null, isNew: null })}
+                      onBlur={(e) => resolveLine(idx, e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs disabled:opacity-50"
+                    />
+                    <div className="text-[11px] min-h-[1.1rem]">
+                      {l.resolving ? (
+                        <span className="text-zinc-400">Resolving...</span>
+                      ) : l.resolvedPartNumber ? (
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                          Internal Part: <span className="font-mono">{l.resolvedPartNumber}</span>
+                        </span>
+                      ) : l.isNew ? (
+                        <span className="font-semibold text-blue-600 dark:text-blue-400">
+                          New part -- an internal Part Number will be generated on submit
+                        </span>
+                      ) : null}
                     </div>
-                  )}
+                  </div>
                   <input required type="number" min={1} placeholder="PO qty" value={l.po_qty}
-                    onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
+                    onChange={(e) => updateLine(idx, { po_qty: e.target.value })}
                     className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
                   <input type="date" value={l.required_date}
-                    onChange={(e) => updateLine(idx, "required_date", e.target.value)}
+                    onChange={(e) => updateLine(idx, { required_date: e.target.value })}
                     className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
                   <button type="button" onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
                     disabled={lines.length === 1}
@@ -202,8 +242,7 @@ export default function POMasterPage() {
                     <Trash2 className="h-3.5 w-3.5" /> Remove
                   </button>
                 </div>
-                );
-              })}
+              ))}
               <button type="button" onClick={() => setLines((prev) => [...prev, emptyLine()])}
                 className="flex items-center gap-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
                 <Plus className="h-3.5 w-3.5" /> Add Line
@@ -248,7 +287,8 @@ export default function POMasterPage() {
                   <table className="w-full text-xs mt-3">
                     <thead className="text-zinc-500 dark:text-zinc-400">
                       <tr>
-                        <th className="text-left py-1 font-semibold">Part</th>
+                        <th className="text-left py-1 font-semibold">Customer Part No.</th>
+                        <th className="text-left py-1 font-semibold">Internal Part</th>
                         <th className="text-right py-1 font-semibold">PO Qty</th>
                         <th className="text-right py-1 font-semibold">Allocated</th>
                         <th className="text-right py-1 font-semibold">Available</th>
@@ -258,6 +298,7 @@ export default function POMasterPage() {
                     <tbody>
                       {po.lines.map((l) => (
                         <tr key={l.id} className="border-t border-zinc-100 dark:border-zinc-800">
+                          <td className="py-1.5">{l.customer_part_number || "-"}</td>
                           <td className="py-1.5 font-mono">{l.part_number}</td>
                           <td className="py-1.5 text-right">{l.po_qty}</td>
                           <td className="py-1.5 text-right">{l.allocated_qty}</td>

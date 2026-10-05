@@ -136,6 +136,7 @@ class OARListItem(BaseModel):
     num_wos: int
     status: str
     delivery_date: Optional[date] = None
+    order_classification: str = "regular"
     created_at: datetime
     work_orders: List[OARWorkOrderSummary]
 

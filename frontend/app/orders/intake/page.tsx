@@ -58,6 +58,7 @@ export default function OrderIntakePage() {
   const [batchSize, setBatchSize] = useState<number | "">(500);
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
   const [orderType, setOrderType] = useState("Standard");
+  const [orderClassification, setOrderClassification] = useState<"regular" | "npd">("regular");
 
   // Demand source -- PO (confirmed) vs Schedule (forecast, not yet a confirmed PO).
   const [sourceType, setSourceType] = useState<"po" | "schedule">("po");
@@ -203,6 +204,7 @@ export default function OrderIntakePage() {
         max_batch_size: batch,
         delivery_date: deliveryDate,
         order_type: orderType,
+        order_classification: orderClassification,
         wo_quantities,
         source_type: sourceType,
         po_line_id: sourceType === "po" ? selectedPoLineId || undefined : undefined,
@@ -251,7 +253,7 @@ export default function OrderIntakePage() {
                   {successResult.message}
                 </h4>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs | {successResult.wos_created.length} Work Order(s) created
+                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs | {successResult.wos_created.length} Work Order(s) created | Type: <strong>{(successResult.order_classification || "regular") === "npd" ? "NPD" : "Regular"}</strong>
                 </p>
               </div>
             </div>
@@ -479,6 +481,19 @@ export default function OrderIntakePage() {
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
               />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Order Type *</label>
+              <select
+                required
+                value={orderClassification}
+                onChange={(e) => setOrderClassification(e.target.value as "regular" | "npd")}
+                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+              >
+                <option value="regular">Regular</option>
+                <option value="npd">NPD (New Product Development)</option>
+              </select>
             </div>
           </div>
 

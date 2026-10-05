@@ -9,8 +9,12 @@ from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterOut,
     ScheduleCreate, ScheduleOut,
+    CustomerPartOut, ResolveCustomerPartResponse,
 )
-from app.services.master_data_service import CustomerMasterService, POMasterService, ScheduleMasterService
+from app.services.master_data_service import (
+    CustomerMasterService, POMasterService, ScheduleMasterService,
+    list_customer_parts, resolve_customer_part_preview,
+)
 
 router = APIRouter(prefix="/api/v1/masters", tags=["masters"])
 
@@ -58,6 +62,27 @@ def create_po(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return POMasterService.create_po(db, payload, current_user=user)
+
+
+# --- Customer Part Mapping (read-only lookups for the PO UI) ---
+
+@router.get("/customer-parts", response_model=List[CustomerPartOut])
+def get_customer_parts(
+    customer_code: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return list_customer_parts(db, customer_code)
+
+
+@router.get("/resolve-customer-part", response_model=ResolveCustomerPartResponse)
+def resolve_customer_part_endpoint(
+    customer_code: str = Query(...),
+    customer_part_number: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return resolve_customer_part_preview(db, customer_code, customer_part_number)
 
 
 # --- Schedule Master ---

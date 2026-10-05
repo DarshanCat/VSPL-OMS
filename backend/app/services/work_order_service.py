@@ -414,6 +414,7 @@ class WorkOrderService:
                 num_wos=len(wos),
                 status=order.status.value,
                 delivery_date=order.delivery_date,
+                order_classification=order.order_classification or "regular",
                 created_at=order.created_at or datetime.now(),
                 work_orders=wo_summaries
             ))
