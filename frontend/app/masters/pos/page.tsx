@@ -1,22 +1,41 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { getMasterCustomers, getPOMasters, createPOMaster, MasterCustomer, POMasterOut } from "@/lib/api";
+import { getMasterCustomers, getPOMasters, createPOMaster, getParts, MasterCustomer, POMasterOut, AdminPart } from "@/lib/api";
 import { FilePlus, AlertTriangle, FileSpreadsheet, Trash2, Plus } from "lucide-react";
 
 interface LineDraft {
   part_number: string;
+  part_search: string;
   po_qty: string;
   required_date: string;
 }
 
 function emptyLine(): LineDraft {
-  return { part_number: "", po_qty: "", required_date: "" };
+  return { part_number: "", part_search: "", po_qty: "", required_date: "" };
+}
+
+// Matches by either the authoritative internal Part Number (Unique Internal Code)
+// or the Customer Part No. (AdminPart.description) -- an operator confirming a part
+// "exists in the Part Master" is just as likely to be reading the customer-facing
+// number off a drawing/PO as the internal code, and only the internal code is a
+// valid `part_number` for the PO line.
+function filterParts(parts: AdminPart[], search: string): AdminPart[] {
+  const q = search.trim().toLowerCase();
+  const matches = q
+    ? parts.filter(
+        (p) =>
+          p.part_number.toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q)
+      )
+    : parts;
+  return matches.slice(0, 300);
 }
 
 export default function POMasterPage() {
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
   const [pos, setPOs] = useState<POMasterOut[]>([]);
+  const [masterParts, setMasterParts] = useState<AdminPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
 
@@ -41,6 +60,11 @@ export default function POMasterPage() {
     } finally {
       setLoading(false);
     }
+    // Loaded independently of the PO/customer list above -- a Part Master outage
+    // must not block viewing or creating POs, only falls back to free-text entry.
+    getParts()
+      .then(setMasterParts)
+      .catch(() => setMasterParts([]));
   }
 
   useEffect(() => {
@@ -127,11 +151,45 @@ export default function POMasterPage() {
 
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
               <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">PO Lines</p>
-              {lines.map((l, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
-                  <input required placeholder="Part number" value={l.part_number}
-                    onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+              {lines.map((l, idx) => {
+                const filteredParts = filterParts(masterParts, l.part_search);
+                return (
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
+                  {masterParts.length === 0 ? (
+                    // Part Master list failed to load -- fall back to free text rather
+                    // than blocking PO creation entirely. The backend still validates
+                    // the part_number against Part Master on submit either way.
+                    <input required placeholder="Part number" value={l.part_number}
+                      onChange={(e) => updateLine(idx, "part_number", e.target.value)}
+                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+                  ) : (
+                    <div className="space-y-1">
+                      <input
+                        type="text"
+                        placeholder="Search part no. or customer part no..."
+                        value={l.part_search}
+                        onChange={(e) => updateLine(idx, "part_search", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 text-[11px]"
+                      />
+                      <select
+                        required
+                        value={l.part_number}
+                        onChange={(e) => updateLine(idx, "part_number", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                      >
+                        <option value="" disabled>Select part...</option>
+                        {l.part_number && !filteredParts.some((p) => p.part_number === l.part_number) && (
+                          <option value={l.part_number}>{l.part_number}</option>
+                        )}
+                        {filteredParts.map((p) => (
+                          <option key={p.id} value={p.part_number}>
+                            {p.part_number} — {p.description || "No customer part no."}
+                            {p.grade ? ` (${p.grade})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <input required type="number" min={1} placeholder="PO qty" value={l.po_qty}
                     onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
                     className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
@@ -144,7 +202,8 @@ export default function POMasterPage() {
                     <Trash2 className="h-3.5 w-3.5" /> Remove
                   </button>
                 </div>
-              ))}
+                );
+              })}
               <button type="button" onClick={() => setLines((prev) => [...prev, emptyLine()])}
                 className="flex items-center gap-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
                 <Plus className="h-3.5 w-3.5" /> Add Line
