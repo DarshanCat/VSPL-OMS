@@ -160,9 +160,14 @@ class OMSIntegrationService:
         wip_map = {w.stage: w for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
         pr = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
 
+        # Check if route has separate PACKING and BSR stages
+        route_upper = [r.stage.strip().upper() for r in routes]
+        has_separate_packing_bsr = "PACKING" in route_upper and "BSR" in route_upper
+
         # 1. Flow calculations along the route
         for i, r in enumerate(routes):
             stg = r.stage
+            stg_upper = stg.strip().upper()
             wip_rec = wip_map.get(stg)
             if not wip_rec:
                 wip_rec = StageWIP(
@@ -184,26 +189,47 @@ class OMSIntegrationService:
             rej = wip_rec.rejected_qty
             tgt = r.stage_target_qty
 
-            is_packing_or_final = (
-                stg.upper() in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH")
-                or i == len(routes) - 1
-                or (i + 1 < len(routes) and routes[i + 1].stage.upper() == "DISPATCH")
-            )
+            if stg_upper == "DISPATCH":
+                # Terminal dispatch stage: dispatched goods leave factory WIP
+                net_ip = 0
+                on_hand = 0
+            elif has_separate_packing_bsr:
+                # If PACKING and BSR are discrete stages:
+                # BSR stage is a stock room buffer receiving packed goods prior to dispatch:
+                # auto-track ok_qty as entered minus rejections so it is immediately on-hand for dispatch.
+                if stg_upper == "BSR":
+                    ok = max(ok, ent - rej)
+                    wip_rec.ok_qty = ok
 
-            if is_packing_or_final and pr:
-                net_ip = pr.pending_qty
-                on_hand = pr.ready_for_dispatch_qty
-            else:
-                # OMS Flow Formula: In-Process (net) = max(Ent - OK - Rej, 0)
+                # OMS Sequential Flow Formulas:
+                # In-Process (net) = max(Ent - OK - Rej, 0)
+                # On-Hand = max(OK - Ent(next), 0)
                 net_ip = max(ent - ok - rej, 0)
-
-                # OMS Flow Formula: On-Hand = max(OK - Ent(next), 0)
                 nxt_ent = 0
                 if i + 1 < len(routes):
                     nxt_stg = routes[i + 1].stage
                     nxt_wip = wip_map.get(nxt_stg)
                     nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
                 on_hand = max(ok - nxt_ent, 0)
+            else:
+                # Route has combined PACKING / BSR or single stage before dispatch
+                is_packing_or_final = (
+                    stg_upper in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH")
+                    or i == len(routes) - 1
+                    or (i + 1 < len(routes) and routes[i + 1].stage.upper() == "DISPATCH")
+                )
+
+                if is_packing_or_final and pr:
+                    net_ip = pr.pending_qty
+                    on_hand = pr.ready_for_dispatch_qty
+                else:
+                    net_ip = max(ent - ok - rej, 0)
+                    nxt_ent = 0
+                    if i + 1 < len(routes):
+                        nxt_stg = routes[i + 1].stage
+                        nxt_wip = wip_map.get(nxt_stg)
+                        nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
+                    on_hand = max(ok - nxt_ent, 0)
 
             # Update StageWIP
             wip_rec.inproc_qty = net_ip

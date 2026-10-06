@@ -50,6 +50,7 @@ class WorkOrder(Base):
     production_updates = relationship("ProductionUpdate", back_populates="work_order")
     nc_records = relationship("NCRecord", back_populates="work_order")
     dispatches = relationship("Dispatch", back_populates="work_order")
+    heat_allocations = relationship("WorkOrderHeatAllocation", back_populates="work_order", cascade="all, delete-orphan")
 
 class WORoute(Base):
     """Ordered stage sequence + per-stage target for a WO (back-calculated from yield)."""

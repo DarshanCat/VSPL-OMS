@@ -17,6 +17,8 @@ class MovePartsRequest(BaseModel):
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
     source_type: Optional[str] = Field("SMES_UI", description="Source: SMES_UI | EXCEL_IMPORT | API | SYSTEM")
 
+from app.schemas.heat import HeatAllocationItem
+
 class RecordStageProductionRequest(BaseModel):
     wo_number: str = Field(..., description="Work Order Number e.g. WO-1001")
     stage: str = Field(..., description="Stage where production occurred e.g. F1, F2, F3, SP, FI")
@@ -28,6 +30,7 @@ class RecordStageProductionRequest(BaseModel):
     defect_code: Optional[str] = Field(None, max_length=100)
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
+    heat_allocations: Optional[List[HeatAllocationItem]] = Field(None, description="Optional raw material / heat batch allocations (typically at Stage F1 - Foundry)")
 
 class ProductionEntryResponse(BaseModel):
     success: bool

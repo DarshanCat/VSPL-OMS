@@ -963,3 +963,90 @@ export async function downloadFile(url: string, filename: string): Promise<void>
   link.remove();
   window.URL.revokeObjectURL(blobUrl);
 }
+
+// Heat Number & Traceability
+export interface Heat {
+  id: string;
+  heat_number: string;
+  grade: string;
+  melt_date?: string | null;
+  status: string;
+  tc_number?: string | null;
+  supplier_or_foundry?: string | null;
+  remarks?: string | null;
+  created_at: string;
+  total_allocated_qty: number;
+}
+
+export interface HeatCreatePayload {
+  heat_number: string;
+  grade: string;
+  melt_date?: string | null;
+  status?: string;
+  tc_number?: string | null;
+  supplier_or_foundry?: string | null;
+  remarks?: string | null;
+}
+
+export interface HeatAllocationItem {
+  id: string;
+  heat_number: string;
+  grade: string;
+  tc_number?: string | null;
+  allocated_qty: number;
+  stage: string;
+  allocated_at: string;
+  allocated_by?: string | null;
+  remarks?: string | null;
+}
+
+export interface StageTraceabilityItem {
+  stage: string;
+  sequence: number;
+  target_qty: number;
+  ok_qty: number;
+  rejected_qty: number;
+  inproc_qty: number;
+  onhand_qty: number;
+  status: string;
+}
+
+export interface DispatchTraceabilityItem {
+  invoice_number: string;
+  dispatched_qty: number;
+  dispatch_date?: string | null;
+  customer_po?: string | null;
+}
+
+export interface WOTraceability {
+  wo_number: string;
+  oar_number?: string | null;
+  customer_code?: string | null;
+  customer_name?: string | null;
+  customer_po?: string | null;
+  part_number?: string | null;
+  part_description?: string | null;
+  grade?: string | null;
+  physical_wo_qty: number;
+  current_stage: string;
+  status: string;
+  heats: HeatAllocationItem[];
+  total_heat_allocated_qty: number;
+  stage_progression: StageTraceabilityItem[];
+  dispatches: DispatchTraceabilityItem[];
+}
+
+export async function getHeats(params?: { grade?: string; status?: string; search?: string }): Promise<Heat[]> {
+  const { data } = await api.get("/api/v1/heats", { params });
+  return data;
+}
+
+export async function createHeat(payload: HeatCreatePayload): Promise<Heat> {
+  const { data } = await api.post("/api/v1/heats", payload);
+  return data;
+}
+
+export async function getWOTraceability(woNumber: string): Promise<WOTraceability> {
+  const { data } = await api.get(`/api/v1/work-orders/${encodeURIComponent(woNumber)}/traceability`);
+  return data;
+}

@@ -15,6 +15,7 @@ from app.models.master_data import (
     POStatus, ScheduleStatus, OrderSourceType, OARPOStatus
 )
 from app.models.customer_part_mapping import CustomerPartMapping
+from app.models.heat import Heat, WorkOrderHeatAllocation
 
 __all__ = [
     "User",
@@ -48,4 +49,6 @@ __all__ = [
     "OrderSourceType",
     "OARPOStatus",
     "CustomerPartMapping",
+    "Heat",
+    "WorkOrderHeatAllocation",
 ]

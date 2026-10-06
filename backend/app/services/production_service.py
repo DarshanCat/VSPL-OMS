@@ -9,6 +9,7 @@ from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.packing import PackingRecord
 from app.models.nc import NCRecord, next_nc_number
+from app.models.heat import Heat, WorkOrderHeatAllocation
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.production import (
@@ -451,6 +452,39 @@ class ProductionService:
             remarks=req.remarks
         )
         db.add(entry)
+        db.flush()
+
+        # Handle Heat Allocations if provided
+        if req.heat_allocations:
+            alloc_sum = sum(h.allocated_qty for h in req.heat_allocations)
+            if alloc_sum != total_proc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Total heat allocated quantity ({alloc_sum}) must equal total stage processed quantity ({total_proc}: {req.good_qty} Good + {req.rejected_quantity} Rej)."
+                )
+            for h in req.heat_allocations:
+                clean_heat = h.heat_number.strip().upper()
+                heat_obj = db.query(Heat).filter(Heat.heat_number == clean_heat).first()
+                if not heat_obj:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Heat '{clean_heat}' not found. Please register heat in Heat Master first."
+                    )
+                if heat_obj.status == "QUARANTINED":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Heat '{clean_heat}' is marked QUARANTINED and cannot be allocated."
+                    )
+                alloc = WorkOrderHeatAllocation(
+                    work_order_id=wo.id,
+                    heat_id=heat_obj.id,
+                    allocated_qty=h.allocated_qty,
+                    stage=matched_stage,
+                    production_update_id=entry.id,
+                    allocated_by=current_user.id if current_user else None,
+                    remarks=req.remarks
+                )
+                db.add(alloc)
 
         # Log NC if rejected
         if req.rejected_quantity > 0:

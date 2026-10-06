@@ -97,3 +97,12 @@ DISPATCH_EXECUTION_ROLES = (UserRole.ADMIN, UserRole.DISPATCH)
 # passwords, activating/deactivating, role assignment. Matches the existing
 # /auth/register gate (require_roles(UserRole.ADMIN)) -- Super Admin only.
 USER_MANAGEMENT_ROLES = (UserRole.ADMIN,)
+
+# Heat batch creation & master management: Metallurgy / Foundry / QA / Store / Admin
+HEAT_MANAGEMENT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE, UserRole.QA, UserRole.PLANNER)
+
+# Heat allocation to Work Order at casting: Floor operators, Store, Production Manager, Admin
+HEAT_ALLOCATION_ROLES = (
+    UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE,
+    UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
+)

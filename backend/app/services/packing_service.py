@@ -9,6 +9,7 @@ from app.models.packing import PackingRecord, PackingTransaction
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.packing import PackingQueueItem, PackingUpdateRequest, PackingUpdateResponse
+from app.services.oms_integration_service import OMSIntegrationService
 
 class PackingService:
     @staticmethod
@@ -125,6 +126,14 @@ class PackingService:
         else:
             packing_rec.status = "In-Packing"
 
+        # Update StageWIP for PACKING stage if present
+        pack_wip = db.query(StageWIP).filter(
+            StageWIP.work_order_id == wo.id,
+            StageWIP.stage.in_(["PACKING", "PACKING / BSR", "PACKING/BSR"])
+        ).with_for_update().first()
+        if pack_wip:
+            pack_wip.ok_qty += req.packed_quantity
+
         # Record immutable packing transaction ledger entry
         txn = PackingTransaction(
             work_order_id=wo.id,
@@ -136,6 +145,9 @@ class PackingService:
             created_by=current_user.id if current_user else None
         )
         db.add(txn)
+
+        # Recompute OMS Authoritative State across all stages
+        OMSIntegrationService.recompute_work_order(db, wo)
 
         # Create audit log
         audit = AuditLog(

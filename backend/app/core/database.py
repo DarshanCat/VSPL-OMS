@@ -253,7 +253,12 @@ def auto_migrate_schema():
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_movements_client_request_id ON production_movements (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_updates_client_request_id ON production_updates (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_dispatches_client_request_id ON dispatches (client_request_id) WHERE client_request_id IS NOT NULL;",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;",
+
+        # Heat Number indexes
+        "CREATE INDEX IF NOT EXISTS ix_heats_heat_number ON heats (heat_number);",
+        "CREATE INDEX IF NOT EXISTS ix_wo_heat_allocations_wo_id ON wo_heat_allocations (work_order_id);",
+        "CREATE INDEX IF NOT EXISTS ix_wo_heat_allocations_heat_id ON wo_heat_allocations (heat_id);"
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used
