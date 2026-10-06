@@ -108,6 +108,21 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall VARCHAR DEFAULT 'No';",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS released_by VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS release_date TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_by VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_at TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_document_name VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_document_url VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_document_revision VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_remarks VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_released_by VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_released_at TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_document_name VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_document_url VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_document_revision VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS manufacturing_remarks VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_wo_id UUID;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS is_replacement BOOLEAN DEFAULT FALSE;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS replacement_reason VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
@@ -254,6 +269,30 @@ def auto_migrate_schema():
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_production_updates_client_request_id ON production_updates (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_dispatches_client_request_id ON dispatches (client_request_id) WHERE client_request_id IS NOT NULL;",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_client_request_id ON packing_transactions (client_request_id) WHERE client_request_id IS NOT NULL;",
+
+        # Packing Transactions
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packed_quantity INTEGER DEFAULT 0;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS box_count INTEGER;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS package_type VARCHAR;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS remarks VARCHAR;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS created_by UUID;",
+        "ALTER TABLE packing_transactions ADD COLUMN IF NOT EXISTS packing_unit_code VARCHAR;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_packing_transactions_packing_unit_code ON packing_transactions (packing_unit_code) WHERE packing_unit_code IS NOT NULL;",
+
+        # Customer Part Cross-References
+        "CREATE TABLE IF NOT EXISTS customer_part_cross_references ("
+        "    id UUID PRIMARY KEY,"
+        "    customer_id UUID NOT NULL REFERENCES customers(id),"
+        "    customer_part_no VARCHAR NOT NULL,"
+        "    part_id UUID NOT NULL REFERENCES parts(id),"
+        "    source VARCHAR,"
+        "    is_active BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    created_by_id UUID REFERENCES users(id),"
+        "    created_by_name VARCHAR"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_part_cross_ref ON customer_part_cross_references (customer_id, customer_part_no);",
 
         # Heat Number indexes
         "CREATE INDEX IF NOT EXISTS ix_heats_heat_number ON heats (heat_number);",

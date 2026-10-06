@@ -16,6 +16,20 @@ from app.models.master_data import (
 )
 from app.models.customer_part_mapping import CustomerPartMapping
 from app.models.heat import Heat, WorkOrderHeatAllocation
+from app.models.machine import Machine
+from app.models.operator import Operator
+from app.models.rejection_type import RejectionType
+from app.models.shift import Shift
+from app.models.customer_part_cross_reference import CustomerPartCrossReference
+from app.models.continuous_casting import (
+    ContinuousCastingMaterial,
+    ContinuousCastingInward,
+    ContinuousCastingStockUnit,
+    ContinuousCastingRouting,
+    ContinuousCastingAllocation,
+    ContinuousCastingStockLedger,
+    ContinuousCastingCutRecord,
+)
 
 __all__ = [
     "User",
@@ -51,4 +65,16 @@ __all__ = [
     "CustomerPartMapping",
     "Heat",
     "WorkOrderHeatAllocation",
+    "Machine",
+    "Operator",
+    "RejectionType",
+    "Shift",
+    "CustomerPartCrossReference",
+    "ContinuousCastingMaterial",
+    "ContinuousCastingInward",
+    "ContinuousCastingStockUnit",
+    "ContinuousCastingRouting",
+    "ContinuousCastingAllocation",
+    "ContinuousCastingStockLedger",
+    "ContinuousCastingCutRecord",
 ]

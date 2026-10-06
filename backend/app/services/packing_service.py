@@ -167,23 +167,24 @@ class PackingService:
         except IntegrityError:
             # A concurrent request with the same idempotency key won the race.
             db.rollback()
-            existing_txn = db.query(PackingTransaction).filter(
-                PackingTransaction.client_request_id == req.client_request_id.strip()
-            ).first()
-            if not existing_txn:
-                raise
-            wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_txn.work_order_id).first()
-            pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_txn.work_order_id).first()
-            return PackingUpdateResponse(
-                success=True,
-                wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
-                client_request_id=existing_txn.client_request_id,
-                packed_this_batch=existing_txn.packed_quantity,
-                total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
-                remaining_pending=pr_existing.pending_qty if pr_existing else 0,
-                ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
-                message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
-            )
+            if req.client_request_id:
+                existing_txn = db.query(PackingTransaction).filter(
+                    PackingTransaction.client_request_id == req.client_request_id.strip()
+                ).first()
+                if existing_txn:
+                    wo_existing = db.query(WorkOrder).filter(WorkOrder.id == existing_txn.work_order_id).first()
+                    pr_existing = db.query(PackingRecord).filter(PackingRecord.work_order_id == existing_txn.work_order_id).first()
+                    return PackingUpdateResponse(
+                        success=True,
+                        wo_number=wo_existing.wo_number if wo_existing else req.wo_number,
+                        client_request_id=existing_txn.client_request_id,
+                        packed_this_batch=existing_txn.packed_quantity,
+                        total_packed=pr_existing.packed_qty if pr_existing else existing_txn.packed_quantity,
+                        remaining_pending=pr_existing.pending_qty if pr_existing else 0,
+                        ready_for_dispatch=pr_existing.ready_for_dispatch_qty if pr_existing else 0,
+                        message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction."
+                    )
+            raise
         db.refresh(packing_rec)
 
         return PackingUpdateResponse(

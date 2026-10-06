@@ -28,6 +28,40 @@ def _get_next_movement_id(db: Session) -> str:
 
 class ProductionService:
     @staticmethod
+    def _enforce_release_gate(wo: WorkOrder) -> None:
+        """Production is blocked until the release chain (Engineering Release ->
+        Manufacturing Release -> WO Released) is complete.
+
+        Backward-compatible activation for ORDINARY WOs: the chain only applies once a
+        WO has actually entered it (Engineering Release recorded) -- a WO that never
+        uses it (the existing intake-and-produce flow) is completely unaffected, so
+        existing production facts and tests are never silently changed.
+
+        Replacement WOs are the one exception: `is_replacement` WOs ALWAYS require the
+        full chain, starting from creation -- a replacement WO must never be producible
+        before Engineering Release, even though it was never explicitly put through
+        Engineering Release yet (that's the whole point: it's blocked until someone
+        does)."""
+        requires_full_chain = getattr(wo, "is_replacement", False) or getattr(wo, "engineering_released_at", None) is not None
+        if not requires_full_chain:
+            return
+        if getattr(wo, "engineering_released_at", None) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending Engineering Release."
+            )
+        if getattr(wo, "manufacturing_released_at", None) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending Manufacturing Release."
+            )
+        if getattr(wo, "release_date", None) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' is blocked pending WO Release."
+            )
+
+    @staticmethod
     def move_parts(db: Session, req: MovePartsRequest, current_user: Optional[User] = None) -> MovementResponse:
         now = datetime.now()
 
@@ -84,6 +118,7 @@ class ProductionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot move parts for Work Order '{req.wo_number}' with status '{wo.status.value}'."
             )
+        ProductionService._enforce_release_gate(wo)
 
         # 3. Validate Work Order Route
         routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
@@ -186,6 +221,12 @@ class ProductionService:
         # we do not double-increment ok_qty. Only increment ok_qty for direct movements where
         # production was not previously entered.
         additional_ok = max(req.quantity_moved - from_wip.onhand_qty, 0)
+        # Continuous-casting material gate (read-only; runs before any counter changes). Moving OUT of the
+        # first stage can create first-stage production implicitly: additional_ok + rejected is that amount.
+        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
+        ContinuousCastingGateService.enforce_first_stage_production(
+            db, wo, routes, matched_from, from_wip.ok_qty + from_wip.rejected_qty,
+            additional_ok + req.rejected_quantity)
         from_wip.ok_qty += additional_ok
         from_wip.rejected_qty += req.rejected_quantity
 
@@ -382,6 +423,7 @@ class ProductionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot record production for Work Order '{req.wo_number}' with status '{wo.status.value}'."
             )
+        ProductionService._enforce_release_gate(wo)
         
         routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
         route_stages = [r.stage for r in routes]
@@ -403,6 +445,11 @@ class ProductionService:
             StageWIP.work_order_id == wo.id,
             StageWIP.stage == matched_stage
         ).with_for_update().first()
+
+        # Continuous-casting material gate (read-only; runs before any StageWIP / ProductionUpdate / NC write).
+        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
+        ContinuousCastingGateService.enforce_first_stage_production(
+            db, wo, routes, matched_stage, (wip.ok_qty + wip.rejected_qty) if wip else 0, total_proc)
 
         if not wip:
             init_ent = wo.physical_wo_qty if route_stages and route_stages[0] == matched_stage else 0

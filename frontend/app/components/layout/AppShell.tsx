@@ -32,7 +32,8 @@ import {
   Users as UsersIcon,
   Building2,
   CalendarClock,
-  GitMerge
+  GitMerge,
+  Cog
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -47,6 +48,10 @@ const STORE_ALLOWED_HREFS = new Set([
   "/production/tracking",
   "/production/history",
   "/quality/nc",
+  // Continuous Casting: only the Stores-facing screens. Materials, Planning, Cutting and Traceability stay hidden.
+  "/continuous-casting/inward",
+  "/continuous-casting/stock",
+  "/continuous-casting/stores",
 ]);
 
 interface NavItem {
@@ -189,6 +194,20 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/quality/nc",
         icon: <AlertTriangle className="h-4 w-4 text-rose-500" />,
       },
+    ],
+  },
+  {
+    // Continuous Casting reads are open to every authenticated user, so no item carries `roles`.
+    // Write actions are hidden per screen (CCRoleGate); the backend enforces the real role checks.
+    group: "CONTINUOUS CASTING",
+    items: [
+      { name: "Materials", href: "/continuous-casting/materials", icon: <Layers className="h-4 w-4 text-amber-600" /> },
+      { name: "Inward & QA", href: "/continuous-casting/inward", icon: <PackageCheck className="h-4 w-4 text-amber-600" /> },
+      { name: "Stock", href: "/continuous-casting/stock", icon: <Boxes className="h-4 w-4 text-amber-600" /> },
+      { name: "Planning", href: "/continuous-casting/planning", icon: <CalendarClock className="h-4 w-4 text-amber-600" /> },
+      { name: "Stores Transactions", href: "/continuous-casting/stores", icon: <ArrowRightLeft className="h-4 w-4 text-amber-600" /> },
+      { name: "Cutting", href: "/continuous-casting/cutting", icon: <Cog className="h-4 w-4 text-amber-600" /> },
+      { name: "Traceability", href: "/continuous-casting/traceability", icon: <GitMerge className="h-4 w-4 text-amber-600" /> },
     ],
   },
   {

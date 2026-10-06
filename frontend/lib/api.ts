@@ -117,6 +117,19 @@ export async function setUserStatus(userId: string, isActive: boolean): Promise<
   return data;
 }
 
+export interface RoleInfo {
+  role: string;
+  display_name: string;
+  department: string;
+  permissions: string[];
+  allowed_modules: string[];
+}
+
+export async function getRoles(): Promise<RoleInfo[]> {
+  const { data } = await api.get("/api/v1/roles");
+  return data;
+}
+
 // Dashboard
 export async function getDashboardStats() {
   const { data } = await api.get("/api/v1/dashboard/stats");
