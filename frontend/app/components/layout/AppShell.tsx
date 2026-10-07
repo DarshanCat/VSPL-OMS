@@ -175,6 +175,12 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["admin", "planner"],
       },
       {
+        name: "Engineering Readiness",
+        href: "/engineering/readiness",
+        icon: <FileText className="h-4 w-4 text-cyan-500" />,
+        roles: ["admin", "engineering", "planner", "production_manager", "ceo"],
+      },
+      {
         name: "WO Release & Routing",
         href: "/planning/wo-release",
         icon: <Factory className="h-4 w-4" />,

@@ -297,7 +297,50 @@ def auto_migrate_schema():
         # Heat Number indexes
         "CREATE INDEX IF NOT EXISTS ix_heats_heat_number ON heats (heat_number);",
         "CREATE INDEX IF NOT EXISTS ix_wo_heat_allocations_wo_id ON wo_heat_allocations (work_order_id);",
-        "CREATE INDEX IF NOT EXISTS ix_wo_heat_allocations_heat_id ON wo_heat_allocations (heat_id);"
+        "CREATE INDEX IF NOT EXISTS ix_wo_heat_allocations_heat_id ON wo_heat_allocations (heat_id);",
+
+        # Part Engineering Profile / Drawing Revisions
+        "CREATE TABLE IF NOT EXISTS part_engineering_revisions ("
+        "    id UUID PRIMARY KEY,"
+        "    part_id UUID NOT NULL REFERENCES parts(id),"
+        "    drawing_number VARCHAR(100) NOT NULL,"
+        "    drawing_revision VARCHAR(50) NOT NULL,"
+        "    drawing_url VARCHAR(1000),"
+        "    customer_spec_ref VARCHAR(200),"
+        "    process_sheet_number VARCHAR(100),"
+        "    pattern_number VARCHAR(100),"
+        "    tooling_id VARCHAR(100),"
+        "    is_active BOOLEAN NOT NULL DEFAULT TRUE,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    created_by_id UUID REFERENCES users(id)"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_part_engineering_revision ON part_engineering_revisions (part_id, drawing_revision);",
+
+        # Work Order Engineering Readiness Checklist
+        "CREATE TABLE IF NOT EXISTS wo_engineering_readiness ("
+        "    id UUID PRIMARY KEY,"
+        "    work_order_id UUID NOT NULL UNIQUE REFERENCES work_orders(id),"
+        "    engineering_revision_id UUID REFERENCES part_engineering_revisions(id),"
+        "    drawing_available BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    drawing_revision_verified BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    customer_spec_verified BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    process_sheet_verified BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    pattern_ready BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    tooling_ready BOOLEAN NOT NULL DEFAULT FALSE,"
+        "    verified_revision VARCHAR(50),"
+        "    drawing_url VARCHAR(1000),"
+        "    pattern_number VARCHAR(100),"
+        "    tooling_id VARCHAR(100),"
+        "    readiness_status VARCHAR(50) NOT NULL DEFAULT 'PENDING',"
+        "    remarks TEXT,"
+        "    engineer_id UUID REFERENCES users(id),"
+        "    engineer_name VARCHAR(200),"
+        "    released_at TIMESTAMP,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_engineering_readiness_wo_id ON wo_engineering_readiness (work_order_id);"
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used

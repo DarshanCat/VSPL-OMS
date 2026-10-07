@@ -30,6 +30,10 @@ from app.models.continuous_casting import (
     ContinuousCastingStockLedger,
     ContinuousCastingCutRecord,
 )
+from app.models.engineering import (
+    PartEngineeringRevision,
+    WOEngineeringReadiness,
+)
 
 __all__ = [
     "User",
@@ -77,4 +81,6 @@ __all__ = [
     "ContinuousCastingAllocation",
     "ContinuousCastingStockLedger",
     "ContinuousCastingCutRecord",
+    "PartEngineeringRevision",
+    "WOEngineeringReadiness",
 ]
