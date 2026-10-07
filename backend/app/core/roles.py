@@ -114,7 +114,7 @@ ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
 
 # Manufacturing Release: second step of the release chain -- the service layer also
 # enforces that Engineering Release must already be recorded before this can happen.
-MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING)
+MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING, UserRole.PRODUCTION_MANAGER)
 
 # Continuous Casting (China) raw-material module. One tuple per operation so widening
 # one never widens another; no China-specific role is introduced.

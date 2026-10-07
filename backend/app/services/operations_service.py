@@ -236,6 +236,27 @@ class OperationsService:
                 detail=f"Work Order '{req.wo_number}' not found."
             )
 
+        # Release Chain Gate Enforcement: Engineering Release -> Manufacturing Release -> Planner WO Release
+        # For new WOs entering release, replacement WOs, or WOs in the release chain:
+        is_legacy_already_released = (
+            getattr(wo, "release_date", None) is not None
+            and getattr(wo, "status", None) != WOStatus.PLANNED
+            and not getattr(wo, "is_replacement", False)
+            and getattr(wo, "engineering_released_at", None) is None
+            and getattr(wo, "manufacturing_released_at", None) is None
+        )
+        if not is_legacy_already_released:
+            if getattr(wo, "engineering_released_at", None) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Work Order '{wo.wo_number}' cannot be released: Engineering Release is pending."
+                )
+            if getattr(wo, "manufacturing_released_at", None) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Work Order '{wo.wo_number}' cannot be released: Manufacturing Release is pending."
+                )
+
         stages = [s.strip().upper() for s in req.route_stages if s.strip()]
         if not stages:
             raise HTTPException(

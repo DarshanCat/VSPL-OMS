@@ -340,7 +340,44 @@ def auto_migrate_schema():
         "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ");",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_engineering_readiness_wo_id ON wo_engineering_readiness (work_order_id);"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_engineering_readiness_wo_id ON wo_engineering_readiness (work_order_id);",
+
+        # Work Order Manufacturing Readiness Checklist
+        "CREATE TABLE IF NOT EXISTS wo_manufacturing_readiness ("
+        "    id UUID PRIMARY KEY,"
+        "    work_order_id UUID NOT NULL UNIQUE REFERENCES work_orders(id),"
+        "    material_staging_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    material_staging_remark VARCHAR(500),"
+        "    machine_capacity_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    machine_capacity_remark VARCHAR(500),"
+        "    machine_id UUID REFERENCES machines(id),"
+        "    machine_code VARCHAR(100),"
+        "    tooling_fixtures_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    tooling_fixtures_remark VARCHAR(500),"
+        "    fixture_id VARCHAR(100),"
+        "    cnc_program_setup_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    cnc_program_setup_remark VARCHAR(500),"
+        "    nc_program_number VARCHAR(100),"
+        "    setup_sheet_url VARCHAR(1000),"
+        "    gauges_quality_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    gauges_quality_remark VARCHAR(500),"
+        "    gauge_set_id VARCHAR(100),"
+        "    operator_manning_status VARCHAR(50) NOT NULL DEFAULT 'NOT_READY',"
+        "    operator_manning_remark VARCHAR(500),"
+        "    operator_id UUID REFERENCES operators(id),"
+        "    operator_name VARCHAR(200),"
+        "    readiness_status VARCHAR(50) NOT NULL DEFAULT 'PENDING',"
+        "    remarks TEXT,"
+        "    document_name VARCHAR(255),"
+        "    document_url VARCHAR(1000),"
+        "    document_revision VARCHAR(50),"
+        "    released_by_id UUID REFERENCES users(id),"
+        "    released_by_name VARCHAR(200),"
+        "    released_at TIMESTAMP,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_manufacturing_readiness_wo_id ON wo_manufacturing_readiness (work_order_id);"
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used

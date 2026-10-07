@@ -34,6 +34,10 @@ from app.models.engineering import (
     PartEngineeringRevision,
     WOEngineeringReadiness,
 )
+from app.models.manufacturing import (
+    WOManufacturingReadiness,
+    ChecklistItemStatus,
+)
 
 __all__ = [
     "User",
@@ -83,4 +87,6 @@ __all__ = [
     "ContinuousCastingCutRecord",
     "PartEngineeringRevision",
     "WOEngineeringReadiness",
+    "WOManufacturingReadiness",
+    "ChecklistItemStatus",
 ]

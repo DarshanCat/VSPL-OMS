@@ -8,10 +8,13 @@ OAR, WO, Production, Movement, Rejection, Conversion, Scrap, Packing/BSR, Dispat
 Tracking, Reports, User administration.
 """
 import uuid
+from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.rate_limit import limiter
+from app.core.database import SessionLocal
+from app.models.work_order import WorkOrder
 from app.main import app
 
 SEEDED_LOGINS = {
@@ -303,6 +306,18 @@ def _build_ready_for_dispatch_wo(client, admin_headers, code):
     against this same dev database over the course of this session."""
     intake = _intake_oar(client, admin_headers, code, po_qty=5)
     wo_number = intake["wos_created"][0]
+
+    # Clear Engineering and Manufacturing gates before Planner release
+    db = SessionLocal()
+    wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number).first()
+    if wo:
+        wo.engineering_released_by = "Lead Engineer"
+        wo.engineering_released_at = datetime.now(timezone.utc)
+        wo.manufacturing_released_by = "Mfg Lead"
+        wo.manufacturing_released_at = datetime.now(timezone.utc)
+        db.commit()
+    db.close()
+
     release = client.post(
         "/api/v1/operations/wo-release", headers=admin_headers,
         json={"wo_number": wo_number, "physical_wo_qty": 5, "route_stages": ["FI", "DISPATCH"]},

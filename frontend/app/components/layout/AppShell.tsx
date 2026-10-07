@@ -33,7 +33,8 @@ import {
   Building2,
   CalendarClock,
   GitMerge,
-  Cog
+  Cog,
+  Wrench,
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -179,6 +180,12 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/engineering/readiness",
         icon: <FileText className="h-4 w-4 text-cyan-500" />,
         roles: ["admin", "engineering", "planner", "production_manager", "ceo"],
+      },
+      {
+        name: "Manufacturing Readiness",
+        href: "/manufacturing/readiness",
+        icon: <Wrench className="h-4 w-4 text-emerald-500" />,
+        roles: ["admin", "manufacturing", "production_manager", "planner", "ceo"],
       },
       {
         name: "WO Release & Routing",

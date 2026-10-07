@@ -9,10 +9,13 @@ Verifies:
 6. Full end-to-end Work Order traceability endpoint.
 """
 import uuid
+from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.rate_limit import limiter
+from app.core.database import SessionLocal
+from app.models.work_order import WorkOrder
 from app.main import app
 
 
@@ -77,6 +80,17 @@ def _setup_order_and_release(client, headers, qty=100, route_stages=None):
     )
     assert intake_resp.status_code == 200, intake_resp.text
     wo_num = intake_resp.json()["wos_created"][0]
+
+    # Stamp engineering and manufacturing release prerequisite
+    db = SessionLocal()
+    wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first()
+    if wo:
+        wo.engineering_released_by = "Lead Engineer"
+        wo.engineering_released_at = datetime.now(timezone.utc)
+        wo.manufacturing_released_by = "Mfg Lead"
+        wo.manufacturing_released_at = datetime.now(timezone.utc)
+        db.commit()
+    db.close()
 
     # 3. Release WO
     rel_resp = client.post(

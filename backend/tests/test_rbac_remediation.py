@@ -19,10 +19,13 @@ Each also proves the legitimate role can still complete the real operation end t
 (not just "not 403") to guard against accidentally locking out the intended workflow.
 """
 import uuid
+from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.rate_limit import limiter
+from app.core.database import SessionLocal
+from app.models.work_order import WorkOrder
 from app.main import app
 
 SEEDED_LOGINS = {
@@ -70,7 +73,20 @@ def _intake_fresh_wo(client, headers, po_qty=25):
         },
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()["wos_created"][0]
+    wo_number = resp.json()["wos_created"][0]
+
+    # Clear Engineering and Manufacturing gates before Planner release
+    db = SessionLocal()
+    wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number).first()
+    if wo:
+        wo.engineering_released_by = "Lead Engineer"
+        wo.engineering_released_at = datetime.now(timezone.utc)
+        wo.manufacturing_released_by = "Mfg Lead"
+        wo.manufacturing_released_at = datetime.now(timezone.utc)
+        db.commit()
+    db.close()
+
+    return wo_number
 
 
 def _build_ready_for_dispatch_wo(client, admin_headers, qty=5):
