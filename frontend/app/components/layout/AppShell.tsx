@@ -142,6 +142,12 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["admin", "planner"],
       },
       {
+        name: "Part Master",
+        href: "/masters/parts",
+        icon: <Layers className="h-4 w-4 text-indigo-500" />,
+        roles: ["admin", "planner"],
+      },
+      {
         name: "PO Master",
         href: "/masters/pos",
         icon: <FileSpreadsheet className="h-4 w-4 text-emerald-500" />,

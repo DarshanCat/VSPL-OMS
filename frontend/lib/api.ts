@@ -418,6 +418,77 @@ export async function createSchedule(payload: {
   return data;
 }
 
+// --- Part Master ---
+
+export interface MasterPart {
+  id: string;
+  part_number: string;
+  customer_id: string;
+  customer_code: string;
+  customer_name: string;
+  customer_part_number: string;
+  status: string;
+  description?: string | null;
+  created_at?: string | null;
+}
+
+export interface MasterPartKPIs {
+  total_parts: number;
+  active_parts: number;
+  total_customers: number;
+  new_parts_this_month: number;
+}
+
+export interface MasterPartListResponse {
+  items: MasterPart[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function getMasterParts(params?: {
+  customer_code?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<MasterPartListResponse> {
+  const { data } = await api.get("/api/v1/masters/parts", { params });
+  return data;
+}
+
+export async function getMasterPartKPIs(): Promise<MasterPartKPIs> {
+  const { data } = await api.get("/api/v1/masters/parts/kpis");
+  return data;
+}
+
+export async function getMasterPart(partId: string): Promise<MasterPart> {
+  const { data } = await api.get(`/api/v1/masters/parts/${encodeURIComponent(partId)}`);
+  return data;
+}
+
+export async function createMasterPart(payload: {
+  customer_code: string;
+  customer_part_number: string;
+  status?: string;
+  description?: string;
+}): Promise<MasterPart> {
+  const { data } = await api.post("/api/v1/masters/parts", payload);
+  return data;
+}
+
+export async function updateMasterPart(
+  partId: string,
+  payload: {
+    customer_part_number?: string;
+    status?: string;
+    description?: string;
+  }
+): Promise<MasterPart> {
+  const { data } = await api.put(`/api/v1/masters/parts/${encodeURIComponent(partId)}`, payload);
+  return data;
+}
+
 // --- PO <-> Schedule Matching ---
 
 export interface MatchCandidate {

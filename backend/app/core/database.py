@@ -377,7 +377,21 @@ def auto_migrate_schema():
         "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
         "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ");",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_manufacturing_readiness_wo_id ON wo_manufacturing_readiness (work_order_id);"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_wo_manufacturing_readiness_wo_id ON wo_manufacturing_readiness (work_order_id);",
+
+        # Customer Part Mappings
+        "CREATE TABLE IF NOT EXISTS customer_part_mappings ("
+        "    id UUID PRIMARY KEY,"
+        "    customer_id UUID NOT NULL REFERENCES customers(id),"
+        "    part_id UUID NOT NULL REFERENCES parts(id),"
+        "    customer_part_number VARCHAR NOT NULL,"
+        "    status VARCHAR NOT NULL DEFAULT 'Active',"
+        "    source_date TIMESTAMP,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ");",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_customer_part_mapping ON customer_part_mappings (customer_id, part_id, customer_part_number);",
+        "CREATE INDEX IF NOT EXISTS ix_customer_part_mappings_cust_part ON customer_part_mappings (customer_id, customer_part_number);"
     ]
 
     # SQLite's ALTER TABLE ADD COLUMN does not support the "IF NOT EXISTS" clause used

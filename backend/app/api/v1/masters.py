@@ -10,10 +10,13 @@ from app.schemas.master_data import (
     POMasterCreate, POMasterOut,
     ScheduleCreate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
+    PartMasterCreate, PartMasterUpdate, PartMasterOut,
+    PartMasterKPIs, PartMasterListResponse,
 )
 from app.services.master_data_service import (
     CustomerMasterService, POMasterService, ScheduleMasterService,
     list_customer_parts, resolve_customer_part_preview,
+    PartMasterService,
 )
 
 router = APIRouter(prefix="/api/v1/masters", tags=["masters"])
@@ -103,3 +106,62 @@ def create_schedule(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return ScheduleMasterService.create_schedule(db, payload, current_user=user)
+
+
+# --- Part Master ---
+
+@router.get("/parts/kpis", response_model=PartMasterKPIs)
+def get_part_kpis(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.get_kpis(db)
+
+
+@router.get("/parts", response_model=PartMasterListResponse)
+def list_parts(
+    customer_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.list_parts(
+        db,
+        customer_code=customer_code,
+        status_filter=status,
+        search=search,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get("/parts/{part_id}", response_model=PartMasterOut)
+def get_part(
+    part_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.get_part(db, part_id=part_id)
+
+
+@router.post("/parts", response_model=PartMasterOut)
+def create_part(
+    payload: PartMasterCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.create_part(db, payload, current_user=user)
+
+
+@router.put("/parts/{part_id}", response_model=PartMasterOut)
+def update_part(
+    part_id: str,
+    payload: PartMasterUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.update_part(db, part_id=part_id, req=payload, current_user=user)
+

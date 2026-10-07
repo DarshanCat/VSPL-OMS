@@ -176,3 +176,54 @@ class MatchConfirmResponse(BaseModel):
     po_number: str
     quantity_match: str
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Part Master
+# ---------------------------------------------------------------------------
+
+class PartMasterCreate(BaseModel):
+    # Customer identifier -- user selects an existing customer
+    customer_code: str = Field(..., max_length=100)
+    # The actual Customer Part Number (Column G from Excel) -- preserved verbatim
+    customer_part_number: str = Field(..., max_length=200)
+    status: str = Field("Active", max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+
+
+class PartMasterUpdate(BaseModel):
+    customer_part_number: Optional[str] = Field(None, max_length=200)
+    status: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+
+
+class PartMasterOut(BaseModel):
+    id: str
+    part_number: str  # Unique Internal Code (e.g. APE1, APE2)
+    customer_id: str
+    customer_code: str
+    customer_name: str
+    customer_part_number: str
+    status: str
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    @field_validator("id", "customer_id", mode="before")
+    @classmethod
+    def _coerce_uuid(cls, v):
+        return str(v) if v is not None else ""
+
+
+class PartMasterKPIs(BaseModel):
+    total_parts: int
+    active_parts: int
+    total_customers: int
+    new_parts_this_month: int
+
+
+class PartMasterListResponse(BaseModel):
+    items: List[PartMasterOut]
+    total: int
+    page: int
+    limit: int
+
