@@ -16,6 +16,7 @@ class StageCode(str, enum.Enum):
     DISPATCH = "DISPATCH"
 
 class WOStatus(str, enum.Enum):
+    OPEN = "open"
     PLANNED = "planned"
     RELEASED = "released"
     IN_PRODUCTION = "in_production"

@@ -125,12 +125,15 @@ class POMasterService:
 
     @staticmethod
     def create_po(db: Session, req: POMasterCreate, current_user: Optional[User] = None) -> POMasterOut:
-        if db.query(POMaster).filter(POMaster.po_number == req.po_number.strip()).first():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PO number '{req.po_number}' already exists.")
-
         customer = db.query(Customer).filter(Customer.customer_code == req.customer_code.strip().upper()).first()
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{req.customer_code}' not found.")
+
+        if db.query(POMaster).filter(
+            POMaster.po_number == req.po_number.strip(),
+            POMaster.customer_id == customer.id
+        ).first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PO number '{req.po_number}' already exists for this customer.")
 
         po = POMaster(
             po_number=req.po_number.strip(), customer_id=customer.id,

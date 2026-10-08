@@ -7,7 +7,7 @@ and Order.oar_po_status below.
 """
 import enum
 import uuid
-from sqlalchemy import Column, String, Integer, Date, DateTime, Enum, ForeignKey
+from sqlalchemy import Column, String, Integer, Date, DateTime, Enum, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, GUID
@@ -43,9 +43,10 @@ class OARPOStatus(str, enum.Enum):
 
 class POMaster(Base):
     __tablename__ = "po_master"
+    __table_args__ = (UniqueConstraint("customer_id", "po_number", name="uq_po_master_customer_po"),)
 
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
-    po_number = Column(String, unique=True, nullable=False, index=True)
+    po_number = Column(String, nullable=False, index=True)
     customer_id = Column(GUID, ForeignKey("customers.id"), nullable=False)
     po_date = Column(Date, nullable=True)
     validity_date = Column(Date, nullable=True)

@@ -7,6 +7,7 @@ from app.core.database import Base, GUID
 
 class OrderStatus(str, enum.Enum):
     ACCEPT = "accept"
+    CONFIRMED = "confirmed"
     HOLD = "hold"
     REJECT = "reject"
 
