@@ -1,8 +1,12 @@
-from typing import List, Optional
+from datetime import datetime
+from typing import List, Optional, Tuple
 from fastapi import HTTPException, status
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from app.models.order import Customer, Part, Order
+from app.models.order import Customer, Part, Order, next_internal_part_number
 from app.models.master_data import POMaster, POLine, ScheduleMaster, POStatus, ScheduleStatus
+from app.models.customer_part_mapping import CustomerPartMapping
 from app.models.machine import Machine
 from app.models.shift import Shift
 from app.models.operator import Operator
@@ -12,10 +16,15 @@ from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterOut, POLineOut,
     ScheduleCreate, ScheduleOut,
+    CustomerPartOut, ResolveCustomerPartResponse,
+    PartMasterCreate, PartMasterUpdate, PartMasterOut,
+    PartMasterKPIs, PartMasterListResponse,
     MachineCreate, MachineUpdate, MachineOut,
     ShiftCreate, ShiftUpdate, ShiftOut,
     OperatorCreate, OperatorUpdate, OperatorOut,
 )
+
+_MAX_PO_CREATE_ATTEMPTS = 5
 
 
 def _audit(db: Session, actor: Optional[User], action: str, entity: str, entity_id: str, details: str = "") -> None:
@@ -53,6 +62,109 @@ def _customer_out(c: Customer) -> CustomerOut:
         address=c.address, gst=c.gst, contact_person=c.contact_person,
         email=c.email, phone=c.phone, is_active=c.is_active,
     )
+
+
+def _find_customer_part_mapping(db: Session, customer_id, customer_part_number: str) -> Optional[CustomerPartMapping]:
+    norm = customer_part_number.strip()
+    return (
+        db.query(CustomerPartMapping)
+        .filter(
+            CustomerPartMapping.customer_id == customer_id,
+            func.upper(CustomerPartMapping.customer_part_number) == norm.upper(),
+        )
+        .first()
+    )
+
+
+def resolve_customer_part(
+    db: Session, customer: Customer, customer_part_number: str, create_if_missing: bool
+) -> Tuple[Optional[Part], bool, Optional[CustomerPartMapping]]:
+    """THE single place a Customer Part Number is ever resolved to -- or, for a
+    genuinely new part, used to generate -- the authoritative internal Part.
+    Both the live resolve-preview endpoint and PO creation call this exact
+    function, so a PO can never land on a different outcome than what was
+    already previewed to the operator.
+
+    Returns (part, is_new, mapping):
+      - an existing mapping is found        -> (existing part, False, existing mapping)
+      - no mapping, create_if_missing=False  -> (None, True, None) -- "would be new"
+      - no mapping, create_if_missing=True   -> generates the next internal Part
+        number (next_internal_part_number) and creates it plus its mapping
+    """
+    norm = (customer_part_number or "").strip()
+    if not norm:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer Part Number is required.")
+
+    existing = _find_customer_part_mapping(db, customer.id, norm)
+    if existing:
+        part = db.query(Part).filter(Part.id == existing.part_id).first()
+        return part, False, existing
+
+    if not create_if_missing:
+        return None, True, None
+
+    db.query(Customer).filter(Customer.id == customer.id).with_for_update().first()
+    next_number = next_internal_part_number(db, customer.customer_code)
+    part = Part(part_number=next_number, description=norm)
+    db.add(part)
+    db.flush()
+    mapping = CustomerPartMapping(
+        customer_id=customer.id, part_id=part.id, customer_part_number=norm, status="Active",
+    )
+    db.add(mapping)
+    db.flush()
+    return part, True, mapping
+
+
+def resolve_customer_part_preview(db: Session, customer_code: str, customer_part_number: str) -> ResolveCustomerPartResponse:
+    """Read-only preview for the PO UI -- never creates anything. Reuses
+    resolve_customer_part() with create_if_missing=False so the preview can
+    never diverge from what an actual PO submission would do."""
+    customer = db.query(Customer).filter(Customer.customer_code == customer_code.strip().upper()).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{customer_code}' not found.")
+
+    part, is_new, _mapping = resolve_customer_part(db, customer, customer_part_number, create_if_missing=False)
+    if part is not None:
+        return ResolveCustomerPartResponse(
+            customer_part_number=customer_part_number.strip(),
+            resolved=True,
+            part_number=part.part_number,
+            is_new=False,
+            message=f"Matches existing part {part.part_number}",
+        )
+    return ResolveCustomerPartResponse(
+        customer_part_number=customer_part_number.strip(),
+        resolved=True,
+        part_number=None,
+        is_new=True,
+        message=f"New part -- internal code will be auto-generated on PO save (e.g. {customer.customer_code}#)",
+    )
+
+
+def list_customer_parts(db: Session, customer_code: str) -> List[CustomerPartOut]:
+    customer = db.query(Customer).filter(Customer.customer_code == customer_code.strip().upper()).first()
+    if not customer:
+        return []
+    rows = (
+        db.query(CustomerPartMapping, Part)
+        .join(Part, CustomerPartMapping.part_id == Part.id)
+        .filter(
+            CustomerPartMapping.customer_id == customer.id,
+            CustomerPartMapping.status == "Active",
+        )
+        .order_by(CustomerPartMapping.customer_part_number)
+        .all()
+    )
+    return [
+        CustomerPartOut(
+            customer_part_number=m.customer_part_number,
+            part_number=p.part_number,
+            description=p.description,
+            grade=p.grade,
+        )
+        for m, p in rows
+    ]
 
 
 class CustomerMasterService:
@@ -99,8 +211,9 @@ class POMasterService:
     def _line_out(line: POLine) -> POLineOut:
         allocated = sum(o.po_qty for o in line.orders)
         return POLineOut(
-            id=str(line.id), part_number=line.part.part_number, po_qty=line.po_qty,
-            allocated_qty=allocated, available_qty=max(line.po_qty - allocated, 0),
+            id=str(line.id), part_number=line.part.part_number,
+            customer_part_number=line.customer_part_number if hasattr(line, "customer_part_number") else None,
+            po_qty=line.po_qty, allocated_qty=allocated, available_qty=max(line.po_qty - allocated, 0),
             required_date=line.required_date,
         )
 
@@ -129,30 +242,53 @@ class POMasterService:
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{req.customer_code}' not found.")
 
+        # Scoped uniqueness per customer
         if db.query(POMaster).filter(
             POMaster.po_number == req.po_number.strip(),
             POMaster.customer_id == customer.id
         ).first():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PO number '{req.po_number}' already exists for this customer.")
 
-        po = POMaster(
-            po_number=req.po_number.strip(), customer_id=customer.id,
-            po_date=req.po_date, validity_date=req.validity_date,
-            status=POStatus.OPEN,
-            created_by_id=current_user.id if current_user else None,
-            created_by_name=current_user.full_name if current_user else "System",
-        )
-        db.add(po)
-        db.flush()
+        for attempt in range(_MAX_PO_CREATE_ATTEMPTS):
+            po = POMaster(
+                po_number=req.po_number.strip(), customer_id=customer.id,
+                po_date=req.po_date, validity_date=req.validity_date,
+                status=POStatus.OPEN,
+                created_by_id=current_user.id if current_user else None,
+                created_by_name=current_user.full_name if current_user else "System",
+            )
+            db.add(po)
+            db.flush()
 
-        for line_req in req.lines:
-            part = _get_part(db, line_req.part_number)
-            db.add(POLine(po_id=po.id, part_id=part.id, po_qty=line_req.po_qty, required_date=line_req.required_date))
+            for line_req in req.lines:
+                if line_req.customer_part_number:
+                    part, _is_new, _mapping = resolve_customer_part(
+                        db, customer, line_req.customer_part_number, create_if_missing=True
+                    )
+                elif line_req.part_number:
+                    part = _get_part(db, line_req.part_number)
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
+                    )
+                db.add(POLine(po_id=po.id, part_id=part.id, po_qty=line_req.po_qty, required_date=line_req.required_date))
 
-        _audit(db, current_user, "PO_CREATED", "POMaster", str(po.id), details=f"po_number={req.po_number}, lines={len(req.lines)}")
-        db.commit()
-        db.refresh(po)
-        return POMasterService._po_out(po)
+            _audit(db, current_user, "PO_CREATED", "POMaster", str(po.id), details=f"po_number={req.po_number}, lines={len(req.lines)}")
+
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                if attempt == _MAX_PO_CREATE_ATTEMPTS - 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Could not create PO due to a concurrent update -- please retry.",
+                    )
+                continue
+
+            db.refresh(po)
+            return POMasterService._po_out(po)
 
 
 class ScheduleMasterService:
@@ -239,8 +375,6 @@ class MachineMasterService:
         if req.department is not None:
             machine.department = req.department
         if req.is_active is not None:
-            # Never physically deleted -- historical production/movement transactions
-            # keep resolving by machine_code regardless of active status.
             machine.is_active = req.is_active
         _audit(db, current_user, "MACHINE_UPDATED", "Machine", str(machine.id))
         db.commit()
@@ -309,8 +443,6 @@ class OperatorMasterService:
 
     @staticmethod
     def create_operator(db: Session, req: OperatorCreate, current_user: Optional[User] = None) -> OperatorOut:
-        # Never create a duplicate employee identity if the authenticated User system
-        # already contains this person -- link to it instead of copying.
         user_ref = None
         if req.user_id:
             user_ref = db.query(User).filter(User.id == req.user_id).first()
@@ -352,3 +484,226 @@ class OperatorMasterService:
         db.commit()
         db.refresh(operator)
         return _operator_out(operator)
+
+
+class PartMasterService:
+    @staticmethod
+    def _part_out(part: Part, mapping: CustomerPartMapping, customer: Customer) -> PartMasterOut:
+        return PartMasterOut(
+            id=str(part.id),
+            part_number=part.part_number,
+            customer_id=str(customer.id),
+            customer_code=customer.customer_code,
+            customer_name=customer.name,
+            customer_part_number=mapping.customer_part_number,
+            status=mapping.status,
+            description=part.description,
+            created_at=mapping.created_at,
+        )
+
+    @staticmethod
+    def list_parts(
+        db: Session,
+        customer_code: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        search: Optional[str] = None,
+        page: int = 1,
+        limit: int = 50,
+    ) -> PartMasterListResponse:
+        query = (
+            db.query(CustomerPartMapping, Part, Customer)
+            .join(Part, CustomerPartMapping.part_id == Part.id)
+            .join(Customer, CustomerPartMapping.customer_id == Customer.id)
+        )
+        if customer_code:
+            query = query.filter(Customer.customer_code == customer_code.strip().upper())
+        if status_filter and status_filter.upper() != "ALL":
+            query = query.filter(func.lower(CustomerPartMapping.status) == status_filter.strip().lower())
+        if search:
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    CustomerPartMapping.customer_part_number.ilike(term),
+                    Part.part_number.ilike(term),
+                    Customer.name.ilike(term),
+                    Customer.customer_code.ilike(term),
+                )
+            )
+        total = query.count()
+        page = max(page, 1)
+        limit = max(min(limit, 500), 1)
+        offset = (page - 1) * limit
+        rows = query.order_by(Customer.customer_code, Part.part_number).offset(offset).limit(limit).all()
+        items = [PartMasterService._part_out(part, mapping, cust) for mapping, part, cust in rows]
+        return PartMasterListResponse(items=items, total=total, page=page, limit=limit)
+
+    @staticmethod
+    def get_kpis(db: Session) -> PartMasterKPIs:
+        total_parts = db.query(CustomerPartMapping).count()
+        active_parts = (
+            db.query(CustomerPartMapping)
+            .filter(func.lower(CustomerPartMapping.status) == "active")
+            .count()
+        )
+        total_customers = db.query(CustomerPartMapping.customer_id).distinct().count()
+
+        now = datetime.now()
+        first_day_of_month = datetime(now.year, now.month, 1)
+        new_this_month = (
+            db.query(CustomerPartMapping)
+            .filter(CustomerPartMapping.created_at >= first_day_of_month)
+            .count()
+        )
+        return PartMasterKPIs(
+            total_parts=total_parts,
+            active_parts=active_parts,
+            total_customers=total_customers,
+            new_parts_this_month=new_this_month,
+        )
+
+    @staticmethod
+    def get_part(db: Session, part_id: str) -> PartMasterOut:
+        row = (
+            db.query(CustomerPartMapping, Part, Customer)
+            .join(Part, CustomerPartMapping.part_id == Part.id)
+            .join(Customer, CustomerPartMapping.customer_id == Customer.id)
+            .filter(Part.id == part_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found in the Part Master.")
+        mapping, part, cust = row
+        return PartMasterService._part_out(part, mapping, cust)
+
+    @staticmethod
+    def create_part(
+        db: Session, req: PartMasterCreate, current_user: Optional[User] = None
+    ) -> PartMasterOut:
+        raw_cpn = (req.customer_part_number or "").strip()
+        if not raw_cpn:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer Part Number is required.")
+
+        cust_code = (req.customer_code or "").strip().upper()
+        if not cust_code:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer code is required.")
+
+        customer = db.query(Customer).filter(Customer.customer_code == cust_code).first()
+        if not customer:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Customer '{req.customer_code}' not found. Please create the customer first before adding parts.",
+            )
+
+        for attempt in range(_MAX_PO_CREATE_ATTEMPTS):
+            db.query(Customer).filter(Customer.id == customer.id).with_for_update().first()
+
+            existing_mapping = (
+                db.query(CustomerPartMapping)
+                .filter(
+                    CustomerPartMapping.customer_id == customer.id,
+                    CustomerPartMapping.customer_part_number == raw_cpn,
+                )
+                .first()
+            )
+            if existing_mapping:
+                existing_part = db.query(Part).filter(Part.id == existing_mapping.part_id).first()
+                part_num = existing_part.part_number if existing_part else "existing part"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Customer Part Number '{raw_cpn}' already exists for customer '{customer.customer_code}' (mapped to {part_num}).",
+                )
+
+            next_code = next_internal_part_number(db, customer.customer_code)
+
+            part = Part(
+                part_number=next_code,
+                description=req.description or raw_cpn,
+            )
+            db.add(part)
+            db.flush()
+
+            mapping = CustomerPartMapping(
+                customer_id=customer.id,
+                part_id=part.id,
+                customer_part_number=raw_cpn,
+                status=req.status if req.status else "Active",
+            )
+            db.add(mapping)
+            db.flush()
+
+            _audit(
+                db, current_user, "PART_CREATED", "Part", str(part.id),
+                details=f"part_number={part.part_number}, customer={customer.customer_code}, customer_part_number={raw_cpn}"
+            )
+
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                if attempt == _MAX_PO_CREATE_ATTEMPTS - 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Could not create part due to a concurrent update -- please retry.",
+                    )
+                continue
+
+            db.refresh(part)
+            db.refresh(mapping)
+            return PartMasterService._part_out(part, mapping, customer)
+
+    @staticmethod
+    def update_part(
+        db: Session, part_id: str, req: PartMasterUpdate, current_user: Optional[User] = None
+    ) -> PartMasterOut:
+        row = (
+            db.query(CustomerPartMapping, Part, Customer)
+            .join(Part, CustomerPartMapping.part_id == Part.id)
+            .join(Customer, CustomerPartMapping.customer_id == Customer.id)
+            .filter(Part.id == part_id)
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found in the Part Master.")
+        mapping, part, customer = row
+
+        db.query(Customer).filter(Customer.id == customer.id).with_for_update().first()
+
+        if req.customer_part_number is not None:
+            new_cpn = req.customer_part_number.strip()
+            if not new_cpn:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer Part Number cannot be blank.")
+            if new_cpn != mapping.customer_part_number:
+                existing = (
+                    db.query(CustomerPartMapping)
+                    .filter(
+                        CustomerPartMapping.customer_id == customer.id,
+                        CustomerPartMapping.customer_part_number == new_cpn,
+                        CustomerPartMapping.id != mapping.id,
+                    )
+                    .first()
+                )
+                if existing:
+                    existing_part = db.query(Part).filter(Part.id == existing.part_id).first()
+                    part_num = existing_part.part_number if existing_part else "existing part"
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Customer Part Number '{new_cpn}' already exists for customer '{customer.customer_code}' (mapped to {part_num}).",
+                    )
+                mapping.customer_part_number = new_cpn
+
+        if req.status is not None:
+            clean_status = req.status.strip()
+            if clean_status:
+                mapping.status = clean_status
+
+        if req.description is not None:
+            part.description = req.description
+
+        _audit(
+            db, current_user, "PART_UPDATED", "Part", str(part.id),
+            details=f"part_number={part.part_number}, customer={customer.customer_code}"
+        )
+        db.commit()
+        db.refresh(part)
+        db.refresh(mapping)
+        return PartMasterService._part_out(part, mapping, customer)

@@ -108,6 +108,7 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall VARCHAR DEFAULT 'No';",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS released_by VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS release_date TIMESTAMP;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS casting_process VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_by VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_released_at TIMESTAMP;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS engineering_document_name VARCHAR;",

@@ -10,6 +10,9 @@ from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterOut,
     ScheduleCreate, ScheduleOut,
+    CustomerPartOut, ResolveCustomerPartResponse,
+    PartMasterCreate, PartMasterUpdate, PartMasterOut,
+    PartMasterKPIs, PartMasterListResponse,
     MachineCreate, MachineUpdate, MachineOut,
     ShiftCreate, ShiftUpdate, ShiftOut,
     OperatorCreate, OperatorUpdate, OperatorOut,
@@ -21,21 +24,15 @@ from app.schemas.customer_part_cross_reference import (
     CustomerPartCrossReferenceListResponse,
     PartLookupResponse,
 )
-from app.schemas.part_master import (
-    PartMasterItemOut,
-    PartMasterListResponse,
-    PartCreate,
-    PartUpdate,
-)
 from app.services.master_data_service import (
     CustomerMasterService, POMasterService, ScheduleMasterService,
+    list_customer_parts, resolve_customer_part_preview,
+    PartMasterService,
     MachineMasterService, ShiftMasterService, OperatorMasterService,
 )
 from app.services.customer_part_cross_reference_service import CustomerPartCrossReferenceService
-from app.services.part_master_service import PartMasterService
 
 router = APIRouter(prefix="/api/v1/masters", tags=["masters"])
-
 
 
 # --- Customer Master ---
@@ -83,6 +80,27 @@ def create_po(
     return POMasterService.create_po(db, payload, current_user=user)
 
 
+# --- Customer Part Mapping (read-only lookups for the PO UI) ---
+
+@router.get("/customer-parts", response_model=List[CustomerPartOut])
+def get_customer_parts(
+    customer_code: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return list_customer_parts(db, customer_code)
+
+
+@router.get("/resolve-customer-part", response_model=ResolveCustomerPartResponse)
+def resolve_customer_part_endpoint(
+    customer_code: str = Query(...),
+    customer_part_number: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return resolve_customer_part_preview(db, customer_code, customer_part_number)
+
+
 # --- Schedule Master ---
 
 @router.get("/schedules", response_model=List[ScheduleOut])
@@ -103,11 +121,65 @@ def create_schedule(
     return ScheduleMasterService.create_schedule(db, payload, current_user=user)
 
 
+# --- Part Master ---
+
+@router.get("/parts/kpis", response_model=PartMasterKPIs)
+def get_part_kpis(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.get_kpis(db)
+
+
+@router.get("/parts", response_model=PartMasterListResponse)
+def list_parts(
+    customer_code: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.list_parts(
+        db,
+        customer_code=customer_code,
+        status_filter=status,
+        search=search,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get("/parts/{part_id}", response_model=PartMasterOut)
+def get_part(
+    part_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.get_part(db, part_id=part_id)
+
+
+@router.post("/parts", response_model=PartMasterOut)
+def create_part(
+    payload: PartMasterCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.create_part(db, payload, current_user=user)
+
+
+@router.put("/parts/{part_id}", response_model=PartMasterOut)
+def update_part(
+    part_id: str,
+    payload: PartMasterUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return PartMasterService.update_part(db, part_id=part_id, req=payload, current_user=user)
+
+
 # --- Machine Master ---
-# Unlike Customer/PO/Schedule (genuinely planning-only data), Machine/Shift/Operator
-# are selected by shop-floor roles in Production Entry -- so, deliberately deviating
-# from this file's usual "PLANNING_ROLES gates read too" convention, listing is open
-# to any authenticated user while mutation stays PLANNING_ROLES-only.
 
 @router.get("/machines", response_model=List[MachineOut])
 def list_machines(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -211,11 +283,6 @@ def lookup_customer_part(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Customer-specific part lookup.
-
-    Resolves Customer + Customer Part No -> Internal Part.
-    Ambiguous mappings report ambiguity without guessing.
-    """
     return CustomerPartCrossReferenceService.lookup_part(
         db,
         customer_code=customer_code,
@@ -240,59 +307,3 @@ def update_part_cross_reference(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return CustomerPartCrossReferenceService.update_cross_reference(db, ref_id, payload, current_user=user)
-
-
-# --- Authoritative Internal Part Master ---
-
-@router.get("/parts", response_model=PartMasterListResponse)
-def list_master_parts(
-    search: Optional[str] = Query(None, description="Search part number, description, grade, or customer mappings"),
-    customer_code: Optional[str] = Query(None, description="Filter internal parts mapped to this customer"),
-    mapping_status: Optional[str] = Query(None, description="'all', 'mapped', or 'unmapped'"),
-    limit: int = Query(50, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Authoritative Internal Part Master listing.
-
-    Returns ALL internal parts from the Part table, with attached customer mappings and statistics.
-    """
-    return PartMasterService.list_parts(
-        db,
-        search=search,
-        customer_code=customer_code,
-        mapping_status=mapping_status,
-        limit=limit,
-        offset=offset,
-        include_stats=True,
-    )
-
-
-@router.get("/parts/{part_id}", response_model=PartMasterItemOut)
-def get_master_part(
-    part_id: UUID,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    return PartMasterService.get_part(db, part_id)
-
-
-@router.post("/parts", response_model=PartMasterItemOut)
-def create_master_part(
-    payload: PartCreate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*PLANNING_ROLES)),
-):
-    return PartMasterService.create_part(db, payload, current_user=user)
-
-
-@router.put("/parts/{part_id}", response_model=PartMasterItemOut)
-def update_master_part(
-    part_id: UUID,
-    payload: PartUpdate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*PLANNING_ROLES)),
-):
-    return PartMasterService.update_part(db, part_id, payload, current_user=user)
-

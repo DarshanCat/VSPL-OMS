@@ -1,7 +1,8 @@
 import enum
+import re
 import uuid
 from sqlalchemy import Column, String, Integer, Date, Enum, DateTime, ForeignKey, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Session, relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, GUID
 
@@ -31,6 +32,26 @@ class Part(Base):
     grade = Column(String)
     description = Column(String)
     orders = relationship("Order", back_populates="part")
+
+
+def next_internal_part_number(db: Session, customer_code: str) -> str:
+    """Authoritative internal Part Number generation for a genuinely new part.
+
+    Mirrors the real, pre-existing Part Master import convention (verified against
+    the actual imported data, e.g. customer code 'PMC' -> 'PMC1' .. 'PMC380'):
+    {Customer Code}{next per-customer sequential integer}, no separator. Follows
+    the same collision-resistant approach as next_nc_number() -- finds the true
+    highest existing suffix for this customer's parts rather than a plain
+    COUNT(*)+1, which drifts out of sync once gaps exist (collapsed duplicates,
+    excluded conflicts, etc. -- exactly as seen in the real imported data)."""
+    prefix = customer_code.strip().upper()
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    highest = 0
+    for (part_number,) in db.query(Part.part_number).filter(Part.part_number.like(f"{prefix}%")).all():
+        m = pattern.match(part_number or "")
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"{prefix}{highest + 1}"
 
 class Order(Base):
     """Represents an accepted OAR (Order Acknowledgement Record)."""

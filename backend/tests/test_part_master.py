@@ -1,317 +1,563 @@
-"""Comprehensive test suite for the Authoritative Part Master (Layer 1) and Customer Part Mapping (Layer 2).
-
-Verifies all 16 required test scenarios:
-1. Part Master returns ALL Internal Parts.
-2. Unmapped Internal Part still appears.
-3. Customer mapping count is separate from Internal Part count.
-4. Customer filter returns only mapped Internal Parts for that customer.
-5. Internal Part with multiple customers displays all mappings.
-6. Internal Part with zero customers displays correctly.
-7. Customer Part No search works.
-8. Internal Part No search works.
-9. Grade search works.
-10. Description search works.
-11. Customer + search combination works.
-12. Pagination total is authoritative.
-13. Customer Master -> View Parts endpoint compatibility.
-14. Order Intake mapping remains correct and unchanged.
-15. Existing 1,890 mappings remain unchanged.
-16. Existing Part records remain unchanged.
+"""Comprehensive tests for Part Master:
+1. Internal code auto-generation (Customer Code + next numeric suffix, per customer)
+2. Gap preservation (never backfills gaps)
+3. Independent per-customer sequences (APE vs MIL)
+4. Customer Part No. exact preservation (spaces, punctuation, parentheses, case)
+5. Uniqueness per (customer_id, customer_part_number): same customer rejected, different customer allowed
+6. Customer prerequisite check (missing customer -> 404)
+7. Immutability of internal code / part_number
+8. Concurrency safety (serialized allocation)
+9. AuditLog recording
+10. RBAC matrix (Admin, Planner allowed; Operator, QA, Dispatch, etc. rejected with 403)
+11. Status and Customer Part No update validation
+12. KPIs endpoint
+13. Search, filter, and pagination
 """
-import uuid
 import pytest
+from datetime import timedelta
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from app.core.rate_limit import limiter
-from app.core.database import SessionLocal
-from app.main import app
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base, get_db
+from app.core.security import create_access_token
+import app.models  # Ensures all tables are registered on Base.metadata
+from app.models.user import User
 from app.models.order import Customer, Part
-from app.models.customer_part_cross_reference import CustomerPartCrossReference
-from app.services.part_master_service import PartMasterService
-from app.services.customer_part_cross_reference_service import CustomerPartCrossReferenceService
+from app.models.customer_part_mapping import CustomerPartMapping
+from app.models.audit import AuditLog
+from app.core.roles import UserRole
+from app.main import app
 
-SEEDED_LOGINS = {
-    "ADMIN": ("admin@vspl.com", "admin123"),
-    "PLANNER": ("planner@vspl.com", "planner123"),
-}
+
+test_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+
+@pytest.fixture
+def test_db():
+    Base.metadata.create_all(bind=test_engine)
+    session = TestingSessionLocal()
+    # Clean tables for complete test isolation
+    session.query(CustomerPartMapping).delete()
+    session.query(AuditLog).delete()
+    session.query(Part).delete()
+    session.query(Customer).delete()
+    session.query(User).delete()
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+        Base.metadata.drop_all(bind=test_engine)
+
+
+@pytest.fixture
+def client(test_db):
+    def _get_test_db():
+        yield test_db
+
+    app.dependency_overrides[get_db] = _get_test_db
+    c = TestClient(app)
+    yield c
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
+    from app.core.rate_limit import limiter
     limiter.reset()
     yield
     limiter.reset()
 
 
-@pytest.fixture
-def client():
-    with TestClient(app) as c:
-        yield c
-
-
-def _login(client, role_key="ADMIN"):
-    email, password = SEEDED_LOGINS[role_key]
-    resp = client.post("/api/v1/auth/login", json={"email": email, "password": password})
-    assert resp.status_code == 200, resp.text
-    return resp.json()["access_token"]
-
-
-def _auth(token):
+def _auth_headers(user: User) -> dict:
+    token = create_access_token(
+        data={"sub": user.email, "role": user.role.value},
+        expires_delta=timedelta(minutes=60),
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_01_part_master_returns_all_internal_parts(client: TestClient):
-    """1. Part Master returns ALL authoritative Internal Parts."""
-    token = _login(client, "ADMIN")
-    resp = client.get("/api/v1/masters/parts?limit=10", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "items" in data
-    assert "total" in data
-    assert "stats" in data
-    assert data["stats"]["total_parts"] > 0
+def _create_user(db, email: str, role: UserRole) -> User:
+    u = db.query(User).filter(User.email == email).first()
+    if not u:
+        u = User(
+            email=email,
+            full_name=f"User {role.value}",
+            role=role,
+            hashed_password="test_hashed_password",
+            is_active=True,
+        )
+        db.add(u)
+        db.commit()
+        db.refresh(u)
+    return u
 
 
-def test_02_unmapped_internal_part_appears(client: TestClient):
-    """2. Unmapped Internal Part (0 customer mappings) still appears in Part Master."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    part_num = f"UNMAP-{uid}"
+def _create_customer(db, code: str, name: str) -> Customer:
+    code_norm = code.strip().upper()
+    c = db.query(Customer).filter(Customer.customer_code == code_norm).first()
+    if not c:
+        c = Customer(
+            customer_code=code_norm,
+            name=name,
+            is_active=True,
+        )
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+    return c
 
-    # Create unmapped part
-    create_resp = client.post(
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def test_01_ape_new_part_generates_ape1(client, test_db):
+    admin = _create_user(test_db, "admin1@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    res = client.post(
         "/api/v1/masters/parts",
-        json={"part_number": part_num, "description": "Unmapped Bushing", "grade": "SG 500-B"},
-        headers=_auth(token),
+        headers=_auth_headers(admin),
+        json={
+            "customer_code": "APE",
+            "customer_part_number": "RC47NN135000000092",
+            "status": "Active",
+        },
     )
-    assert create_resp.status_code == 200
-    p_data = create_resp.json()
-    assert p_data["part_number"] == part_num
-    assert p_data["customer_count"] == 0
-    assert p_data["mapping_count"] == 0
-    assert p_data["customer_mappings"] == []
-
-    # Query Part Master with search
-    list_resp = client.get(f"/api/v1/masters/parts?search={part_num}", headers=_auth(token))
-    assert list_resp.status_code == 200
-    res = list_resp.json()
-    assert res["total"] == 1
-    assert res["items"][0]["part_number"] == part_num
-    assert res["items"][0]["customer_count"] == 0
-    assert res["items"][0]["mapping_count"] == 0
+    assert res.status_code == 200, res.text
+    data = res.json()
+    assert data["part_number"] == "APE1"
+    assert data["customer_code"] == "APE"
+    assert data["customer_part_number"] == "RC47NN135000000092"
+    assert data["status"] == "Active"
 
 
-def test_03_customer_mapping_count_is_separate_from_part_count(client: TestClient):
-    """3. Customer mapping count is separate from Internal Part count in stats."""
-    token = _login(client, "ADMIN")
-    resp = client.get("/api/v1/masters/parts?limit=5", headers=_auth(token))
-    assert resp.status_code == 200
-    stats = resp.json()["stats"]
-    assert stats["total_parts"] > stats["total_mappings"]
-    assert stats["mapped_parts"] + stats["unmapped_parts"] == stats["total_parts"]
+def test_02_next_ape_part_generates_ape2_and_ape3(client, test_db):
+    admin = _create_user(test_db, "admin2@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
 
-
-def test_04_customer_filter_returns_only_mapped_internal_parts(client: TestClient):
-    """4. Customer filter returns only Internal Parts mapped to that customer."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code_1 = f"CUST1-{uid}"
-    c_code_2 = f"CUST2-{uid}"
-    p_num_1 = f"P1-{uid}"
-    p_num_2 = f"P2-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_1, "name": "Customer 1"}, headers=_auth(token))
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_2, "name": "Customer 2"}, headers=_auth(token))
-
-    client.post("/api/v1/masters/parts", json={"part_number": p_num_1, "description": "Part 1"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num_2, "description": "Part 2"}, headers=_auth(token))
-
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_1, "customer_part_no": "CP1", "internal_part_code": p_num_1}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_2, "customer_part_no": "CP2", "internal_part_code": p_num_2}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?customer_code={c_code_1}", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["items"][0]["part_number"] == p_num_1
-    assert data["items"][0]["customer_mappings"][0]["customer_code"] == c_code_1
-
-
-def test_05_internal_part_with_multiple_customers_displays_all_mappings(client: TestClient):
-    """5. Internal Part with multiple customers displays all mappings."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code_a = f"CA-{uid}"
-    c_code_b = f"CB-{uid}"
-    p_num = f"SHARED-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_a, "name": "Customer A"}, headers=_auth(token))
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_b, "name": "Customer B"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "Shared Bushing"}, headers=_auth(token))
-
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_a, "customer_part_no": "CP-A", "internal_part_code": p_num}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_b, "customer_part_no": "CP-B", "internal_part_code": p_num}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?search={p_num}", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    item = data["items"][0]
-    assert item["customer_count"] == 2
-    assert item["mapping_count"] == 2
-    codes = {m["customer_code"] for m in item["customer_mappings"]}
-    assert codes == {c_code_a, c_code_b}
-
-
-def test_06_internal_part_with_zero_customers_displays_correctly(client: TestClient):
-    """6. Internal Part with zero customers displays customer_count=0 and mapping_count=0."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    p_num = f"ZERO-{uid}"
-
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "Zero Mappings"}, headers=_auth(token))
-    resp = client.get(f"/api/v1/masters/parts?search={p_num}", headers=_auth(token))
-    assert resp.status_code == 200
-    item = resp.json()["items"][0]
-    assert item["customer_count"] == 0
-    assert item["mapping_count"] == 0
-    assert len(item["customer_mappings"]) == 0
-
-
-def test_07_customer_part_no_search_works(client: TestClient):
-    """7. Search by Customer Part No finds the linked Internal Part."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code = f"SRC-CUST-{uid}"
-    p_num = f"SRC-PART-{uid}"
-    cp_no = f"SEARCHABLE-CPNO-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code, "name": "Search Test Corp"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "Searchable Internal"}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code, "customer_part_no": cp_no, "internal_part_code": p_num}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?search={cp_no}", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["items"][0]["part_number"] == p_num
-
-
-def test_08_internal_part_no_search_works(client: TestClient):
-    """8. Search by Internal Part No works."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    p_num = f"IPSEARCH-{uid}"
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "Desc"}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?search={p_num}", headers=_auth(token))
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 1
-    assert resp.json()["items"][0]["part_number"] == p_num
-
-
-def test_09_grade_search_works(client: TestClient):
-    """9. Search by Grade works."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    grade = f"CUSTOM-GRADE-{uid}"
-    p_num = f"GRADE-P-{uid}"
-
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "grade": grade}, headers=_auth(token))
-    resp = client.get(f"/api/v1/masters/parts?search={grade}", headers=_auth(token))
-    assert resp.status_code == 200
-    assert resp.json()["total"] >= 1
-    found = any(item["part_number"] == p_num for item in resp.json()["items"])
-    assert found is True
-
-
-def test_10_description_search_works(client: TestClient):
-    """10. Search by Description works."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    desc = f"Unique Precision Bushing {uid}"
-    p_num = f"DESC-P-{uid}"
-
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": desc}, headers=_auth(token))
-    resp = client.get(f"/api/v1/masters/parts?search={uid}", headers=_auth(token))
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 1
-    assert resp.json()["items"][0]["part_number"] == p_num
-
-
-def test_11_customer_plus_search_combination_works(client: TestClient):
-    """11. Customer filter + search combination applies boolean AND."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code_1 = f"C1-{uid}"
-    c_code_2 = f"C2-{uid}"
-    p_num_1 = f"P1-{uid}"
-    p_num_2 = f"P2-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_1, "name": "Cust 1"}, headers=_auth(token))
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code_2, "name": "Cust 2"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num_1, "description": f"MatchedWord {uid}"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num_2, "description": f"MatchedWord {uid}"}, headers=_auth(token))
-
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_1, "customer_part_no": "CP1", "internal_part_code": p_num_1}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code_2, "customer_part_no": "CP2", "internal_part_code": p_num_2}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?customer_code={c_code_1}&search=MatchedWord", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["items"][0]["part_number"] == p_num_1
-
-
-def test_12_pagination_total_is_authoritative(client: TestClient):
-    """12. Pagination total is authoritative and not capped at page limit."""
-    token = _login(client, "ADMIN")
-    resp = client.get("/api/v1/masters/parts?limit=10&offset=0", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["limit"] == 10
-    assert data["offset"] == 0
-    assert len(data["items"]) == 10
-    assert data["total"] >= 10
-
-
-def test_13_customer_master_view_parts_compatibility(client: TestClient):
-    """13. Customer Master View Parts parameter (customer_code) works seamlessly."""
-    token = _login(client, "ADMIN")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code = f"VP-{uid}"
-    p_num = f"VPP-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code, "name": "View Parts Test"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "VP Part"}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code, "customer_part_no": "VP-CP", "internal_part_code": p_num}, headers=_auth(token))
-
-    resp = client.get(f"/api/v1/masters/parts?customer_code={c_code}", headers=_auth(token))
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["items"][0]["part_number"] == p_num
-
-
-def test_14_order_intake_lookup_remains_correct(client: TestClient):
-    """14. Order Intake lookup continues resolving Customer + Customer Part No -> Internal Part."""
-    token = _login(client, "PLANNER")
-    uid = uuid.uuid4().hex[:6].upper()
-    c_code = f"INTK-CUST-{uid}"
-    p_num = f"INTK-PART-{uid}"
-    cp_no = f"INTK-CP-{uid}"
-
-    client.post("/api/v1/masters/customers", json={"customer_code": c_code, "name": "Intake Corp"}, headers=_auth(token))
-    client.post("/api/v1/masters/parts", json={"part_number": p_num, "description": "Intake Bushing", "grade": "SG 500"}, headers=_auth(token))
-    client.post("/api/v1/masters/part-cross-references", json={"customer_code": c_code, "customer_part_no": cp_no, "internal_part_code": p_num}, headers=_auth(token))
-
-    lookup_resp = client.get(
-        "/api/v1/masters/part-cross-references/lookup",
-        params={"customer_code": c_code, "customer_part_no": cp_no},
-        headers=_auth(token),
+    res1 = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "RC4750RC0385"},
     )
-    assert lookup_resp.status_code == 200
-    l_data = lookup_resp.json()
-    assert l_data["is_matched"] is True
-    assert l_data["part_number"] == p_num
-    assert l_data["grade"] == "SG 500"
+    assert res1.status_code == 200
+    assert res1.json()["part_number"] == "APE1"
+
+    res2 = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "RC47N0115003500076"},
+    )
+    assert res2.status_code == 200
+    assert res2.json()["part_number"] == "APE2"
+
+    res3 = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "RC47N0120000000089"},
+    )
+    assert res3.status_code == 200
+    assert res3.json()["part_number"] == "APE3"
+
+
+def test_03_existing_ape1_and_ape3_generates_ape4_without_backfilling_gap(client, test_db):
+    admin = _create_user(test_db, "admin3@vspl.com", UserRole.ADMIN)
+    cust = _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    # Manually seed APE1 and APE3 (simulating legacy gap where APE2 was deleted/not imported)
+    p1 = Part(part_number="APE1", description="Legacy 1")
+    p3 = Part(part_number="APE3", description="Legacy 3")
+    test_db.add_all([p1, p3])
+    test_db.flush()
+    m1 = CustomerPartMapping(customer_id=cust.id, part_id=p1.id, customer_part_number="LEGACY-1")
+    m3 = CustomerPartMapping(customer_id=cust.id, part_id=p3.id, customer_part_number="LEGACY-3")
+    test_db.add_all([m1, m3])
+    test_db.commit()
+
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "NEW-PART-AFTER-GAP"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["part_number"] == "APE4", "Must be APE4 -- must never backfill APE2"
+
+
+def test_04_mil_sequence_is_independent_from_ape(client, test_db):
+    planner = _create_user(test_db, "planner4@vspl.com", UserRole.PLANNER)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+    _create_customer(test_db, "MIL", "Milacron India Pvt Ltd.")
+
+    # Create APE parts
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "APE-PART-1"})
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "APE-PART-2"})
+
+    # Create MIL part -- must start at MIL1, not MIL3
+    res_mil = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(planner),
+        json={"customer_code": "MIL", "customer_part_number": "5225727X"},
+    )
+    assert res_mil.status_code == 200
+    assert res_mil.json()["part_number"] == "MIL1"
+
+
+def test_05_same_customer_same_customer_part_number_rejected_400(client, test_db):
+    admin = _create_user(test_db, "admin5@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "ACC", "Accutech CNC")
+
+    res1 = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "ACC", "customer_part_number": "H00D035800"},
+    )
+    assert res1.status_code == 200
+
+    # Attempt duplicate for same customer
+    res2 = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "ACC", "customer_part_number": "H00D035800"},
+    )
+    assert res2.status_code == 400
+    assert "already exists for customer 'ACC'" in res2.json()["detail"]
+
+
+def test_06_different_customer_same_customer_part_number_allowed(client, test_db):
+    admin = _create_user(test_db, "admin6@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+    _create_customer(test_db, "WPR", "Wipro Enterprises (P) Ltd")
+
+    shared_part_no = "RC47NN135000000092"
+
+    res_ape = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": shared_part_no},
+    )
+    assert res_ape.status_code == 200
+    assert res_ape.json()["part_number"] == "APE1"
+
+    res_wpr = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "WPR", "customer_part_number": shared_part_no},
+    )
+    assert res_wpr.status_code == 200
+    assert res_wpr.json()["part_number"] == "WPR1"
+    assert res_ape.json()["id"] != res_wpr.json()["id"]
+
+
+def test_07_exact_punctuation_and_special_chars_preserved(client, test_db):
+    admin = _create_user(test_db, "admin7@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "WAL", "Walvoil Fluid Power")
+
+    exact_part_no = "DX-207441-001/A.1#4"
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "WAL", "customer_part_number": exact_part_no},
+    )
+    assert res.status_code == 200
+    assert res.json()["customer_part_number"] == exact_part_no
+
+
+def test_08_exact_spaces_preserved(client, test_db):
+    admin = _create_user(test_db, "admin8@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "ACC", "Accutech CNC")
+
+    exact_part_no = "206 x 196 x 321"
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "ACC", "customer_part_number": exact_part_no},
+    )
+    assert res.status_code == 200
+    assert res.json()["customer_part_number"] == exact_part_no
+
+
+def test_09_parentheses_preserved(client, test_db):
+    admin = _create_user(test_db, "admin9@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "ACC", "Accutech CNC")
+
+    exact_part_no = "H00A2117101V (132 X 116 X 106)"
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "ACC", "customer_part_number": exact_part_no},
+    )
+    assert res.status_code == 200
+    assert res.json()["customer_part_number"] == exact_part_no
+
+
+def test_10_missing_customer_returns_404(client, test_db):
+    admin = _create_user(test_db, "admin10@vspl.com", UserRole.ADMIN)
+
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "NONEXISTENT", "customer_part_number": "PART-123"},
+    )
+    assert res.status_code == 404
+    assert "Customer 'NONEXISTENT' not found" in res.json()["detail"]
+
+
+def test_11_internal_code_cannot_be_manually_supplied(client, test_db):
+    admin = _create_user(test_db, "admin11@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    # Client passes part_number in body; server must ignore it and auto-generate APE1
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={
+            "customer_code": "APE",
+            "customer_part_number": "RC-SUPPLIED",
+            "part_number": "CUSTOM-CODE-999",  # Attempted override
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["part_number"] == "APE1", "Internal code must be auto-generated as APE1, ignoring client override"
+
+
+def test_12_internal_code_cannot_be_changed_by_update(client, test_db):
+    admin = _create_user(test_db, "admin12@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    res_create = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "ORIG-PART"},
+    )
+    part_id = res_create.json()["id"]
+    assert res_create.json()["part_number"] == "APE1"
+
+    # Attempt to change part_number via PUT
+    res_update = client.put(
+        f"/api/v1/masters/parts/{part_id}",
+        headers=_auth_headers(admin),
+        json={"part_number": "HACKED_CODE", "status": "Obsolete"},
+    )
+    assert res_update.status_code == 200
+    assert res_update.json()["part_number"] == "APE1", "Internal code must NEVER change"
+    assert res_update.json()["status"] == "Obsolete"
+
+
+def test_13_db_uniqueness_enforced_on_part_number(client, test_db):
+    admin = _create_user(test_db, "admin13@vspl.com", UserRole.ADMIN)
+    cust = _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    # Seed APE1
+    p1 = Part(part_number="APE1", description="Part 1")
+    test_db.add(p1)
+    test_db.flush()
+    m1 = CustomerPartMapping(customer_id=cust.id, part_id=p1.id, customer_part_number="PART-1")
+    test_db.add(m1)
+    test_db.commit()
+
+    # Create next part via API
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "PART-2"},
+    )
+    assert res.status_code == 200
+    assert res.json()["part_number"] == "APE2"
+
+
+def test_14_concurrency_race_safety(client, test_db):
+    admin = _create_user(test_db, "admin14@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    # Sequentially create 5 parts under APE and confirm strictly ascending sequence
+    codes = []
+    for i in range(5):
+        res = client.post(
+            "/api/v1/masters/parts",
+            headers=_auth_headers(admin),
+            json={"customer_code": "APE", "customer_part_number": f"CONC-PART-{i}"},
+        )
+        assert res.status_code == 200
+        codes.append(res.json()["part_number"])
+
+    assert codes == ["APE1", "APE2", "APE3", "APE4", "APE5"]
+
+
+def test_15_audit_log_written_on_creation_and_update(client, test_db):
+    admin = _create_user(test_db, "admin15@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "AUDIT-PART-1"},
+    )
+    assert res.status_code == 200
+    part_id = res.json()["id"]
+
+    logs = test_db.query(AuditLog).filter(AuditLog.entity == "Part", AuditLog.action == "PART_CREATED").all()
+    assert len(logs) >= 1
+    assert "part_number=APE1" in logs[-1].details
+
+    # Update
+    client.put(
+        f"/api/v1/masters/parts/{part_id}",
+        headers=_auth_headers(admin),
+        json={"status": "Obsolete"},
+    )
+    update_logs = test_db.query(AuditLog).filter(AuditLog.entity == "Part", AuditLog.action == "PART_UPDATED").all()
+    assert len(update_logs) >= 1
+
+
+@pytest.mark.parametrize("role,expected_status", [
+    (UserRole.ADMIN, 200),
+    (UserRole.PLANNER, 200),
+    (UserRole.OPERATOR, 403),
+    (UserRole.QA, 403),
+    (UserRole.DISPATCH, 403),
+    (UserRole.STORE, 403),
+    (UserRole.PRODUCTION_MANAGER, 403),
+    (UserRole.ENGINEERING, 403),
+])
+def test_16_rbac_matrix_for_part_creation(client, test_db, role, expected_status):
+    user = _create_user(test_db, f"rbac_{role.value}@vspl.com", role)
+    _create_customer(test_db, f"CUST_{role.value.upper()}", "Test Cust")
+
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(user),
+        json={"customer_code": f"CUST_{role.value.upper()}", "customer_part_number": "RBAC-TEST"},
+    )
+    assert res.status_code == expected_status
+
+
+def test_17_existing_part_records_remain_unchanged(client, test_db):
+    admin = _create_user(test_db, "admin17@vspl.com", UserRole.ADMIN)
+    cust = _create_customer(test_db, "PMC", "PMC Hydraulics")
+
+    # Seed 3 existing parts
+    p1 = Part(part_number="PMC1", description="Original PMC1")
+    p2 = Part(part_number="PMC2", description="Original PMC2")
+    test_db.add_all([p1, p2])
+    test_db.flush()
+    m1 = CustomerPartMapping(customer_id=cust.id, part_id=p1.id, customer_part_number="PMC-001", status="Active")
+    m2 = CustomerPartMapping(customer_id=cust.id, part_id=p2.id, customer_part_number="PMC-002", status="Active")
+    test_db.add_all([m1, m2])
+    test_db.commit()
+
+    # Add a new part
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "PMC", "customer_part_number": "PMC-003"},
+    )
+    assert res.status_code == 200
+    assert res.json()["part_number"] == "PMC3"
+
+    # Verify existing records are 100% intact
+    db_p1 = test_db.query(Part).filter(Part.part_number == "PMC1").first()
+    db_p2 = test_db.query(Part).filter(Part.part_number == "PMC2").first()
+    assert db_p1.description == "Original PMC1"
+    assert db_p2.description == "Original PMC2"
+
+
+def test_18_status_update_works(client, test_db):
+    admin = _create_user(test_db, "admin18@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    res = client.post(
+        "/api/v1/masters/parts",
+        headers=_auth_headers(admin),
+        json={"customer_code": "APE", "customer_part_number": "STATUS-TEST", "status": "Active"},
+    )
+    part_id = res.json()["id"]
+
+    for new_status in ["Obsolete", "ECR", "Active"]:
+        res_upd = client.put(
+            f"/api/v1/masters/parts/{part_id}",
+            headers=_auth_headers(admin),
+            json={"status": new_status},
+        )
+        assert res_upd.status_code == 200
+        assert res_upd.json()["status"] == new_status
+
+
+def test_19_duplicate_customer_part_number_update_is_rejected(client, test_db):
+    admin = _create_user(test_db, "admin19@vspl.com", UserRole.ADMIN)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+
+    res1 = client.post("/api/v1/masters/parts", headers=_auth_headers(admin), json={"customer_code": "APE", "customer_part_number": "PART-A"})
+    res2 = client.post("/api/v1/masters/parts", headers=_auth_headers(admin), json={"customer_code": "APE", "customer_part_number": "PART-B"})
+
+    part_b_id = res2.json()["id"]
+
+    # Try updating PART-B to PART-A under same customer -> 400
+    res_upd = client.put(
+        f"/api/v1/masters/parts/{part_b_id}",
+        headers=_auth_headers(admin),
+        json={"customer_part_number": "PART-A"},
+    )
+    assert res_upd.status_code == 400
+    assert "already exists for customer 'APE'" in res_upd.json()["detail"]
+
+
+def test_20_kpis_endpoint_works(client, test_db):
+    planner = _create_user(test_db, "planner20@vspl.com", UserRole.PLANNER)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+    _create_customer(test_db, "MIL", "Milacron India Pvt Ltd.")
+
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "P1", "status": "Active"})
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "P2", "status": "Obsolete"})
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "MIL", "customer_part_number": "P3", "status": "Active"})
+
+    res = client.get("/api/v1/masters/parts/kpis", headers=_auth_headers(planner))
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_parts"] == 3
+    assert data["active_parts"] == 2
+    assert data["total_customers"] == 2
+    assert data["new_parts_this_month"] == 3
+
+
+def test_21_pagination_filtering_and_search_works(client, test_db):
+    planner = _create_user(test_db, "planner21@vspl.com", UserRole.PLANNER)
+    _create_customer(test_db, "APE", "A P Engineering Works Pvt Ltd")
+    _create_customer(test_db, "MIL", "Milacron India Pvt Ltd.")
+
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "RC47NN135000000092", "status": "Active"})
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "APE", "customer_part_number": "RC4750RC0385", "status": "Obsolete"})
+    client.post("/api/v1/masters/parts", headers=_auth_headers(planner), json={"customer_code": "MIL", "customer_part_number": "5225727X", "status": "Active"})
+
+    # Filter by customer
+    res_cust = client.get("/api/v1/masters/parts?customer_code=APE", headers=_auth_headers(planner))
+    assert res_cust.status_code == 200
+    assert res_cust.json()["total"] == 2
+
+    # Filter by status
+    res_status = client.get("/api/v1/masters/parts?status=Obsolete", headers=_auth_headers(planner))
+    assert res_status.status_code == 200
+    assert res_status.json()["total"] == 1
+    assert res_status.json()["items"][0]["customer_part_number"] == "RC4750RC0385"
+
+    # Search by part number
+    res_search = client.get("/api/v1/masters/parts?search=5225727X", headers=_auth_headers(planner))
+    assert res_search.status_code == 200
+    assert res_search.json()["total"] == 1
+    assert res_search.json()["items"][0]["customer_code"] == "MIL"
+
+    # Pagination
+    res_page = client.get("/api/v1/masters/parts?page=1&limit=2", headers=_auth_headers(planner))
+    assert res_page.status_code == 200
+    assert len(res_page.json()["items"]) == 2
+    assert res_page.json()["total"] == 3

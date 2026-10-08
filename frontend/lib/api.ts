@@ -684,11 +684,13 @@ export async function releaseWorkOrder(payload: {
   wo_number: string;
   physical_wo_qty: number;
   route_stages: string[];
+  casting_process?: string;
   remarks?: string;
 }) {
   const { data } = await api.post("/api/v1/operations/wo-release", payload);
   return data;
 }
+
 
 export async function createConversion(payload: {
   conversion_wo_number: string;
@@ -1058,73 +1060,73 @@ export async function updatePartCrossReference(
 
 // --- Authoritative Internal Part Master ---
 
-export interface CustomerMappingBrief {
+export interface MasterPart {
   id: string;
+  part_number: string;
   customer_id: string;
   customer_code: string;
   customer_name: string;
-  customer_part_no: string;
-  source?: string | null;
-  is_active: boolean;
-}
-
-export interface PartMasterItemOut {
-  id: string;
-  part_number: string;
+  customer_part_number: string;
+  status: string;
   description?: string | null;
-  grade?: string | null;
-  is_active: boolean;
-  customer_count: number;
-  mapping_count: number;
-  customer_mappings: CustomerMappingBrief[];
+  created_at?: string | null;
 }
 
-export interface PartMasterStats {
+export interface MasterPartKPIs {
   total_parts: number;
-  mapped_parts: number;
-  unmapped_parts: number;
-  total_mappings: number;
+  active_parts: number;
   total_customers: number;
+  new_parts_this_month: number;
 }
 
-export interface PartMasterListResponse {
-  items: PartMasterItemOut[];
+export interface MasterPartListResponse {
+  items: MasterPart[];
   total: number;
+  page: number;
   limit: number;
-  offset: number;
-  stats?: PartMasterStats | null;
 }
 
 export async function getMasterParts(params?: {
-  search?: string;
   customer_code?: string;
-  mapping_status?: "all" | "mapped" | "unmapped";
+  status?: string;
+  search?: string;
+  page?: number;
   limit?: number;
-  offset?: number;
-}): Promise<PartMasterListResponse> {
+}): Promise<MasterPartListResponse> {
   const { data } = await api.get("/api/v1/masters/parts", { params });
   return data;
 }
 
-export async function getMasterPart(partId: string): Promise<PartMasterItemOut> {
-  const { data } = await api.get(`/api/v1/masters/parts/${partId}`);
+export async function getMasterPartKPIs(): Promise<MasterPartKPIs> {
+  const { data } = await api.get("/api/v1/masters/parts/kpis");
+  return data;
+}
+
+export async function getMasterPart(partId: string): Promise<MasterPart> {
+  const { data } = await api.get(`/api/v1/masters/parts/${encodeURIComponent(partId)}`);
   return data;
 }
 
 export async function createMasterPart(payload: {
-  part_number: string;
+  customer_code: string;
+  customer_part_number: string;
+  status?: string;
   description?: string;
-  grade?: string;
-}): Promise<PartMasterItemOut> {
+}): Promise<MasterPart> {
   const { data } = await api.post("/api/v1/masters/parts", payload);
   return data;
 }
 
 export async function updateMasterPart(
   partId: string,
-  payload: { description?: string; grade?: string }
-): Promise<PartMasterItemOut> {
-  const { data } = await api.put(`/api/v1/masters/parts/${partId}`, payload);
+  payload: {
+    customer_part_number?: string;
+    status?: string;
+    description?: string;
+  }
+): Promise<MasterPart> {
+  const { data } = await api.put(`/api/v1/masters/parts/${encodeURIComponent(partId)}`, payload);
   return data;
 }
+
 
