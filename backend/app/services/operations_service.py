@@ -389,23 +389,27 @@ class OperationsService:
             stages.append("DISPATCH")
 
         # Validate Casting Process:
-        # If F1 is in the route, casting_process is required and must be CENTRIFUGAL or CONTINUOUS.
-        # If F1 is not in the route, casting_process is optional.
+        # If F1 is in the route and casting_process is omitted / None / blank:
+        # default to CENTRIFUGAL for backward-compatible standard foundry execution.
+        # If casting_process is explicitly provided, validate that it is CENTRIFUGAL or CONTINUOUS.
         casting_proc = req.casting_process.strip().upper() if req.casting_process and req.casting_process.strip() else None
         if "F1" in stages:
             if not casting_proc:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Casting process is required when F1 (Casting) stage is in the route. Please select 'CENTRIFUGAL' or 'CONTINUOUS'."
-                )
-            if casting_proc not in ("CENTRIFUGAL", "CONTINUOUS"):
+                casting_proc = "CENTRIFUGAL"
+            elif casting_proc not in ("CENTRIFUGAL", "CONTINUOUS"):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid casting process '{req.casting_process}'. Must be 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
                 )
             wo.casting_process = casting_proc
         else:
+            if casting_proc and casting_proc not in ("CENTRIFUGAL", "CONTINUOUS"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid casting process '{req.casting_process}'. Must be 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
+                )
             wo.casting_process = casting_proc
+
 
         # Continuous Casting bypasses F1; it enters production at the first downstream stage (normally F2).
         if wo.casting_process == "CONTINUOUS":

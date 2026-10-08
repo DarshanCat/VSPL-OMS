@@ -211,10 +211,10 @@ def test_2_release_wo_with_f1_centrifugal_casting(client, db_session):
 
 
 def test_3_release_wo_with_f1_missing_or_invalid_casting_process(client, db_session):
-    """TEST 3: F1 in route requires valid casting process; rejects missing or invalid."""
+    """TEST 3: F1 in route defaults omitted casting process to CENTRIFUGAL; rejects invalid."""
     customer, part, order, wo, planner, _, _ = _seed_base_data(db_session)
 
-    # Missing casting process
+    # Missing casting process defaults to CENTRIFUGAL
     res1 = client.post(
         "/api/v1/operations/wo-release",
         headers=_auth_headers(planner),
@@ -224,8 +224,15 @@ def test_3_release_wo_with_f1_missing_or_invalid_casting_process(client, db_sess
             "route_stages": ["F1", "F2", "DISPATCH"],
         },
     )
-    assert res1.status_code == 400
-    assert "Casting process is required when F1 (Casting) stage is in the route" in res1.json()["detail"]
+    assert res1.status_code == 200, res1.text
+    data1 = res1.json()
+    assert data1["success"] is True
+    assert data1["casting_process"] == "CENTRIFUGAL"
+    assert "F1 -> F2 -> DISPATCH" in data1["route"]
+
+    # Re-plan WO for second test case
+    wo.status = WOStatus.PLANNED
+    db_session.commit()
 
     # Invalid casting process
     res2 = client.post(
@@ -240,6 +247,7 @@ def test_3_release_wo_with_f1_missing_or_invalid_casting_process(client, db_sess
     )
     assert res2.status_code == 400
     assert "Invalid casting process 'SAND_CASTING'" in res2.json()["detail"]
+
 
 
 def test_4_release_wo_without_f1(client, db_session):
