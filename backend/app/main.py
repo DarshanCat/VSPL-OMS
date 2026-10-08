@@ -13,7 +13,7 @@ from app.core.security_headers import SecurityHeadersMiddleware
 from app.api.v1 import (
     auth, oms, production, work_orders, packing,
     dispatch, operations, dashboard, reports, ai, admin, analytics, rejection,
-    conversion_mapping, users, migration, masters, po_matching, roles
+    conversion_mapping, users, migration, masters, po_matching, roles, continuous_casting
 )
 from app.services.seed_service import seed_database_if_empty
 
@@ -105,6 +105,7 @@ app.include_router(migration.router)  # TEMPORARY -- see app/api/v1/migration.py
 app.include_router(masters.router)
 app.include_router(po_matching.router)
 app.include_router(roles.router)
+app.include_router(continuous_casting.router)
 
 @app.get("/health")
 def health():

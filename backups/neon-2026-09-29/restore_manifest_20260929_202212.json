@@ -1,0 +1,15 @@
+{
+  "source_snapshot": "neon_snapshot_20260929_180636.json",
+  "source_sha256": "42f5dc2fac5cf5c7ac8a27ed317c3ace0363a09edcbdee013f7317d2bad3be01",
+  "target_database": "postgresql://***@34.100.147.34:5432/vspl_smes",
+  "started_at": "2026-09-29T14:52:12.358696+00:00",
+  "mode": "COMMIT",
+  "legacy_excluded": [
+    "customer_part_mappings"
+  ],
+  "table_reports": {},
+  "sequences": [],
+  "success": false,
+  "error": "insert or update on table \"work_orders\" violates foreign key constraint \"work_orders_source_wo_id_fkey\"\nDETAIL:  Key (source_wo_id)=(b2571f03-1914-4edc-b62c-06032421abe9) is not present in table \"work_orders\".\n",
+  "finished_at": "2026-09-29T14:52:17.945313+00:00"
+}

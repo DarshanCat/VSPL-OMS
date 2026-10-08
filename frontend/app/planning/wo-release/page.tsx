@@ -29,6 +29,7 @@ export default function WOReleasePage() {
   const [wos, setWos] = useState<any[]>([]);
   const [selectedWO, setSelectedWO] = useState<string>("WO-1002");
   const [physicalQty, setPhysicalQty] = useState<number | "">(500);
+  const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
   const [selectedStages, setSelectedStages] = useState<string[]>([
     "F1",
     "F2",
@@ -125,6 +126,7 @@ export default function WOReleasePage() {
 
   const toggleStage = (stgCode: string) => {
     if (stgCode === "DISPATCH") return; // Dispatch is always terminal
+    if (stgCode === "F1" && castingProcess === "CONTINUOUS") return; // F1 is bypassed for Continuous Casting
     if (selectedStages.includes(stgCode)) {
       setSelectedStages(selectedStages.filter((s) => s !== stgCode));
     } else {
@@ -151,6 +153,11 @@ export default function WOReleasePage() {
       return;
     }
 
+    if (selectedStages.includes("F1") && !castingProcess) {
+      setError("Please select a casting process for F1 (Centrifugal Casting or Continuous Casting).");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -158,6 +165,7 @@ export default function WOReleasePage() {
         wo_number: selectedWO,
         physical_wo_qty: qty,
         route_stages: selectedStages,
+        casting_process: castingProcess || undefined,
         remarks: remarks,
       });
 
@@ -205,9 +213,21 @@ export default function WOReleasePage() {
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">
                   Route: <strong>{successResult.route}</strong>
                 </p>
+                {successResult.casting_process && (
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-0.5">
+                    Casting Process:{" "}
+                    <strong>
+                      {successResult.casting_process === "CONTINUOUS"
+                        ? "Continuous Casting"
+                        : successResult.casting_process === "CENTRIFUGAL"
+                        ? "Centrifugal Casting / Melt"
+                        : successResult.casting_process}
+                    </strong>
+                  </p>
+                )}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Link
                 href={`/production/tracking?wo=${successResult.wo_number}`}
                 className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
@@ -215,6 +235,15 @@ export default function WOReleasePage() {
                 <span>Track {successResult.wo_number} on Floor</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
+              {successResult.casting_process === "CONTINUOUS" && (
+                <Link
+                  href="/continuous-casting/planning"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline ml-3"
+                >
+                  <span>Continuous Casting Planning &amp; Allocations</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              )}
             </div>
           </div>
         )}
@@ -353,21 +382,105 @@ export default function WOReleasePage() {
             </div>
           </div>
 
-          {/* Route Stages Checklist */}
+          {/* Material Source & Casting Process Selector */}
           <div>
             <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 block mb-2">
-              Declared Stage Routing (Select stages this WO will physically move through):
+              Material Source &amp; Casting Process *
             </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  castingProcess === "CENTRIFUGAL"
+                    ? "border-blue-600 bg-blue-50/40 dark:bg-blue-950/30 shadow-sm ring-1 ring-blue-600"
+                    : "border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="castingProcess"
+                  value="CENTRIFUGAL"
+                  checked={castingProcess === "CENTRIFUGAL"}
+                  onChange={() => {
+                    setCastingProcess("CENTRIFUGAL");
+                    if (!selectedStages.includes("F1")) {
+                      setSelectedStages(["F1", ...selectedStages.filter((s) => s !== "F1")]);
+                    }
+                  }}
+                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                    <span>Centrifugal Casting / Melt</span>
+                    <span className="rounded bg-blue-100 dark:bg-blue-950/60 px-1.5 py-0.2 text-[9px] font-bold text-blue-800 dark:text-blue-300">
+                      F1 Route
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    Traditional melt and centrifugal casting on shop floor. F1 stage is required.
+                  </div>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  castingProcess === "CONTINUOUS"
+                    ? "border-amber-600 bg-amber-50/40 dark:bg-amber-950/30 shadow-sm ring-1 ring-amber-600"
+                    : "border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="castingProcess"
+                  value="CONTINUOUS"
+                  checked={castingProcess === "CONTINUOUS"}
+                  onChange={() => {
+                    setCastingProcess("CONTINUOUS");
+                    setSelectedStages(selectedStages.filter((s) => s !== "F1"));
+                  }}
+                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                />
+                <div>
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                    <span>Continuous Casting</span>
+                    <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-800 dark:text-amber-300">
+                      Bypasses F1
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    Pre-cast continuous material. Bypasses F1 melt; blanks issued from cutting.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Route Stages Checklist */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                Declared Stage Routing (Select stages this WO will physically move through):
+              </label>
+              {castingProcess === "CONTINUOUS" && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                  F1 is bypassed for Continuous Casting
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {ALL_POSSIBLE_STAGES.map((stg) => {
+                const isF1 = stg.code === "F1";
+                const isBypassedF1 = isF1 && castingProcess === "CONTINUOUS";
                 const isChecked = selectedStages.includes(stg.code);
                 return (
                   <button
                     type="button"
                     key={stg.code}
+                    disabled={isBypassedF1}
                     onClick={() => toggleStage(stg.code)}
                     className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
-                      isChecked
+                      isBypassedF1
+                        ? "border-zinc-200 dark:border-zinc-800/50 bg-zinc-100/50 dark:bg-zinc-900/30 text-zinc-400 cursor-not-allowed opacity-60"
+                        : isChecked
                         ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100"
                         : "border-zinc-200 dark:border-zinc-800 text-zinc-400 bg-zinc-50/40 dark:bg-zinc-950/40"
                     }`}
@@ -375,12 +488,23 @@ export default function WOReleasePage() {
                     <div className="flex items-center gap-2.5">
                       <div
                         className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-                          isChecked ? "border-blue-600 bg-blue-600 text-white" : "border-zinc-300 dark:border-zinc-700"
+                          isBypassedF1
+                            ? "border-zinc-300 dark:border-zinc-700 bg-zinc-200 dark:bg-zinc-800"
+                            : isChecked
+                            ? "border-blue-600 bg-blue-600 text-white"
+                            : "border-zinc-300 dark:border-zinc-700"
                         }`}
                       >
-                        {isChecked && <Check className="h-3.5 w-3.5" />}
+                        {isChecked && !isBypassedF1 && <Check className="h-3.5 w-3.5" />}
                       </div>
-                      <span className="text-xs font-bold">{stg.name}</span>
+                      <div>
+                        <span className="text-xs font-bold">{stg.name}</span>
+                        {isBypassedF1 && (
+                          <div className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">
+                            Bypassed for Continuous Casting
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {stg.code === "DISPATCH" && (
                       <span className="text-[10px] text-zinc-400 font-medium">Terminal</span>

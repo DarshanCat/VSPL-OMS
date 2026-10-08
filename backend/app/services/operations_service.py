@@ -388,6 +388,34 @@ class OperationsService:
         if "DISPATCH" not in stages:
             stages.append("DISPATCH")
 
+        # Validate Casting Process:
+        # If F1 is in the route, casting_process is required and must be CENTRIFUGAL or CONTINUOUS.
+        # If F1 is not in the route, casting_process is optional.
+        casting_proc = req.casting_process.strip().upper() if req.casting_process and req.casting_process.strip() else None
+        if "F1" in stages:
+            if not casting_proc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Casting process is required when F1 (Casting) stage is in the route. Please select 'CENTRIFUGAL' or 'CONTINUOUS'."
+                )
+            if casting_proc not in ("CENTRIFUGAL", "CONTINUOUS"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid casting process '{req.casting_process}'. Must be 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
+                )
+            wo.casting_process = casting_proc
+        else:
+            wo.casting_process = casting_proc
+
+        # Continuous Casting bypasses F1; it enters production at the first downstream stage (normally F2).
+        if wo.casting_process == "CONTINUOUS":
+            stages = [s for s in stages if s != "F1"]
+            if not stages or stages == ["DISPATCH"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Continuous Casting Work Orders bypass F1 and require at least one downstream manufacturing stage (e.g. F2)."
+                )
+
         wo.physical_wo_qty = req.physical_wo_qty
         wo.released_by = current_user.full_name if current_user else "Planner"
         wo.release_date = datetime.now()
@@ -436,7 +464,7 @@ class OperationsService:
             action="WO_RELEASE",
             entity="WorkOrder",
             entity_id=wo.wo_number,
-            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}",
+            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}, Casting Process: {wo.casting_process or 'N/A'}",
             details=req.remarks or "Work Order released to production"
         )
         db.add(audit)
@@ -449,6 +477,7 @@ class OperationsService:
             wo_number=wo.wo_number,
             released_qty=req.physical_wo_qty,
             route=" -> ".join(stages),
+            casting_process=wo.casting_process,
             stage_targets=targets,
             message=f"Work Order '{wo.wo_number}' successfully released with {req.physical_wo_qty} pieces."
         )

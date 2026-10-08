@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-10-08T07:57:44.840297Z",
+  "baseline_counts": {
+    "po_master": 1,
+    "po_lines": 1,
+    "orders": 0,
+    "work_orders": 0
+  },
+  "target_counts": {
+    "po_master": 20,
+    "po_lines": 41,
+    "orders": 41,
+    "work_orders": 59
+  },
+  "protected_tables": {
+    "customers": 119,
+    "parts": 5506,
+    "customer_part_mappings": 5170,
+    "customer_part_cross_references": 1891,
+    "cc_materials": 15,
+    "cc_inwards": 15,
+    "cc_stock_units": 273,
+    "cc_stock_ledger": 273,
+    "users": 27,
+    "audit_logs": 332
+  }
+}

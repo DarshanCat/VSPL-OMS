@@ -1,0 +1,1677 @@
+{
+  "source": "Neon PostgreSQL",
+  "snapshot_timestamp": "20260929_180636",
+  "table_count": 26,
+  "tables": {
+    "audit_logs": {
+      "row_count": 139,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "user_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "action",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "entity",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "entity_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "old_value",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "new_value",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "details",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "ip_address",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "conversion_part_mappings": {
+      "row_count": 1,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "source_part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "destination_part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "conversion_type",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "conversion_factor",
+          "type": "double precision",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "conversions": {
+      "row_count": 2,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "conversion_wo_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_wo_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "destination_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "conversion_wo_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "entry_stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "reason",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "planner",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "nc_record_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "customer_part_cross_references": {
+      "row_count": 1890,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_part_no",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "source",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "customer_part_mappings": {
+      "row_count": 368,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_part_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "status",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "customers": {
+      "row_count": 119,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_code",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "address",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "gst",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "contact_person",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "email",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "phone",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "dispatches": {
+      "row_count": 4,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "client_request_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "customer_po",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "invoice_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "dispatched_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "dispatch_date",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "transporter",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "vehicle_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "machines": {
+      "row_count": 0,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "machine_code",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "machine_name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "department",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "nc_records": {
+      "row_count": 6,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "nc_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "stage",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "defect_code",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "root_cause",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "disposition",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "responsibility",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_type",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "date_raised",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "date_closed",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "operators": {
+      "row_count": 0,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "user_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "employee_code",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "display_name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "orders": {
+      "row_count": 8,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "oar_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_po",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "po_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "max_batch_size",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "delivery_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "order_type",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_type",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "po_line_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "schedule_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "oar_po_status",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "packing_records": {
+      "row_count": 4,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "fi_approved_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "available_for_packing",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "received_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "packed_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "pending_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "ready_for_dispatch_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "dispatched_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "box_count",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "package_type",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "packing_transactions": {
+      "row_count": 4,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "client_request_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "packed_quantity",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "box_count",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "package_type",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "packing_unit_code",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "parts": {
+      "row_count": 5483,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "grade",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "description",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "po_lines": {
+      "row_count": 1,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "po_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "po_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "required_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "po_master": {
+      "row_count": 1,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "po_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "po_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "validity_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "USER-DEFINED",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "production_movements": {
+      "row_count": 24,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "movement_id",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "client_request_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_type",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "from_stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "to_stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "quantity_moved",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "rejected_quantity",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "machine_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "operator_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "operator_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "shift",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "movement_date",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "movement_time",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "production_updates": {
+      "row_count": 36,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "client_request_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "machine",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "operator_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "operator_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "shift",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "good_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "reject_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "USER-DEFINED",
+          "nullable": "NO"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "rejection_dispositions": {
+      "row_count": 1,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "nc_record_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "action",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "destination_wo_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "destination_part_number",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "destination_customer_code",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "conversion_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "authorized_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "authorized_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_status",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_destination",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_sent_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_sent_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_sent_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "melting_remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "rejection_types": {
+      "row_count": 9,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "code",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "description",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_by",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "schedule_master": {
+      "row_count": 0,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "schedule_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "customer_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "part_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "scheduled_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "required_date",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "customer_schedule_ref",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "po_status",
+          "type": "USER-DEFINED",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "shifts": {
+      "row_count": 0,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "shift_code",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "shift_name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "start_time",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "end_time",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "NO"
+        },
+        {
+          "name": "created_by_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_by_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "stage_wips": {
+      "row_count": 92,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "ent_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "ok_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "inproc_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "onhand_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "rejected_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "received_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "available_wip",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "moved_out_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "scrapped_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "last_updated",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "users": {
+      "row_count": 24,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "full_name",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "email",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "hashed_password",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "role",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "employee_id",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "department",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "must_change_password",
+          "type": "boolean",
+          "nullable": "NO"
+        }
+      ]
+    },
+    "wo_routes": {
+      "row_count": 120,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "work_order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "stage",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "sequence",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "stage_target_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "cumulative_ent_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "cumulative_ok_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "cumulative_rej_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "cumulative_inproc_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "cumulative_onhand_qty",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "stage_status",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    },
+    "work_orders": {
+      "row_count": 19,
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "wo_number",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "order_id",
+          "type": "uuid",
+          "nullable": "NO"
+        },
+        {
+          "name": "physical_wo_qty",
+          "type": "integer",
+          "nullable": "NO"
+        },
+        {
+          "name": "current_stage",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "projected_final_good",
+          "type": "integer",
+          "nullable": "YES"
+        },
+        {
+          "name": "shortfall",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "status",
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        {
+          "name": "released_by",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "release_date",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_released_by",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_released_at",
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_released_by",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_released_at",
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        {
+          "name": "source_wo_id",
+          "type": "uuid",
+          "nullable": "YES"
+        },
+        {
+          "name": "is_replacement",
+          "type": "boolean",
+          "nullable": "YES"
+        },
+        {
+          "name": "replacement_reason",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_document_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_document_url",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_document_revision",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "engineering_remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_document_name",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_document_url",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_document_revision",
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        {
+          "name": "manufacturing_remarks",
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      ]
+    }
+  },
+  "sequences": [],
+  "status": "CAPTURED",
+  "data_file": "neon_snapshot_20260929_180636.json",
+  "data_file_sha256": "42f5dc2fac5cf5c7ac8a27ed317c3ace0363a09edcbdee013f7317d2bad3be01",
+  "total_rows": 8355
+}

@@ -1,0 +1,168 @@
+{
+  "source_snapshot": "neon_snapshot_20260929_180636.json",
+  "source_sha256": "42f5dc2fac5cf5c7ac8a27ed317c3ace0363a09edcbdee013f7317d2bad3be01",
+  "target_database": "postgresql://***@34.100.147.34:5432/vspl_smes",
+  "started_at": "2026-09-29T14:54:16.255203+00:00",
+  "mode": "COMMIT",
+  "legacy_excluded": [
+    "customer_part_mappings"
+  ],
+  "table_reports": {
+    "rejection_types": {
+      "source_count": 9,
+      "target_before": 9,
+      "target_after": 9,
+      "status": "PASS"
+    },
+    "customers": {
+      "source_count": 119,
+      "target_before": 4,
+      "target_after": 119,
+      "status": "PASS"
+    },
+    "parts": {
+      "source_count": 5483,
+      "target_before": 5,
+      "target_after": 5483,
+      "status": "PASS"
+    },
+    "users": {
+      "source_count": 24,
+      "target_before": 16,
+      "target_after": 24,
+      "status": "PASS"
+    },
+    "customer_part_cross_references": {
+      "source_count": 1890,
+      "target_before": 0,
+      "target_after": 1890,
+      "status": "PASS"
+    },
+    "po_master": {
+      "source_count": 1,
+      "target_before": 0,
+      "target_after": 1,
+      "status": "PASS"
+    },
+    "conversion_part_mappings": {
+      "source_count": 1,
+      "target_before": 0,
+      "target_after": 1,
+      "status": "PASS"
+    },
+    "machines": {
+      "source_count": 0,
+      "target_before": 0,
+      "target_after": 0,
+      "status": "PASS"
+    },
+    "operators": {
+      "source_count": 0,
+      "target_before": 0,
+      "target_after": 0,
+      "status": "PASS"
+    },
+    "shifts": {
+      "source_count": 0,
+      "target_before": 0,
+      "target_after": 0,
+      "status": "PASS"
+    },
+    "po_lines": {
+      "source_count": 1,
+      "target_before": 0,
+      "target_after": 1,
+      "status": "PASS"
+    },
+    "schedule_master": {
+      "source_count": 0,
+      "target_before": 0,
+      "target_after": 0,
+      "status": "PASS"
+    },
+    "orders": {
+      "source_count": 8,
+      "target_before": 4,
+      "target_after": 8,
+      "status": "PASS"
+    },
+    "work_orders": {
+      "source_count": 19,
+      "target_before": 7,
+      "target_after": 19,
+      "status": "PASS"
+    },
+    "nc_records": {
+      "source_count": 6,
+      "target_before": 9,
+      "target_after": 6,
+      "status": "PASS"
+    },
+    "conversions": {
+      "source_count": 2,
+      "target_before": 0,
+      "target_after": 2,
+      "status": "PASS"
+    },
+    "wo_routes": {
+      "source_count": 120,
+      "target_before": 49,
+      "target_after": 120,
+      "status": "PASS"
+    },
+    "stage_wips": {
+      "source_count": 92,
+      "target_before": 49,
+      "target_after": 92,
+      "status": "PASS"
+    },
+    "production_movements": {
+      "source_count": 24,
+      "target_before": 0,
+      "target_after": 24,
+      "status": "PASS"
+    },
+    "production_updates": {
+      "source_count": 36,
+      "target_before": 0,
+      "target_after": 36,
+      "status": "PASS"
+    },
+    "rejection_dispositions": {
+      "source_count": 1,
+      "target_before": 0,
+      "target_after": 1,
+      "status": "PASS"
+    },
+    "packing_records": {
+      "source_count": 4,
+      "target_before": 3,
+      "target_after": 4,
+      "status": "PASS"
+    },
+    "packing_transactions": {
+      "source_count": 4,
+      "target_before": 0,
+      "target_after": 4,
+      "status": "PASS"
+    },
+    "dispatches": {
+      "source_count": 4,
+      "target_before": 1,
+      "target_after": 4,
+      "status": "PASS"
+    },
+    "audit_logs": {
+      "source_count": 139,
+      "target_before": 1,
+      "target_after": 139,
+      "status": "PASS"
+    }
+  },
+  "sequences": [],
+  "success": true,
+  "total_source_rows": 8355,
+  "total_restored_rows": 7987,
+  "excluded_legacy_rows": 368,
+  "finished_at": "2026-09-29T14:54:23.094650+00:00"
+}

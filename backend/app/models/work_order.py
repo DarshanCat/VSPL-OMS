@@ -56,6 +56,7 @@ class WorkOrder(Base):
     manufacturing_remarks = Column(String, nullable=True)
     released_by = Column(String, nullable=True)
     release_date = Column(DateTime(timezone=True), nullable=True)
+    casting_process = Column(String(50), nullable=True)  # 'CENTRIFUGAL' | 'CONTINUOUS' (for F1 casting route)
     # Rejection-replacement WO linkage. A replacement WO is a normal WO in every other
     # respect (own route/release/production lifecycle) -- these three fields only
     # record where it came from. The original WO's own history/target is never

@@ -1,0 +1,483 @@
+diff --git a/backend/app/core/roles.py b/backend/app/core/roles.py
+index 5a89150..1d5e83c 100644
+--- a/backend/app/core/roles.py
++++ b/backend/app/core/roles.py
+@@ -98,6 +98,15 @@ DISPATCH_EXECUTION_ROLES = (UserRole.ADMIN, UserRole.DISPATCH)
+ # /auth/register gate (require_roles(UserRole.ADMIN)) -- Super Admin only.
+ USER_MANAGEMENT_ROLES = (UserRole.ADMIN,)
+ 
++# Heat batch creation & master management: Metallurgy / Foundry / QA / Store / Admin
++HEAT_MANAGEMENT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE, UserRole.QA, UserRole.PLANNER)
++
++# Heat allocation to Work Order at casting: Floor operators, Store, Production Manager, Admin
++HEAT_ALLOCATION_ROLES = (
++    UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE,
++    UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
++)
++
+ # Engineering Release: first step of the release chain (Engineering Release ->
+ # Manufacturing Release -> WO Release -> Production). Super Admin may administer
+ # every release step per existing admin policy.
+@@ -105,4 +114,25 @@ ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
+ 
+ # Manufacturing Release: second step of the release chain -- the service layer also
+ # enforces that Engineering Release must already be recorded before this can happen.
+-MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING)
++MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING, UserRole.PRODUCTION_MANAGER)
++
++# Continuous Casting (China) raw-material module. One tuple per operation so widening
++# one never widens another; no China-specific role is introduced.
++CC_INWARD_ROLES = (UserRole.ADMIN, UserRole.STORE)
++CC_RESERVE_ROLES = (UserRole.ADMIN, UserRole.PLANNER)
++CC_ISSUE_ROLES = (UserRole.ADMIN, UserRole.STORE)
++CC_CUT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER)
++# Physical quarantine, disposal and count correction (Phase 9). Quality places a hold, Stores
++# executes a scrap; a quarantine is released by Quality/Admin only; adjustments are Admin only.
++CC_HOLD_ROLES = (UserRole.ADMIN, UserRole.STORE, UserRole.QA)
++CC_HOLD_RELEASE_ROLES = (UserRole.ADMIN, UserRole.QA)
++CC_SCRAP_ROLES = (UserRole.ADMIN, UserRole.STORE)
++CC_ADJUSTMENT_ROLES = (UserRole.ADMIN,)
++# Routing creation/supersession (compatibility and allowances are Engineering's call).
++CC_ROUTING_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
++# Material master (Phase 11A): Engineering owns the technical material / grade / dimensions that it
++# later validates against a WO routing. Inward QA decision: Quality owns acceptance (UserRole.QA is the
++# repository's existing quality role -- the same one QUALITY_APPROVAL_ROLES uses).
++CC_MATERIAL_MASTER_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
++CC_QA_ROLES = (UserRole.ADMIN, UserRole.QA)
++
+diff --git a/backend/app/main.py b/backend/app/main.py
+index e01a6cd..767f287 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -13,7 +13,7 @@ from app.core.security_headers import SecurityHeadersMiddleware
+ from app.api.v1 import (
+     auth, oms, production, work_orders, packing,
+     dispatch, operations, dashboard, reports, ai, admin, analytics, rejection,
+-    conversion_mapping, users, migration, masters, po_matching, roles
++    conversion_mapping, users, migration, masters, po_matching, roles, continuous_casting
+ )
+ from app.services.seed_service import seed_database_if_empty
+ 
+@@ -105,6 +105,7 @@ app.include_router(migration.router)  # TEMPORARY -- see app/api/v1/migration.py
+ app.include_router(masters.router)
+ app.include_router(po_matching.router)
+ app.include_router(roles.router)
++app.include_router(continuous_casting.router)
+ 
+ @app.get("/health")
+ def health():
+diff --git a/backend/app/models/work_order.py b/backend/app/models/work_order.py
+index 8e724a6..80db7c2 100644
+--- a/backend/app/models/work_order.py
++++ b/backend/app/models/work_order.py
+@@ -56,6 +56,7 @@ class WorkOrder(Base):
+     manufacturing_remarks = Column(String, nullable=True)
+     released_by = Column(String, nullable=True)
+     release_date = Column(DateTime(timezone=True), nullable=True)
++    casting_process = Column(String(50), nullable=True)  # 'CENTRIFUGAL' | 'CONTINUOUS' (for F1 casting route)
+     # Rejection-replacement WO linkage. A replacement WO is a normal WO in every other
+     # respect (own route/release/production lifecycle) -- these three fields only
+     # record where it came from. The original WO's own history/target is never
+diff --git a/backend/app/schemas/operations.py b/backend/app/schemas/operations.py
+index 3ba99d7..bb74e67 100644
+--- a/backend/app/schemas/operations.py
++++ b/backend/app/schemas/operations.py
+@@ -46,6 +46,11 @@ class WOReleaseCreate(BaseModel):
+     wo_number: str
+     physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
+     route_stages: List[str] = Field(..., max_length=50, description="Ordered list of stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
++    casting_process: Optional[str] = Field(
++        None,
++        max_length=50,
++        description="Required when F1 stage is selected: 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
++    )
+     remarks: Optional[str] = Field(None, max_length=2000)
+ 
+ class WOReleaseResponse(BaseModel):
+@@ -53,6 +58,7 @@ class WOReleaseResponse(BaseModel):
+     wo_number: str
+     released_qty: int
+     route: str
++    casting_process: Optional[str] = None
+     stage_targets: dict[str, int]
+     message: str
+ 
+diff --git a/backend/app/schemas/work_order.py b/backend/app/schemas/work_order.py
+index 2fcdbdc..3b6c142 100644
+--- a/backend/app/schemas/work_order.py
++++ b/backend/app/schemas/work_order.py
+@@ -28,6 +28,7 @@ class WorkOrderListItem(BaseModel):
+     grade: Optional[str] = None
+     order_qty: int
+     physical_wo_qty: int
++    casting_process: Optional[str] = None
+     match_size: Optional[int] = None
+     current_stage: str
+     next_allowed_stage: Optional[str] = None
+@@ -84,6 +85,7 @@ class WorkOrderTrackingDetail(BaseModel):
+     grade: Optional[str] = None
+     order_qty: int
+     physical_wo_qty: int
++    casting_process: Optional[str] = None
+     match_size: Optional[int] = None
+     current_stage: str
+     next_allowed_stage: Optional[str] = None
+@@ -128,6 +130,7 @@ class OARWorkOrderSummary(BaseModel):
+     release_status: str
+     current_stage: str
+     wo_status: str
++    casting_process: Optional[str] = None
+     ok_completed: int = 0
+     rejected: int = 0
+     movable_wip: int = 0
+diff --git a/backend/app/services/operations_service.py b/backend/app/services/operations_service.py
+index a85317f..6a9f7e9 100644
+--- a/backend/app/services/operations_service.py
++++ b/backend/app/services/operations_service.py
+@@ -388,6 +388,34 @@ class OperationsService:
+         if "DISPATCH" not in stages:
+             stages.append("DISPATCH")
+ 
++        # Validate Casting Process:
++        # If F1 is in the route, casting_process is required and must be CENTRIFUGAL or CONTINUOUS.
++        # If F1 is not in the route, casting_process is optional.
++        casting_proc = req.casting_process.strip().upper() if req.casting_process and req.casting_process.strip() else None
++        if "F1" in stages:
++            if not casting_proc:
++                raise HTTPException(
++                    status_code=status.HTTP_400_BAD_REQUEST,
++                    detail="Casting process is required when F1 (Casting) stage is in the route. Please select 'CENTRIFUGAL' or 'CONTINUOUS'."
++                )
++            if casting_proc not in ("CENTRIFUGAL", "CONTINUOUS"):
++                raise HTTPException(
++                    status_code=status.HTTP_400_BAD_REQUEST,
++                    detail=f"Invalid casting process '{req.casting_process}'. Must be 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
++                )
++            wo.casting_process = casting_proc
++        else:
++            wo.casting_process = casting_proc
++
++        # Continuous Casting bypasses F1; it enters production at the first downstream stage (normally F2).
++        if wo.casting_process == "CONTINUOUS":
++            stages = [s for s in stages if s != "F1"]
++            if not stages or stages == ["DISPATCH"]:
++                raise HTTPException(
++                    status_code=status.HTTP_400_BAD_REQUEST,
++                    detail="Continuous Casting Work Orders bypass F1 and require at least one downstream manufacturing stage (e.g. F2)."
++                )
++
+         wo.physical_wo_qty = req.physical_wo_qty
+         wo.released_by = current_user.full_name if current_user else "Planner"
+         wo.release_date = datetime.now()
+@@ -436,7 +464,7 @@ class OperationsService:
+             action="WO_RELEASE",
+             entity="WorkOrder",
+             entity_id=wo.wo_number,
+-            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}",
++            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}, Casting Process: {wo.casting_process or 'N/A'}",
+             details=req.remarks or "Work Order released to production"
+         )
+         db.add(audit)
+@@ -449,6 +477,7 @@ class OperationsService:
+             wo_number=wo.wo_number,
+             released_qty=req.physical_wo_qty,
+             route=" -> ".join(stages),
++            casting_process=wo.casting_process,
+             stage_targets=targets,
+             message=f"Work Order '{wo.wo_number}' successfully released with {req.physical_wo_qty} pieces."
+         )
+diff --git a/backend/app/services/production_service.py b/backend/app/services/production_service.py
+index bebaffa..75aa5e7 100644
+--- a/backend/app/services/production_service.py
++++ b/backend/app/services/production_service.py
+@@ -295,6 +295,12 @@ class ProductionService:
+         # we do not double-increment ok_qty. Only increment ok_qty for direct movements where
+         # production was not previously entered.
+         additional_ok = max(req.quantity_moved - from_wip.onhand_qty, 0)
++        # Continuous-casting material gate (read-only; runs before any counter changes). Moving OUT of the
++        # first stage can create first-stage production implicitly: additional_ok + rejected is that amount.
++        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
++        ContinuousCastingGateService.enforce_first_stage_production(
++            db, wo, routes, matched_from, from_wip.ok_qty + from_wip.rejected_qty,
++            additional_ok + req.rejected_quantity)
+         from_wip.ok_qty += additional_ok
+         from_wip.rejected_qty += req.rejected_quantity
+ 
+@@ -516,6 +522,11 @@ class ProductionService:
+             StageWIP.stage == matched_stage
+         ).with_for_update().first()
+ 
++        # Continuous-casting material gate (read-only; runs before any StageWIP / ProductionUpdate / NC write).
++        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
++        ContinuousCastingGateService.enforce_first_stage_production(
++            db, wo, routes, matched_stage, (wip.ok_qty + wip.rejected_qty) if wip else 0, total_proc)
++
+         if not wip:
+             init_ent = wo.physical_wo_qty if route_stages and route_stages[0] == matched_stage else 0
+             wip = StageWIP(
+diff --git a/backend/app/services/work_order_service.py b/backend/app/services/work_order_service.py
+index cb0e548..d19ef96 100644
+--- a/backend/app/services/work_order_service.py
++++ b/backend/app/services/work_order_service.py
+@@ -96,6 +96,7 @@ class WorkOrderService:
+                 grade=order.part.grade if (order and order.part) else None,
+                 order_qty=order.po_qty if order else wo.physical_wo_qty,
+                 physical_wo_qty=wo.physical_wo_qty,
++                casting_process=getattr(wo, "casting_process", None),
+                 match_size=order.max_batch_size if order else None,
+                 current_stage=cur_stage,
+                 next_allowed_stage=next_stage,
+@@ -263,6 +264,7 @@ class WorkOrderService:
+             grade=order.part.grade if (order and order.part) else None,
+             order_qty=order.po_qty if order else wo.physical_wo_qty,
+             physical_wo_qty=wo.physical_wo_qty,
++            casting_process=getattr(wo, "casting_process", None),
+             match_size=order.max_batch_size if order else None,
+             current_stage=cur_stage,
+             next_allowed_stage=next_stage,
+@@ -461,6 +463,7 @@ class WorkOrderService:
+                 release_status=rel_status,
+                 current_stage=cur_stage,
+                 wo_status=wo.status.value,
++                casting_process=getattr(wo, "casting_process", None),
+                 ok_completed=good_qty,
+                 rejected=rejected_qty,
+                 movable_wip=movable_wip,
+diff --git a/frontend/app/components/layout/AppShell.tsx b/frontend/app/components/layout/AppShell.tsx
+index e9d037d..c23f566 100644
+--- a/frontend/app/components/layout/AppShell.tsx
++++ b/frontend/app/components/layout/AppShell.tsx
+@@ -221,6 +221,18 @@ const NAV_GROUPS: NavGroup[] = [
+       },
+     ],
+   },
++  {
++    group: "CONTINUOUS CASTING",
++    items: [
++      { name: "Materials", href: "/continuous-casting/materials", icon: <Layers className="h-4 w-4 text-amber-600" /> },
++      { name: "Inward & QA", href: "/continuous-casting/inward", icon: <PackageCheck className="h-4 w-4 text-amber-600" /> },
++      { name: "Stock", href: "/continuous-casting/stock", icon: <Boxes className="h-4 w-4 text-amber-600" /> },
++      { name: "Planning", href: "/continuous-casting/planning", icon: <CalendarClock className="h-4 w-4 text-amber-600" /> },
++      { name: "Stores Transactions", href: "/continuous-casting/stores", icon: <ArrowRightLeft className="h-4 w-4 text-amber-600" /> },
++      { name: "Cutting", href: "/continuous-casting/cutting", icon: <Cog className="h-4 w-4 text-amber-600" /> },
++      { name: "Traceability", href: "/continuous-casting/traceability", icon: <GitMerge className="h-4 w-4 text-amber-600" /> },
++    ],
++  },
+   {
+     group: "INTELLIGENCE & REPORTS",
+     items: [
+diff --git a/frontend/app/planning/wo-release/page.tsx b/frontend/app/planning/wo-release/page.tsx
+index 000fbb9..4ec6d56 100644
+--- a/frontend/app/planning/wo-release/page.tsx
++++ b/frontend/app/planning/wo-release/page.tsx
+@@ -29,6 +29,7 @@ export default function WOReleasePage() {
+   const [wos, setWos] = useState<any[]>([]);
+   const [selectedWO, setSelectedWO] = useState<string>("WO-1002");
+   const [physicalQty, setPhysicalQty] = useState<number | "">(500);
++  const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
+   const [selectedStages, setSelectedStages] = useState<string[]>([
+     "F1",
+     "F2",
+@@ -125,6 +126,7 @@ export default function WOReleasePage() {
+ 
+   const toggleStage = (stgCode: string) => {
+     if (stgCode === "DISPATCH") return; // Dispatch is always terminal
++    if (stgCode === "F1" && castingProcess === "CONTINUOUS") return; // F1 is bypassed for Continuous Casting
+     if (selectedStages.includes(stgCode)) {
+       setSelectedStages(selectedStages.filter((s) => s !== stgCode));
+     } else {
+@@ -151,6 +153,11 @@ export default function WOReleasePage() {
+       return;
+     }
+ 
++    if (selectedStages.includes("F1") && !castingProcess) {
++      setError("Please select a casting process for F1 (Centrifugal Casting or Continuous Casting).");
++      return;
++    }
++
+     setLoading(true);
+ 
+     try {
+@@ -158,6 +165,7 @@ export default function WOReleasePage() {
+         wo_number: selectedWO,
+         physical_wo_qty: qty,
+         route_stages: selectedStages,
++        casting_process: castingProcess || undefined,
+         remarks: remarks,
+       });
+ 
+@@ -205,9 +213,21 @@ export default function WOReleasePage() {
+                 <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                   Route: <strong>{successResult.route}</strong>
+                 </p>
++                {successResult.casting_process && (
++                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-0.5">
++                    Casting Process:{" "}
++                    <strong>
++                      {successResult.casting_process === "CONTINUOUS"
++                        ? "Continuous Casting"
++                        : successResult.casting_process === "CENTRIFUGAL"
++                        ? "Centrifugal Casting / Melt"
++                        : successResult.casting_process}
++                    </strong>
++                  </p>
++                )}
+               </div>
+             </div>
+-            <div className="flex gap-2">
++            <div className="flex flex-wrap gap-2">
+               <Link
+                 href={`/production/tracking?wo=${successResult.wo_number}`}
+                 className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+@@ -215,6 +235,15 @@ export default function WOReleasePage() {
+                 <span>Track {successResult.wo_number} on Floor</span>
+                 <ArrowRight className="h-3.5 w-3.5" />
+               </Link>
++              {successResult.casting_process === "CONTINUOUS" && (
++                <Link
++                  href="/continuous-casting/planning"
++                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline ml-3"
++                >
++                  <span>Continuous Casting Planning &amp; Allocations</span>
++                  <ArrowRight className="h-3.5 w-3.5" />
++                </Link>
++              )}
+             </div>
+           </div>
+         )}
+@@ -353,21 +382,105 @@ export default function WOReleasePage() {
+             </div>
+           </div>
+ 
+-          {/* Route Stages Checklist */}
++          {/* Material Source & Casting Process Selector */}
+           <div>
+             <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 block mb-2">
+-              Declared Stage Routing (Select stages this WO will physically move through):
++              Material Source &amp; Casting Process *
+             </label>
++            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
++              <label
++                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
++                  castingProcess === "CENTRIFUGAL"
++                    ? "border-blue-600 bg-blue-50/40 dark:bg-blue-950/30 shadow-sm ring-1 ring-blue-600"
++                    : "border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300"
++                }`}
++              >
++                <input
++                  type="radio"
++                  name="castingProcess"
++                  value="CENTRIFUGAL"
++                  checked={castingProcess === "CENTRIFUGAL"}
++                  onChange={() => {
++                    setCastingProcess("CENTRIFUGAL");
++                    if (!selectedStages.includes("F1")) {
++                      setSelectedStages(["F1", ...selectedStages.filter((s) => s !== "F1")]);
++                    }
++                  }}
++                  className="mt-0.5 text-blue-600 focus:ring-blue-500"
++                />
++                <div>
++                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
++                    <span>Centrifugal Casting / Melt</span>
++                    <span className="rounded bg-blue-100 dark:bg-blue-950/60 px-1.5 py-0.2 text-[9px] font-bold text-blue-800 dark:text-blue-300">
++                      F1 Route
++                    </span>
++                  </div>
++                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
++                    Traditional melt and centrifugal casting on shop floor. F1 stage is required.
++                  </div>
++                </div>
++              </label>
++
++              <label
++                className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
++                  castingProcess === "CONTINUOUS"
++                    ? "border-amber-600 bg-amber-50/40 dark:bg-amber-950/30 shadow-sm ring-1 ring-amber-600"
++                    : "border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-950/40 hover:border-zinc-300"
++                }`}
++              >
++                <input
++                  type="radio"
++                  name="castingProcess"
++                  value="CONTINUOUS"
++                  checked={castingProcess === "CONTINUOUS"}
++                  onChange={() => {
++                    setCastingProcess("CONTINUOUS");
++                    setSelectedStages(selectedStages.filter((s) => s !== "F1"));
++                  }}
++                  className="mt-0.5 text-amber-600 focus:ring-amber-500"
++                />
++                <div>
++                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
++                    <span>Continuous Casting</span>
++                    <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-800 dark:text-amber-300">
++                      Bypasses F1
++                    </span>
++                  </div>
++                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
++                    Pre-cast continuous material. Bypasses F1 melt; blanks issued from cutting.
++                  </div>
++                </div>
++              </label>
++            </div>
++          </div>
++
++          {/* Route Stages Checklist */}
++          <div>
++            <div className="flex items-center justify-between mb-2">
++              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
++                Declared Stage Routing (Select stages this WO will physically move through):
++              </label>
++              {castingProcess === "CONTINUOUS" && (
++                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
++                  F1 is bypassed for Continuous Casting
++                </span>
++              )}
++            </div>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+               {ALL_POSSIBLE_STAGES.map((stg) => {
++                const isF1 = stg.code === "F1";
++                const isBypassedF1 = isF1 && castingProcess === "CONTINUOUS";
+                 const isChecked = selectedStages.includes(stg.code);
+                 return (
+                   <button
+                     type="button"
+                     key={stg.code}
++                    disabled={isBypassedF1}
+                     onClick={() => toggleStage(stg.code)}
+                     className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
+-                      isChecked
++                      isBypassedF1
++                        ? "border-zinc-200 dark:border-zinc-800/50 bg-zinc-100/50 dark:bg-zinc-900/30 text-zinc-400 cursor-not-allowed opacity-60"
++                        : isChecked
+                         ? "border-blue-500 bg-blue-50/60 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100"
+                         : "border-zinc-200 dark:border-zinc-800 text-zinc-400 bg-zinc-50/40 dark:bg-zinc-950/40"
+                     }`}
+@@ -375,12 +488,23 @@ export default function WOReleasePage() {
+                     <div className="flex items-center gap-2.5">
+                       <div
+                         className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+-                          isChecked ? "border-blue-600 bg-blue-600 text-white" : "border-zinc-300 dark:border-zinc-700"
++                          isBypassedF1
++                            ? "border-zinc-300 dark:border-zinc-700 bg-zinc-200 dark:bg-zinc-800"
++                            : isChecked
++                            ? "border-blue-600 bg-blue-600 text-white"
++                            : "border-zinc-300 dark:border-zinc-700"
+                         }`}
+                       >
+-                        {isChecked && <Check className="h-3.5 w-3.5" />}
++                        {isChecked && !isBypassedF1 && <Check className="h-3.5 w-3.5" />}
++                      </div>
++                      <div>
++                        <span className="text-xs font-bold">{stg.name}</span>
++                        {isBypassedF1 && (
++                          <div className="text-[10px] text-amber-600 dark:text-amber-400 font-normal">
++                            Bypassed for Continuous Casting
++                          </div>
++                        )}
+                       </div>
+-                      <span className="text-xs font-bold">{stg.name}</span>
+                     </div>
+                     {stg.code === "DISPATCH" && (
+                       <span className="text-[10px] text-zinc-400 font-medium">Terminal</span>

@@ -1,0 +1,15 @@
+{
+  "source_snapshot": "neon_snapshot_20260929_180636.json",
+  "source_sha256": "42f5dc2fac5cf5c7ac8a27ed317c3ace0363a09edcbdee013f7317d2bad3be01",
+  "target_database": "postgresql://***@34.100.147.34:5432/vspl_smes",
+  "started_at": "2026-09-29T14:53:31.046031+00:00",
+  "mode": "COMMIT",
+  "legacy_excluded": [
+    "customer_part_mappings"
+  ],
+  "table_reports": {},
+  "sequences": [],
+  "success": false,
+  "error": "insert or update on table \"conversions\" violates foreign key constraint \"conversions_nc_record_id_fkey\"\nDETAIL:  Key (nc_record_id)=(da605d8a-a65e-430e-b64c-be0195f9dd74) is not present in table \"nc_records\".\n",
+  "finished_at": "2026-09-29T14:53:36.708559+00:00"
+}

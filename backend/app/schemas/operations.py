@@ -46,6 +46,11 @@ class WOReleaseCreate(BaseModel):
     wo_number: str
     physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
     route_stages: List[str] = Field(..., max_length=50, description="Ordered list of stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
+    casting_process: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Required when F1 stage is selected: 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
+    )
     remarks: Optional[str] = Field(None, max_length=2000)
 
 class WOReleaseResponse(BaseModel):
@@ -53,6 +58,7 @@ class WOReleaseResponse(BaseModel):
     wo_number: str
     released_qty: int
     route: str
+    casting_process: Optional[str] = None
     stage_targets: dict[str, int]
     message: str
 

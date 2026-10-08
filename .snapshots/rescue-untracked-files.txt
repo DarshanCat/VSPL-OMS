@@ -1,0 +1,164 @@
+On branch gcp/oms-production
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   backend/app/api/v1/continuous_casting.py
+	new file:   backend/app/models/continuous_casting.py
+	new file:   backend/app/schemas/continuous_casting.py
+	new file:   backend/app/schemas/continuous_casting_read.py
+	new file:   backend/app/services/continuous_casting_cut_service.py
+	new file:   backend/app/services/continuous_casting_gate_service.py
+	new file:   backend/app/services/continuous_casting_material_service.py
+	new file:   backend/app/services/continuous_casting_physical_service.py
+	new file:   backend/app/services/continuous_casting_qa_service.py
+	new file:   backend/app/services/continuous_casting_read_service.py
+	new file:   backend/app/services/continuous_casting_reservation_service.py
+	new file:   backend/app/services/continuous_casting_routing_service.py
+	new file:   backend/app/services/continuous_casting_service.py
+	new file:   backend/app/services/continuous_casting_split_service.py
+	new file:   backend/tests/test_cc_api_router.py
+	new file:   backend/tests/test_cc_constraints.py
+	new file:   backend/tests/test_cc_cut_consume_service.py
+	new file:   backend/tests/test_cc_inward_service.py
+	new file:   backend/tests/test_cc_issue_service.py
+	new file:   backend/tests/test_cc_material_qa_service.py
+	new file:   backend/tests/test_cc_number_generators.py
+	new file:   backend/tests/test_cc_phase10_gate.py
+	new file:   backend/tests/test_cc_phase9_service.py
+	new file:   backend/tests/test_cc_read_api.py
+	new file:   backend/tests/test_cc_reservation_service.py
+	new file:   backend/tests/test_cc_return_service.py
+	new file:   backend/tests/test_cc_routing_allocation.py
+	new file:   backend/tests/test_cc_split_service.py
+	new file:   backend/tests/test_cc_stock_summary.py
+	new file:   backend/tests/test_wo_release_casting_process.py
+	new file:   frontend/app/components/cc/CCActionForm.tsx
+	new file:   frontend/app/components/cc/CCAllocationList.tsx
+	new file:   frontend/app/components/cc/CCAllocationPanel.tsx
+	new file:   frontend/app/components/cc/CCAvailableCutList.tsx
+	new file:   frontend/app/components/cc/CCConfirmModal.tsx
+	new file:   frontend/app/components/cc/CCCutConsumePanel.tsx
+	new file:   frontend/app/components/cc/CCCutResultList.tsx
+	new file:   frontend/app/components/cc/CCCutResultPanel.tsx
+	new file:   frontend/app/components/cc/CCErrorBanner.tsx
+	new file:   frontend/app/components/cc/CCFilterBar.tsx
+	new file:   frontend/app/components/cc/CCGateStatusPanel.tsx
+	new file:   frontend/app/components/cc/CCInwardSelector.tsx
+	new file:   frontend/app/components/cc/CCInwardTraceView.tsx
+	new file:   frontend/app/components/cc/CCLedgerTable.tsx
+	new file:   frontend/app/components/cc/CCLengthCell.tsx
+	new file:   frontend/app/components/cc/CCMaterialStockSummary.tsx
+	new file:   frontend/app/components/cc/CCPagedTable.tsx
+	new file:   frontend/app/components/cc/CCReleaseSupersededModal.tsx
+	new file:   frontend/app/components/cc/CCReservationPanel.tsx
+	new file:   frontend/app/components/cc/CCRoleGate.tsx
+	new file:   frontend/app/components/cc/CCRoutingFormModal.tsx
+	new file:   frontend/app/components/cc/CCRoutingVersionHistory.tsx
+	new file:   frontend/app/components/cc/CCStatusBadge.tsx
+	new file:   frontend/app/components/cc/CCTxnNumber.tsx
+	new file:   frontend/app/components/cc/CCUnitBalances.tsx
+	new file:   frontend/app/components/cc/CCUnitList.tsx
+	new file:   frontend/app/components/cc/CCWorkOrderSelector.tsx
+	new file:   frontend/app/components/cc/CCWorkOrderTraceView.tsx
+	new file:   frontend/app/continuous-casting/cutting/CuttingContent.tsx
+	new file:   frontend/app/continuous-casting/cutting/page.tsx
+	new file:   frontend/app/continuous-casting/inward/InwardContent.tsx
+	new file:   frontend/app/continuous-casting/inward/page.tsx
+	new file:   frontend/app/continuous-casting/materials/MaterialsContent.tsx
+	new file:   frontend/app/continuous-casting/materials/page.tsx
+	new file:   frontend/app/continuous-casting/planning/PlanningContent.tsx
+	new file:   frontend/app/continuous-casting/planning/page.tsx
+	new file:   frontend/app/continuous-casting/stock/StockContent.tsx
+	new file:   frontend/app/continuous-casting/stock/page.tsx
+	new file:   frontend/app/continuous-casting/stores/StoresContent.tsx
+	new file:   frontend/app/continuous-casting/stores/page.tsx
+	new file:   frontend/app/continuous-casting/traceability/TraceabilityContent.tsx
+	new file:   frontend/app/continuous-casting/traceability/page.tsx
+	new file:   frontend/lib/continuousCastingApi.ts
+	new file:   frontend/lib/continuousCastingForm.ts
+	new file:   frontend/lib/continuousCastingInwardGroups.ts
+	new file:   frontend/lib/continuousCastingRoles.ts
+	new file:   frontend/lib/continuousCastingTypes.ts
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   backend/app/core/roles.py
+	modified:   backend/app/main.py
+	modified:   backend/app/models/work_order.py
+	modified:   backend/app/schemas/operations.py
+	modified:   backend/app/schemas/work_order.py
+	modified:   backend/app/services/operations_service.py
+	modified:   backend/app/services/production_service.py
+	modified:   backend/app/services/work_order_service.py
+	modified:   frontend/app/components/layout/AppShell.tsx
+	modified:   frontend/app/planning/wo-release/page.tsx
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.dockerignore
+	.gcloudignore
+	.gitattributes
+	.snapshots/config.json
+	.snapshots/readme.md
+	.snapshots/rescue-staged-diff.patch
+	.snapshots/rescue-untracked-files.txt
+	.snapshots/rescue-working-tree-diff.patch
+	.snapshots/sponsors.md
+	Dockerfile
+	Master_2026-09-19.xlsx
+	Part Master - Control Plan(D&E) (2).xlsx
+	backend/data/masters/Master_2026-09-09.xlsx
+	backend/tests/test_restore_neon_to_cloudsql.py
+	backups/neon-2026-09-29/neon_manifest_20260929_180636.json
+	backups/neon-2026-09-29/neon_snapshot_20260929_180636.json
+	backups/neon-2026-09-29/restore_manifest_20260929_201636.json
+	backups/neon-2026-09-29/restore_manifest_20260929_201646.json
+	backups/neon-2026-09-29/restore_manifest_20260929_201658.json
+	backups/neon-2026-09-29/restore_manifest_20260929_202212.json
+	backups/neon-2026-09-29/restore_manifest_20260929_202311.json
+	backups/neon-2026-09-29/restore_manifest_20260929_202331.json
+	backups/neon-2026-09-29/restore_manifest_20260929_202400.json
+	backups/neon-2026-09-29/restore_manifest_20260929_202416.json
+	backups/neon-2026-09-29/restore_manifest_20261008_141222.json
+	backups/neon-2026-09-29/restore_manifest_20261008_142518.json
+	backups/pre-cleanup-20261005/neon_manifest_20261005_144359.json
+	backups/pre-cleanup-20261005/neon_snapshot_20261005_144359.json
+	demo_cleanup_dryrun.sql
+	deploy.ps1
+	entrypoint.sh
+	how --name-only --format= f2d08c5
+	how --stat --oneline f2d08c5
+	scratch/audit_7_pos.py
+	scratch/audit_cc_db.py
+	scratch/audit_part_matching.py
+	scratch/audit_reconciliation_27.py
+	scratch/check_all_tables.py
+	scratch/check_api.py
+	scratch/check_audit_po.py
+	scratch/check_cust_codes.py
+	scratch/check_cust_po_groups.py
+	scratch/check_operational_api.py
+	scratch/check_po_constraints.py
+	scratch/check_pos.py
+	scratch/check_users.py
+	scratch/comprehensive_source_audit.py
+	scratch/consistency_analysis.py
+	scratch/diagnose_urls.py
+	scratch/dump_hierarchy.py
+	scratch/execute_7pos_cleanup.py
+	scratch/execute_import_59wos.py
+	scratch/generate_manifest.py
+	scratch/inspect_tables_schema.py
+	scratch/inspect_uploaded_excel.py
+	scratch/pre_cleanup_snapshot_7pos_23rows.json
+	scratch/pre_import_snapshot_59wos.json
+	scratch/read_full_logs.py
+	scratch/test_api_jwt.py
+	scratch/test_enum_mapping.py
+	scratch/test_po_unique.py
+	scratch/uploaded_wo_data.csv
+	scripts/audit_comparison.py
+	scripts/backup_neon.py
+	scripts/restore_neon_to_cloudsql.py
+	scripts/verify_gcp_oms_functional.py
+

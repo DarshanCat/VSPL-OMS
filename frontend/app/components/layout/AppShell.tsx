@@ -222,6 +222,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    group: "CONTINUOUS CASTING",
+    items: [
+      { name: "Materials", href: "/continuous-casting/materials", icon: <Layers className="h-4 w-4 text-amber-600" /> },
+      { name: "Inward & QA", href: "/continuous-casting/inward", icon: <PackageCheck className="h-4 w-4 text-amber-600" /> },
+      { name: "Stock", href: "/continuous-casting/stock", icon: <Boxes className="h-4 w-4 text-amber-600" /> },
+      { name: "Planning", href: "/continuous-casting/planning", icon: <CalendarClock className="h-4 w-4 text-amber-600" /> },
+      { name: "Stores Transactions", href: "/continuous-casting/stores", icon: <ArrowRightLeft className="h-4 w-4 text-amber-600" /> },
+      { name: "Cutting", href: "/continuous-casting/cutting", icon: <Cog className="h-4 w-4 text-amber-600" /> },
+      { name: "Traceability", href: "/continuous-casting/traceability", icon: <GitMerge className="h-4 w-4 text-amber-600" /> },
+    ],
+  },
+  {
     group: "INTELLIGENCE & REPORTS",
     items: [
       {

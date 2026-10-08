@@ -1,0 +1,17 @@
+﻿.git
+.git/**
+.github
+.snapshots
+backend/venv
+backend/data
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+frontend/node_modules
+backend/__pycache__
+frontend/.next

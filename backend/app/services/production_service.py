@@ -295,6 +295,12 @@ class ProductionService:
         # we do not double-increment ok_qty. Only increment ok_qty for direct movements where
         # production was not previously entered.
         additional_ok = max(req.quantity_moved - from_wip.onhand_qty, 0)
+        # Continuous-casting material gate (read-only; runs before any counter changes). Moving OUT of the
+        # first stage can create first-stage production implicitly: additional_ok + rejected is that amount.
+        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
+        ContinuousCastingGateService.enforce_first_stage_production(
+            db, wo, routes, matched_from, from_wip.ok_qty + from_wip.rejected_qty,
+            additional_ok + req.rejected_quantity)
         from_wip.ok_qty += additional_ok
         from_wip.rejected_qty += req.rejected_quantity
 
@@ -515,6 +521,11 @@ class ProductionService:
             StageWIP.work_order_id == wo.id,
             StageWIP.stage == matched_stage
         ).with_for_update().first()
+
+        # Continuous-casting material gate (read-only; runs before any StageWIP / ProductionUpdate / NC write).
+        from app.services.continuous_casting_gate_service import ContinuousCastingGateService
+        ContinuousCastingGateService.enforce_first_stage_production(
+            db, wo, routes, matched_stage, (wip.ok_qty + wip.rejected_qty) if wip else 0, total_proc)
 
         if not wip:
             init_ent = wo.physical_wo_qty if route_stages and route_stages[0] == matched_stage else 0

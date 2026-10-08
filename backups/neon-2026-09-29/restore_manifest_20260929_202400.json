@@ -1,0 +1,14 @@
+{
+  "source_snapshot": "neon_snapshot_20260929_180636.json",
+  "source_sha256": "42f5dc2fac5cf5c7ac8a27ed317c3ace0363a09edcbdee013f7317d2bad3be01",
+  "target_database": "postgresql://***@34.100.147.34:5432/vspl_smes",
+  "started_at": "2026-09-29T14:54:00.789347+00:00",
+  "mode": "DRY_RUN",
+  "legacy_excluded": [
+    "customer_part_mappings"
+  ],
+  "table_reports": {},
+  "sequences": [],
+  "success": true,
+  "finished_at": "2026-09-29T14:54:00.810337+00:00"
+}

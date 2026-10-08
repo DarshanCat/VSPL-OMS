@@ -1,0 +1,207 @@
+{
+  "timestamp": "2026-10-08T06:35:02.888575Z",
+  "po_master": [
+    {
+      "id": "75533993-0dfa-44a1-abbf-11b333e60204",
+      "po_number": "ACNC/VSPL/16/2026-27",
+      "customer_id": "5269cdd1-9be9-413e-9ee3-f39038334a57",
+      "status": "OPEN",
+      "po_date": "2026-06-14",
+      "validity_date": "2026-07-15",
+      "created_by_id": "76913a60-d7df-4800-843d-311947d7df36",
+      "created_at": "2026-10-02T10:31:56.820290+00:00"
+    },
+    {
+      "id": "f864db6b-a915-4337-9a76-b965ab4d2503",
+      "po_number": "PO-009-OEM/26-27",
+      "customer_id": "5269cdd1-9be9-413e-9ee3-f39038334a57",
+      "status": "OPEN",
+      "po_date": "2026-10-05",
+      "validity_date": "2026-10-30",
+      "created_by_id": "328e8da8-0fee-47dc-aa11-bb6c2bea95a6",
+      "created_at": "2026-10-06T04:41:22.659129+00:00"
+    },
+    {
+      "id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "po_number": "ACNC/VSPL/18 /2026-27",
+      "customer_id": "5269cdd1-9be9-413e-9ee3-f39038334a57",
+      "status": "OPEN",
+      "po_date": "2026-10-03",
+      "validity_date": "2026-10-31",
+      "created_by_id": "d918174a-6081-493d-8743-777c23e47b3f",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "d1dffb2d-140b-4ceb-a2e6-b73b476e842c",
+      "po_number": "MS/GEN/262251",
+      "customer_id": "e9b56b5e-6d5d-40ea-9ce2-3ac35c970ac4",
+      "status": "OPEN",
+      "po_date": "2026-10-02",
+      "validity_date": "2026-10-15",
+      "created_by_id": "d918174a-6081-493d-8743-777c23e47b3f",
+      "created_at": "2026-10-07T04:30:01.255295+00:00"
+    },
+    {
+      "id": "aadc2984-a134-480e-abd4-bbe34bc22760",
+      "po_number": "4510284161",
+      "customer_id": "7cf54d1f-5666-4dac-90f7-e07b9d1d03d8",
+      "status": "OPEN",
+      "po_date": "2026-10-05",
+      "validity_date": "2026-10-16",
+      "created_by_id": "d918174a-6081-493d-8743-777c23e47b3f",
+      "created_at": "2026-10-07T04:31:24.162005+00:00"
+    },
+    {
+      "id": "48c46ab0-8aea-48d7-815f-a2e40b65a184",
+      "po_number": "Schedule",
+      "customer_id": "2c2bd146-6224-4593-93e3-d6f1aecce025",
+      "status": "OPEN",
+      "po_date": "2026-10-03",
+      "validity_date": "2026-10-20",
+      "created_by_id": "d918174a-6081-493d-8743-777c23e47b3f",
+      "created_at": "2026-10-07T04:32:59.177192+00:00"
+    },
+    {
+      "id": "1226e1ca-65ad-43cb-b693-7e2e2ed856e7",
+      "po_number": "91160310",
+      "customer_id": "2088a16b-4a66-4dd4-aca9-c52e0e925055",
+      "status": "OPEN",
+      "po_date": "2026-09-24",
+      "validity_date": "2026-10-20",
+      "created_by_id": "d918174a-6081-493d-8743-777c23e47b3f",
+      "created_at": "2026-10-07T09:54:14.374701+00:00"
+    }
+  ],
+  "po_lines": [
+    {
+      "id": "80d0b72c-68f2-4d11-b84b-6bc258a86e64",
+      "po_id": "75533993-0dfa-44a1-abbf-11b333e60204",
+      "part_id": "b63490d3-5803-4ad4-8b01-cb3be232a13b",
+      "po_qty": 20,
+      "required_date": null,
+      "created_at": "2026-10-02T10:31:56.820290+00:00"
+    },
+    {
+      "id": "b878d417-574d-4952-9695-3fbcd65cb7fb",
+      "po_id": "f864db6b-a915-4337-9a76-b965ab4d2503",
+      "part_id": "ef75fac1-7fe1-400f-be46-d3d355e745f7",
+      "po_qty": 20,
+      "required_date": "2026-10-30",
+      "created_at": "2026-10-06T04:41:22.659129+00:00"
+    },
+    {
+      "id": "45298605-2b0c-4862-973a-e425ae1eb5e5",
+      "po_id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "part_id": "44987f60-aee3-43a8-aba9-1cdfdc51a2ec",
+      "po_qty": 20,
+      "required_date": "2026-10-31",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "f97fbd27-8af6-47a7-bdd0-917156b1cd1f",
+      "po_id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "part_id": "4e4273b3-747c-4c1f-821a-e4e1e27f9600",
+      "po_qty": 60,
+      "required_date": "2026-10-31",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "8135dca2-8445-4379-a3af-febdd72c8428",
+      "po_id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "part_id": "f34e2c24-6a54-415b-bdbc-e4fef509a25f",
+      "po_qty": 10,
+      "required_date": "2026-10-31",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "8a6960c1-8bbd-4b9f-b739-9605a4f6700f",
+      "po_id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "part_id": "549557a1-e571-43c7-8ebb-0c324e00db7e",
+      "po_qty": 20,
+      "required_date": "2026-10-31",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "cc290650-3ac8-4e5a-bb82-6e6bf80d7578",
+      "po_id": "2457a77c-a193-46db-838a-faf12efe4849",
+      "part_id": "422124b7-b99e-4aae-b2c1-3a9b0e9595df",
+      "po_qty": 20,
+      "required_date": "2026-10-31",
+      "created_at": "2026-10-07T04:25:22.862267+00:00"
+    },
+    {
+      "id": "a112a018-4526-4ba6-a8a5-a9c80e025a58",
+      "po_id": "d1dffb2d-140b-4ceb-a2e6-b73b476e842c",
+      "part_id": "69ff2b38-cd01-4cb5-9acf-a57c146d02c6",
+      "po_qty": 40,
+      "required_date": "2026-10-15",
+      "created_at": "2026-10-07T04:30:01.255295+00:00"
+    },
+    {
+      "id": "6cfce7ef-01cb-4e6a-bd94-e6781da877e7",
+      "po_id": "d1dffb2d-140b-4ceb-a2e6-b73b476e842c",
+      "part_id": "a59e7db6-d70b-4e09-a4b6-de54da73e16c",
+      "po_qty": 30,
+      "required_date": "2026-10-15",
+      "created_at": "2026-10-07T04:30:01.255295+00:00"
+    },
+    {
+      "id": "49dc16ae-c406-4558-8ceb-e951866b5628",
+      "po_id": "d1dffb2d-140b-4ceb-a2e6-b73b476e842c",
+      "part_id": "2122ea4e-975d-4275-8cd3-af1c04b8ff4d",
+      "po_qty": 32,
+      "required_date": "2026-10-16",
+      "created_at": "2026-10-07T04:30:01.255295+00:00"
+    },
+    {
+      "id": "a22cd7a4-6c17-47fc-84d8-880f43145acd",
+      "po_id": "d1dffb2d-140b-4ceb-a2e6-b73b476e842c",
+      "part_id": "fe7b7b1f-a409-4884-9ca0-6f5c1aad2aac",
+      "po_qty": 40,
+      "required_date": "2026-11-06",
+      "created_at": "2026-10-07T04:30:01.255295+00:00"
+    },
+    {
+      "id": "382fbee5-5f64-41a9-b1bb-c05e7d95d90d",
+      "po_id": "aadc2984-a134-480e-abd4-bbe34bc22760",
+      "part_id": "4e67d323-ef54-42ab-bcb0-95f85bf6117a",
+      "po_qty": 6,
+      "required_date": "2026-10-16",
+      "created_at": "2026-10-07T04:31:24.162005+00:00"
+    },
+    {
+      "id": "7ef5272b-3046-4e34-a938-a5d72ef42201",
+      "po_id": "48c46ab0-8aea-48d7-815f-a2e40b65a184",
+      "part_id": "a862db95-b7f4-4df5-bdea-b8805f1c7f84",
+      "po_qty": 8,
+      "required_date": "2026-10-20",
+      "created_at": "2026-10-07T04:32:59.177192+00:00"
+    },
+    {
+      "id": "69f9fbc3-f76e-47a6-9d75-9971acce0deb",
+      "po_id": "48c46ab0-8aea-48d7-815f-a2e40b65a184",
+      "part_id": "4151a457-1c24-40e2-be11-d4e99a09eda4",
+      "po_qty": 15,
+      "required_date": "2026-10-16",
+      "created_at": "2026-10-07T04:32:59.177192+00:00"
+    },
+    {
+      "id": "c2658f52-d6f0-4902-ba3f-4d2ac789088d",
+      "po_id": "1226e1ca-65ad-43cb-b693-7e2e2ed856e7",
+      "part_id": "3db37dc0-4157-435e-9d7e-314c60d50485",
+      "po_qty": 5,
+      "required_date": "2026-10-20",
+      "created_at": "2026-10-07T09:54:14.374701+00:00"
+    },
+    {
+      "id": "d2aeb3cb-4cbe-459f-9565-c8b2f8839dc1",
+      "po_id": "1226e1ca-65ad-43cb-b693-7e2e2ed856e7",
+      "part_id": "6bfcc2af-3012-47fc-89ac-b3cbb7eac078",
+      "po_qty": 5,
+      "required_date": "2026-10-20",
+      "created_at": "2026-10-07T09:54:14.374701+00:00"
+    }
+  ],
+  "target_po_count": 7,
+  "target_line_count": 16
+}

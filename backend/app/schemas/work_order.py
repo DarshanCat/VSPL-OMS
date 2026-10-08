@@ -28,6 +28,7 @@ class WorkOrderListItem(BaseModel):
     grade: Optional[str] = None
     order_qty: int
     physical_wo_qty: int
+    casting_process: Optional[str] = None
     match_size: Optional[int] = None
     current_stage: str
     next_allowed_stage: Optional[str] = None
@@ -84,6 +85,7 @@ class WorkOrderTrackingDetail(BaseModel):
     grade: Optional[str] = None
     order_qty: int
     physical_wo_qty: int
+    casting_process: Optional[str] = None
     match_size: Optional[int] = None
     current_stage: str
     next_allowed_stage: Optional[str] = None
@@ -128,6 +130,7 @@ class OARWorkOrderSummary(BaseModel):
     release_status: str
     current_stage: str
     wo_status: str
+    casting_process: Optional[str] = None
     ok_completed: int = 0
     rejected: int = 0
     movable_wip: int = 0

@@ -98,6 +98,15 @@ DISPATCH_EXECUTION_ROLES = (UserRole.ADMIN, UserRole.DISPATCH)
 # /auth/register gate (require_roles(UserRole.ADMIN)) -- Super Admin only.
 USER_MANAGEMENT_ROLES = (UserRole.ADMIN,)
 
+# Heat batch creation & master management: Metallurgy / Foundry / QA / Store / Admin
+HEAT_MANAGEMENT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE, UserRole.QA, UserRole.PLANNER)
+
+# Heat allocation to Work Order at casting: Floor operators, Store, Production Manager, Admin
+HEAT_ALLOCATION_ROLES = (
+    UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE,
+    UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
+)
+
 # Engineering Release: first step of the release chain (Engineering Release ->
 # Manufacturing Release -> WO Release -> Production). Super Admin may administer
 # every release step per existing admin policy.
@@ -105,4 +114,25 @@ ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
 
 # Manufacturing Release: second step of the release chain -- the service layer also
 # enforces that Engineering Release must already be recorded before this can happen.
-MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING)
+MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING, UserRole.PRODUCTION_MANAGER)
+
+# Continuous Casting (China) raw-material module. One tuple per operation so widening
+# one never widens another; no China-specific role is introduced.
+CC_INWARD_ROLES = (UserRole.ADMIN, UserRole.STORE)
+CC_RESERVE_ROLES = (UserRole.ADMIN, UserRole.PLANNER)
+CC_ISSUE_ROLES = (UserRole.ADMIN, UserRole.STORE)
+CC_CUT_ROLES = (UserRole.ADMIN, UserRole.PRODUCTION_MANAGER)
+# Physical quarantine, disposal and count correction (Phase 9). Quality places a hold, Stores
+# executes a scrap; a quarantine is released by Quality/Admin only; adjustments are Admin only.
+CC_HOLD_ROLES = (UserRole.ADMIN, UserRole.STORE, UserRole.QA)
+CC_HOLD_RELEASE_ROLES = (UserRole.ADMIN, UserRole.QA)
+CC_SCRAP_ROLES = (UserRole.ADMIN, UserRole.STORE)
+CC_ADJUSTMENT_ROLES = (UserRole.ADMIN,)
+# Routing creation/supersession (compatibility and allowances are Engineering's call).
+CC_ROUTING_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
+# Material master (Phase 11A): Engineering owns the technical material / grade / dimensions that it
+# later validates against a WO routing. Inward QA decision: Quality owns acceptance (UserRole.QA is the
+# repository's existing quality role -- the same one QUALITY_APPROVAL_ROLES uses).
+CC_MATERIAL_MASTER_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
+CC_QA_ROLES = (UserRole.ADMIN, UserRole.QA)
+
