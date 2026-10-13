@@ -13,6 +13,7 @@ class MovePartsRequest(BaseModel):
     operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
     defect_code: Optional[str] = Field(None, max_length=100)
+    heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
     source_type: Optional[str] = Field("SMES_UI", description="Source: SMES_UI | EXCEL_IMPORT | API | SYSTEM")
@@ -26,6 +27,7 @@ class RecordStageProductionRequest(BaseModel):
     operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
     defect_code: Optional[str] = Field(None, max_length=100)
+    heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
 
@@ -41,6 +43,7 @@ class ProductionEntryResponse(BaseModel):
     stage_rejection_total: int
     stage_onhand_available: int
     stage_inproc_remaining: int
+    heat_number: Optional[str] = None
     timestamp: datetime
     message: str
 
@@ -57,6 +60,7 @@ class MovementResponse(BaseModel):
     available_wip_remaining: int
     to_stage_available_wip: int
     current_stage: str
+    heat_number: Optional[str] = None
     timestamp: datetime
     message: str
 
@@ -79,6 +83,7 @@ class MovementListItem(BaseModel):
     shift: Optional[str] = None
     movement_date: Optional[str] = None
     movement_time: Optional[str] = None
+    heat_number: Optional[str] = None
     remarks: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: datetime

@@ -19,7 +19,11 @@ import {
   FileText,
   ChevronDown,
   Calendar,
-  Clock
+  Clock,
+  Download,
+  FileSpreadsheet,
+  Flame,
+  BarChart3
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -43,7 +47,9 @@ import {
   releaseWorkOrder,
   engineeringReleaseWorkOrder,
   manufacturingReleaseWorkOrder,
-  WorkOrderListItem
+  getPlanningSummary,
+  WorkOrderListItem,
+  PlanningSummary
 } from "@/lib/api";
 
 const ALL_POSSIBLE_STAGES = [
@@ -92,6 +98,11 @@ function WOReleasePageInner() {
   const [releaseFilter, setReleaseFilter] = useState<"all" | "unreleased" | "ready_for_production" | "released">("all");
   const [sortBy, setSortBy] = useState<string>("wo_date_desc");
 
+  // Planner KPI Summary & Heat Number tracking
+  const [planningSummary, setPlanningSummary] = useState<PlanningSummary | null>(null);
+  const [heatNumber, setHeatNumber] = useState<string>("");
+  const [exportingExcel, setExportingExcel] = useState<boolean>(false);
+
   const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
   const [selectedStages, setSelectedStages] = useState<string[]>([
@@ -124,6 +135,7 @@ function WOReleasePageInner() {
     setSelectedWODetail(found);
     setSearchQuery(found.wo_number);
     setPhysicalQty(found.physical_wo_qty);
+    setHeatNumber(found.heat_number || "");
     setChainResult({});
     setChainError("");
     setError("");
@@ -243,6 +255,100 @@ function WOReleasePageInner() {
     }
   }, [urlWo, applyWO, sortBy]);
 
+  const fetchPlanningSummary = useCallback(async () => {
+    try {
+      const summary = await getPlanningSummary();
+      setPlanningSummary(summary);
+    } catch {
+      // Non-blocking
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPlanningSummary();
+  }, [fetchPlanningSummary]);
+
+  const handleExportExcel = async (unreleasedOnly: boolean = false) => {
+    setExportingExcel(true);
+    try {
+      const filterToUse = unreleasedOnly ? "unreleased" : (releaseFilter !== "all" ? releaseFilter : undefined);
+      const data = await getWorkOrders({
+        release_filter: filterToUse,
+        exclude_dispatched: true,
+        limit: 500,
+        sort_by: sortBy,
+      });
+      const list = Array.isArray(data) ? data : [];
+
+      const headers = [
+        "WO Number",
+        "Heat Number",
+        "Customer PO",
+        "PO Date",
+        "OAR Number",
+        "OAR Date",
+        "WO Date",
+        "Required Delivery Date",
+        "Customer Code",
+        "Customer Name",
+        "Part Number",
+        "Part Name",
+        "Grade",
+        "Physical WO Qty",
+        "Current Stage",
+        "Release Status",
+        "Is Released",
+        "Ready For Production",
+        "Delivery Risk",
+        "Shortfall"
+      ];
+
+      const escapeCsv = (val: any) => {
+        if (val === null || val === undefined) return '""';
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      };
+
+      const rows = list.map((w) => [
+        escapeCsv(w.wo_number),
+        escapeCsv(w.heat_number || "Not Assigned"),
+        escapeCsv(w.customer_po || "—"),
+        escapeCsv(w.po_date ? formatDate(w.po_date) : "—"),
+        escapeCsv(w.oar_number || "—"),
+        escapeCsv(w.oar_date ? formatDate(w.oar_date) : "—"),
+        escapeCsv(w.wo_date ? formatDate(w.wo_date) : formatDate(w.created_at)),
+        escapeCsv(w.delivery_date ? formatDate(w.delivery_date) : "—"),
+        escapeCsv(w.customer_code),
+        escapeCsv(w.customer_name),
+        escapeCsv(w.part_number),
+        escapeCsv(w.part_name || "—"),
+        escapeCsv(w.grade || "Standard"),
+        escapeCsv(w.physical_wo_qty),
+        escapeCsv(w.current_stage),
+        escapeCsv(w.release_status || "UNRELEASED"),
+        escapeCsv(w.is_released ? "YES" : "NO"),
+        escapeCsv(w.ready_for_production ? "READY" : "AWAITING CLEARANCE"),
+        escapeCsv(w.delivery_risk || "Normal"),
+        escapeCsv(w.shortfall || "No"),
+      ]);
+
+      const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const filename = `VSPL_Planner_WO_List_${unreleasedOnly ? "Unreleased_" : ""}${new Date().toISOString().slice(0, 10)}.csv`;
+      link.setAttribute("href", url);
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      setError("Failed to download planning Excel file.");
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
   const handleWOSelect = (woNum: string) => {
     const found = wos.find((w) => w.wo_number === woNum);
     if (found) {
@@ -344,10 +450,13 @@ function WOReleasePageInner() {
         physical_wo_qty: qty,
         route_stages: selectedStages,
         casting_process: castingProcess || undefined,
+        heat_number: heatNumber.trim() || undefined,
         remarks: remarks,
       });
 
       setSuccessResult(res);
+      fetchPlanningSummary();
+      handleSearch(searchQuery, releaseFilter, sortBy);
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to release Work Order.");
     } finally {
@@ -357,21 +466,141 @@ function WOReleasePageInner() {
 
   return (
     <AppShell>
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Header */}
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-              Planning &amp; WO Release
-            </span>
-            <span className="text-xs text-zinc-400">Dynamic Stage Routing</span>
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header with Title and Excel Export Buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                Production Planning
+              </span>
+              <span className="text-xs text-zinc-400">Daily Queue &amp; WO Release</span>
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
+              Work Order Release &amp; Custom Routing
+            </h1>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Planner dashboard to monitor daily backlog, track Heat Numbers, and release WOs with custom stage routing.
+            </p>
           </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-            Work Order Release &amp; Custom Routing
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Planner declares physical released quantity and sets custom stage routing (skipping non-applicable gates).
-          </p>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              disabled={exportingExcel}
+              onClick={() => handleExportExcel(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-300 shadow-sm hover:bg-amber-100 dark:hover:bg-amber-900/60 transition-colors cursor-pointer"
+              title="Download all unreleased Work Orders awaiting planner release"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-amber-600" />
+              <span>{exportingExcel ? "Exporting..." : "Download Unreleased (.csv)"}</span>
+            </button>
+            <button
+              type="button"
+              disabled={exportingExcel}
+              onClick={() => handleExportExcel(false)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              title="Export all filtered work orders as Excel CSV"
+            >
+              <Download className="h-4 w-4 text-blue-600" />
+              <span>Export All WOs</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Planner Live Metrics KPI Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* Card 1: Yet to Release */}
+          <div
+            onClick={() => {
+              setReleaseFilter("unreleased");
+              handleSearch(searchQuery, "unreleased", sortBy);
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+              releaseFilter === "unreleased"
+                ? "border-amber-500 bg-amber-50/70 dark:bg-amber-950/50 ring-2 ring-amber-500/30 shadow-md"
+                : "border-amber-200/70 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-950/20 hover:border-amber-300"
+            }`}
+          >
+            <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+              <span className="text-[10px] uppercase font-bold tracking-wider">Yet to Release</span>
+              <Clock className="h-4 w-4" />
+            </div>
+            <div className="mt-2 text-2xl font-black font-mono text-zinc-900 dark:text-zinc-100">
+              {planningSummary?.unreleased_count ?? "—"}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500 flex items-center justify-between">
+              <span>Pending Release</span>
+              <span className="font-semibold text-amber-600">Filter View &rarr;</span>
+            </div>
+          </div>
+
+          {/* Card 2: Ready for Release */}
+          <div
+            onClick={() => {
+              setReleaseFilter("ready_for_production");
+              handleSearch(searchQuery, "ready_for_production", sortBy);
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+              releaseFilter === "ready_for_production"
+                ? "border-purple-500 bg-purple-50/70 dark:bg-purple-950/50 ring-2 ring-purple-500/30 shadow-md"
+                : "border-purple-200/70 dark:border-purple-900/40 bg-purple-50/20 dark:bg-purple-950/20 hover:border-purple-300"
+            }`}
+          >
+            <div className="flex items-center justify-between text-purple-600 dark:text-purple-400">
+              <span className="text-[10px] uppercase font-bold tracking-wider">Ready for Prod</span>
+              <ClipboardCheck className="h-4 w-4" />
+            </div>
+            <div className="mt-2 text-2xl font-black font-mono text-zinc-900 dark:text-zinc-100">
+              {planningSummary?.ready_for_production_count ?? "—"}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500 flex items-center justify-between">
+              <span>Mfg Cleared / Ready</span>
+              <span className="font-semibold text-purple-600">Filter View &rarr;</span>
+            </div>
+          </div>
+
+          {/* Card 3: Producing Today */}
+          <div className="p-4 rounded-2xl border border-emerald-200/70 dark:border-emerald-900/40 bg-emerald-50/20 dark:bg-emerald-950/20 shadow-xs">
+            <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
+              <span className="text-[10px] uppercase font-bold tracking-wider">Producing Today</span>
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            </div>
+            <div className="mt-2 text-2xl font-black font-mono text-emerald-700 dark:text-emerald-300">
+              {planningSummary?.producing_today_count ?? "—"}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500">
+              Active shop floor logs today
+            </div>
+          </div>
+
+          {/* Card 4: Released & Active */}
+          <div
+            onClick={() => {
+              setReleaseFilter("released");
+              handleSearch(searchQuery, "released", sortBy);
+            }}
+            className={`p-4 rounded-2xl border transition-all cursor-pointer ${
+              releaseFilter === "released"
+                ? "border-blue-500 bg-blue-50/70 dark:bg-blue-950/50 ring-2 ring-blue-500/30 shadow-md"
+                : "border-blue-200/70 dark:border-blue-900/40 bg-blue-50/20 dark:bg-blue-950/20 hover:border-blue-300"
+            }`}
+          >
+            <div className="flex items-center justify-between text-blue-600 dark:text-blue-400">
+              <span className="text-[10px] uppercase font-bold tracking-wider">Released &amp; Active</span>
+              <Layers className="h-4 w-4" />
+            </div>
+            <div className="mt-2 text-2xl font-black font-mono text-zinc-900 dark:text-zinc-100">
+              {planningSummary?.released_count ?? "—"}
+            </div>
+            <div className="mt-0.5 text-[10px] text-zinc-500 flex items-center justify-between">
+              <span>In Manufacturing Route</span>
+              <span className="font-semibold text-blue-600">Filter View &rarr;</span>
+            </div>
+          </div>
         </div>
 
         {/* Global Error Banner */}
@@ -515,8 +744,8 @@ function WOReleasePageInner() {
               </div>
             </div>
 
-            {/* Production Planning & Genealogy Timeline Dates */}
-            <div className="pt-2 border-t border-blue-200/40 dark:border-blue-800/40 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+            {/* Production Planning & Genealogy Timeline Dates & Heat Number */}
+            <div className="pt-2 border-t border-blue-200/40 dark:border-blue-800/40 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
                 <span className="text-[9px] text-zinc-400 uppercase font-bold block">1. PO Creation Date</span>
                 <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
@@ -551,6 +780,13 @@ function WOReleasePageInner() {
                   ) : (
                     <span className="text-amber-600">Not Released</span>
                   )}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">6. Heat Number</span>
+                <span className="font-mono font-bold text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1">
+                  <Flame className="h-3 w-3 text-orange-500 shrink-0" />
+                  <span className="truncate">{selectedWODetail.heat_number || "Not Assigned"}</span>
                 </span>
               </div>
             </div>
@@ -735,23 +971,36 @@ function WOReleasePageInner() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5 text-[10px]">
-                  <span className="text-zinc-400 font-medium">Plan by:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSortBy(val);
-                      handleSearch(searchQuery, releaseFilter, val);
-                    }}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
+                <div className="flex items-center gap-2 text-[10px] flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-400 font-medium">Plan by:</span>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSortBy(val);
+                        handleSearch(searchQuery, releaseFilter, val);
+                      }}
+                      className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
+                    >
+                      <option value="wo_date_desc">WO Gen Date (Newest first)</option>
+                      <option value="wo_date_asc">WO Gen Date (Oldest first / FIFO)</option>
+                      <option value="delivery_date_asc">Delivery Date (Earliest first)</option>
+                      <option value="delivery_date_desc">Delivery Date (Latest first)</option>
+                      <option value="wo_number_asc">WO Number (Ascending)</option>
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={exportingExcel}
+                    onClick={() => handleExportExcel(false)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold text-[10px] shadow-xs cursor-pointer"
+                    title="Download currently filtered list as Excel CSV spreadsheet"
                   >
-                    <option value="wo_date_desc">WO Gen Date (Newest first)</option>
-                    <option value="wo_date_asc">WO Gen Date (Oldest first / FIFO)</option>
-                    <option value="delivery_date_asc">Delivery Date (Earliest first)</option>
-                    <option value="delivery_date_desc">Delivery Date (Latest first)</option>
-                    <option value="wo_number_asc">WO Number (Ascending)</option>
-                  </select>
+                    <FileSpreadsheet className="h-3 w-3 text-emerald-600" />
+                    <span>{exportingExcel ? "Exporting..." : "Download Excel (.csv)"}</span>
+                  </button>
                 </div>
               </div>
 
@@ -848,6 +1097,12 @@ function WOReleasePageInner() {
                                     NOT RELEASED
                                   </span>
                                 )}
+                                {w.heat_number && (
+                                  <span className="rounded bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.2 text-[9px] font-mono font-bold text-orange-700 dark:text-orange-300 flex items-center gap-0.5">
+                                    <Flame className="h-2.5 w-2.5" />
+                                    {w.heat_number}
+                                  </span>
+                                )}
                                 {w.current_stage && (
                                   <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-600 dark:text-zinc-400">
                                     {w.current_stage}
@@ -885,23 +1140,50 @@ function WOReleasePageInner() {
                     <span className="font-mono font-bold text-blue-700 dark:text-blue-300">{selectedWODetail.wo_number}</span>
                     <span className="text-zinc-400 truncate">({selectedWODetail.part_number} - {selectedWODetail.customer_code || selectedWODetail.customer_name})</span>
                   </div>
-                  <span className="font-mono font-bold text-emerald-600 shrink-0 ml-2">{selectedWODetail.physical_wo_qty} pcs</span>
+                  <div className="flex items-center gap-3">
+                    {selectedWODetail.heat_number && (
+                      <span className="text-orange-600 font-mono font-bold text-[10px] flex items-center gap-1">
+                        <Flame className="h-3 w-3" />
+                        {selectedWODetail.heat_number}
+                      </span>
+                    )}
+                    <span className="font-mono font-bold text-emerald-600 shrink-0">{selectedWODetail.physical_wo_qty} pcs</span>
+                  </div>
                 </div>
               )}
             </div>
 
-            <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                Released Physical WO Quantity (pcs) *
-              </label>
-              <input
-                type="number"
-                required
-                min={1}
-                value={physicalQty}
-                onChange={(e) => setPhysicalQty(e.target.value === "" ? "" : Number(e.target.value))}
-                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Released Physical WO Quantity (pcs) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={physicalQty}
+                  onChange={(e) => setPhysicalQty(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
+                  <span>Heat Number / Cast Batch #</span>
+                  <span className="text-[10px] text-zinc-400 font-normal">Melt / continuous casting source</span>
+                </label>
+                <div className="relative mt-1.5">
+                  <Flame className="absolute left-3 top-2.5 h-3.5 w-3.5 text-orange-500 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={heatNumber}
+                    onChange={(e) => setHeatNumber(e.target.value)}
+                    placeholder="e.g. HN-2026-088, CAST-42..."
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 

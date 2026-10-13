@@ -5,11 +5,21 @@ from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.schemas.work_order import (
-    WorkOrderListItem, WorkOrderTrackingDetail, WorkOrderRouteResponse
+    WorkOrderListItem, WorkOrderTrackingDetail, WorkOrderRouteResponse,
+    PlanningSummaryResponse
 )
 from app.services.work_order_service import WorkOrderService
 
 router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
+
+@router.get("/planning-summary", response_model=PlanningSummaryResponse)
+def get_planning_summary(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Retrieve live aggregate planning metrics for production planners:
+    unreleased count, released count, producing today count, ready for production count, etc."""
+    return WorkOrderService.get_planning_summary(db)
 
 @router.get("", response_model=List[WorkOrderListItem])
 def list_work_orders(

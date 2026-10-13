@@ -17,7 +17,8 @@ import {
   Sparkles,
   ShieldCheck,
   ClipboardCheck,
-  AlertCircle
+  AlertCircle,
+  Flame
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -85,6 +86,7 @@ export function ProductionEntryContent() {
   const [selectedOperator, setSelectedOperator] = useState("Ramesh Kumar");
   const [shift, setShift] = useState("Shift A");
   const [defectCode, setDefectCode] = useState("DEF-POROSITY");
+  const [heatNumber, setHeatNumber] = useState("");
   const [remarks, setRemarks] = useState("");
   const [rejectionTypes, setRejectionTypes] = useState<MasterRejectionType[]>([]);
 
@@ -179,6 +181,7 @@ export function ProductionEntryContent() {
       setWoData(tracking);
       setRouteData(route);
       setSearchTerm(tracking.wo_number);
+      setHeatNumber(tracking.heat_number || "");
 
       // Default stage: if currently selected stage is valid in timeline, keep it; otherwise use current_stage
       const validStages = tracking.timeline?.map((s: any) => s.stage) || ["F1"];
@@ -328,6 +331,7 @@ export function ProductionEntryContent() {
         shift: shift,
         defect_code: rejQtyNum > 0 ? defectCode : undefined,
         remarks: remarks.trim() || undefined,
+        heat_number: heatNumber.trim() || undefined,
         client_request_id: clientReqId
       });
 
@@ -337,6 +341,7 @@ export function ProductionEntryContent() {
         stage: res.stage,
         good_qty: res.good_qty,
         rejected_quantity: res.rejected_quantity,
+        heat_number: res.heat_number || heatNumber.trim() || undefined,
         stage_ok_total: res.stage_ok_total,
         stage_rejection_total: res.stage_rejection_total,
         stage_onhand_available: res.stage_onhand_available,
@@ -455,7 +460,7 @@ export function ProductionEntryContent() {
           <div className="space-y-6">
             {/* WO Context & Metadata Strip */}
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 text-xs">
                 <div>
                   <span className="text-zinc-400 text-[10px] uppercase font-bold">Work Order</span>
                   <p className="font-mono font-extrabold text-zinc-900 dark:text-zinc-50 text-sm">{woData.wo_number}</p>
@@ -470,6 +475,15 @@ export function ProductionEntryContent() {
                   <span className="text-zinc-400 text-[10px] uppercase font-bold">OAR Number</span>
                   <p className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{woData.oar_number || "OAR-DEFAULT"}</p>
                   <p className="text-[10px] text-zinc-500">PO: {woData.customer_po}</p>
+                </div>
+                <div>
+                  <span className="text-zinc-400 text-[10px] uppercase font-bold flex items-center gap-1">
+                    <Flame className="h-3 w-3 text-amber-500" /> Heat Number
+                  </span>
+                  <p className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm">
+                    {woData.heat_number || "Not assigned"}
+                  </p>
+                  <p className="text-[10px] text-zinc-500">Melt / Cast Heat</p>
                 </div>
                 <div>
                   <span className="text-zinc-400 text-[10px] uppercase font-bold">Match Size</span>
@@ -765,20 +779,37 @@ export function ProductionEntryContent() {
                     </div>
                   </div>
 
-                  {/* Remarks */}
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                      REMARKS / LOG DETAILS
-                    </label>
-                    <input
-                      ref={inputRemarksRef}
-                      type="text"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, "submit", "shift")}
-                      placeholder="Optional batch notes or process observations..."
-                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                    />
+                  {/* Heat Number & Remarks */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                        <Flame className="h-3.5 w-3.5 text-amber-500" />
+                        HEAT NUMBER / MELT BATCH
+                      </label>
+                      <input
+                        type="text"
+                        value={heatNumber}
+                        onChange={(e) => setHeatNumber(e.target.value)}
+                        placeholder="e.g. HT-2026-904..."
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-amber-500"
+                      />
+                      <span className="text-[10px] text-zinc-400 mt-1 block">Heat batch from which parts are being produced</span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
+                        REMARKS / LOG DETAILS
+                      </label>
+                      <input
+                        ref={inputRemarksRef}
+                        type="text"
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                        onKeyDown={(e) => handleKeyDown(e, "submit", "shift")}
+                        placeholder="Optional batch notes or process observations..."
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                      />
+                    </div>
                   </div>
 
                   {/* Submit Button */}

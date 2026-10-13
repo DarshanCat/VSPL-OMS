@@ -18,7 +18,8 @@ import {
   ArrowRight,
   TrendingUp,
   BrainCircuit,
-  Ban
+  Ban,
+  Flame
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -58,6 +59,7 @@ export function MovePartsContent() {
   const [selectedMachine, setSelectedMachine] = useState<string>("M-LATHE-01");
   const [operatorName, setOperatorName] = useState("Ramesh Kumar (Logistics)");
   const [shift, setShift] = useState("Shift A");
+  const [heatNumber, setHeatNumber] = useState("");
   const [remarks, setRemarks] = useState("");
 
   // Submission & Result Modal
@@ -115,6 +117,7 @@ export function MovePartsContent() {
       }
       setWoData(data);
       setSearchTerm(data.wo_number);
+      setHeatNumber(data.heat_number || "");
 
       // Movement quantity is always a fresh transaction amount, never prefilled with
       // the available WIP -- an operator must enter what was actually physically moved.
@@ -228,6 +231,7 @@ export function MovePartsContent() {
         operator_name: operatorName,
         shift: shift,
         remarks: remarks || undefined,
+        heat_number: heatNumber.trim() || undefined,
         client_request_id: clientReqId
       });
 
@@ -377,9 +381,15 @@ export function MovePartsContent() {
                     <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-xs font-bold text-zinc-700 dark:text-zinc-300 font-mono">
                       {woData.part_number} ({woData.grade || "Alloy"})
                     </span>
+                    {woData.heat_number && (
+                      <span className="rounded-md bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-xs font-bold text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1">
+                        <Flame className="h-3 w-3" />
+                        Heat: {woData.heat_number}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    Customer: <span className="font-semibold text-zinc-800 dark:text-zinc-200">{woData.customer_name}</span> | PO: <span className="font-mono">{woData.customer_po}</span> | Planned: <span className="font-bold text-zinc-900 dark:text-zinc-100">{woData.physical_wo_qty} pcs</span>
+                    Customer: <span className="font-semibold text-zinc-800 dark:text-zinc-200">{woData.customer_name}</span> | PO: <span className="font-mono">{woData.customer_po}</span> | Planned: <span className="font-bold text-zinc-900 dark:text-zinc-100">{woData.physical_wo_qty} pcs</span> | Heat: <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{woData.heat_number || "Not assigned"}</span>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -699,20 +709,37 @@ export function MovePartsContent() {
                       </div>
                     </div>
 
-                    {/* Remarks */}
-                    <div>
-                      <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        Movement Remarks / Notes
-                      </label>
-                      <input
-                        ref={inputRemarksRef}
-                        type="text"
-                        value={remarks}
-                        onChange={(e) => setRemarks(e.target.value)}
-                        onKeyDown={(e) => handleKeyDownEnter(e, "submit")}
-                        placeholder="e.g. Batch moved to CNC bay for turning"
-                        className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
-                      />
+                    {/* Heat Number & Remarks */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                          <Flame className="h-3.5 w-3.5 text-amber-500" />
+                          <span>Heat Number / Melt Batch</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={heatNumber}
+                          onChange={(e) => setHeatNumber(e.target.value)}
+                          placeholder="e.g. HT-2026-904..."
+                          className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:border-amber-500 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-zinc-400 mt-1 block">Cast heat batch from which parts are being produced</span>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                          Movement Remarks / Notes
+                        </label>
+                        <input
+                          ref={inputRemarksRef}
+                          type="text"
+                          value={remarks}
+                          onChange={(e) => setRemarks(e.target.value)}
+                          onKeyDown={(e) => handleKeyDownEnter(e, "submit")}
+                          placeholder="e.g. Batch moved to CNC bay for turning"
+                          className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
 
                     {/* Submit Button */}

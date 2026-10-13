@@ -363,9 +363,12 @@ class ProductionService:
             shift=req.shift or "Shift A",
             movement_date=str(now.date()),
             movement_time=now.strftime("%H:%M:%S"),
+            heat_number=(req.heat_number.strip() if req.heat_number and req.heat_number.strip() else (wo.heat_number or None)),
             remarks=req.remarks,
             created_by=current_user.id if current_user else None
         )
+        if req.heat_number and req.heat_number.strip():
+            wo.heat_number = req.heat_number.strip()
         db.add(movement)
 
         # 10. Record NC if rejected
@@ -429,6 +432,7 @@ class ProductionService:
                 available_wip_remaining=from_wip_ex.available_wip if from_wip_ex else 0,
                 to_stage_available_wip=to_wip_ex.available_wip if to_wip_ex else 0,
                 current_stage=wo_existing.current_stage if wo_existing else "N/A",
+                heat_number=existing_mov.heat_number,
                 timestamp=existing_mov.created_at or now,
                 message=f"Duplicate request detected with token '{req.client_request_id}'. Returning original transaction '{existing_mov.movement_id}'."
             )
@@ -451,6 +455,7 @@ class ProductionService:
             available_wip_remaining=from_wip.available_wip,
             to_stage_available_wip=to_wip.available_wip,
             current_stage=wo.current_stage,
+            heat_number=movement.heat_number,
             timestamp=now,
             message=f"Successfully moved {req.quantity_moved} pieces from {matched_from} to {matched_to} for {wo.wo_number}."
         )
@@ -572,8 +577,11 @@ class ProductionService:
             good_qty=req.good_qty,
             reject_qty=req.rejected_quantity,
             status=ProductionStatus.COMPLETED,
+            heat_number=(req.heat_number.strip() if req.heat_number and req.heat_number.strip() else (wo.heat_number or None)),
             remarks=req.remarks
         )
+        if req.heat_number and req.heat_number.strip():
+            wo.heat_number = req.heat_number.strip()
         db.add(entry)
 
         # Log NC if rejected
@@ -603,7 +611,7 @@ class ProductionService:
             entity="WorkOrder",
             entity_id=wo.wo_number,
             old_value=f"Stage: {matched_stage}, Prev OK: {wip.ok_qty - req.good_qty}, Prev Rej: {wip.rejected_qty - req.rejected_quantity}",
-            new_value=f"Completed Good: {req.good_qty}, Rej: {req.rejected_quantity}, Total OK: {wip.ok_qty}",
+            new_value=f"Completed Good: {req.good_qty}, Rej: {req.rejected_quantity}, Total OK: {wip.ok_qty}, Heat No: {entry.heat_number or 'N/A'}",
             details=f"Production Entry on Machine {req.machine_id or 'Cell'} by {req.operator_name or 'Operator'}"
         )
         db.add(audit)
@@ -635,6 +643,7 @@ class ProductionService:
                 stage_rejection_total=wip_existing.rejected_qty if wip_existing else existing_entry.reject_qty,
                 stage_onhand_available=wip_existing.onhand_qty if wip_existing else 0,
                 stage_inproc_remaining=wip_existing.inproc_qty if wip_existing else 0,
+                heat_number=existing_entry.heat_number,
                 timestamp=existing_entry.created_at or now,
                 message=f"Duplicate production entry detected with token '{req.client_request_id}'. Returning original transaction."
             )
@@ -653,6 +662,7 @@ class ProductionService:
             stage_rejection_total=wip.rejected_qty,
             stage_onhand_available=wip.onhand_qty,
             stage_inproc_remaining=wip.inproc_qty,
+            heat_number=entry.heat_number,
             timestamp=now,
             message=f"Successfully recorded stage production for {wo.wo_number} at {matched_stage}: {req.good_qty} Good, {req.rejected_quantity} Rejected."
         )

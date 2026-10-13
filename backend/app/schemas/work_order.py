@@ -48,6 +48,7 @@ class WorkOrderListItem(BaseModel):
     release_status: Optional[str] = None
     is_released: bool = False
     ready_for_production: bool = False
+    heat_number: Optional[str] = None
 
 class StageTimelineStep(BaseModel):
     stage: str
@@ -81,6 +82,7 @@ class TransactionHistoryItem(BaseModel):
     operator_name: Optional[str] = None
     shift: Optional[str] = None
     remarks: Optional[str] = None
+    heat_number: Optional[str] = None
     client_request_id: Optional[str] = None
 
 class WorkOrderTrackingDetail(BaseModel):
@@ -125,6 +127,7 @@ class WorkOrderTrackingDetail(BaseModel):
     total_rejected: int
     yield_pct: float
     created_at: datetime
+    heat_number: Optional[str] = None
 
 class OARWorkOrderSummary(BaseModel):
     wo_id: str
@@ -152,6 +155,16 @@ class OARWorkOrderSummary(BaseModel):
     release_date: Optional[datetime] = None
     is_released: bool = False
     ready_for_production: bool = False
+    heat_number: Optional[str] = None
+
+class PlanningSummaryResponse(BaseModel):
+    unreleased_count: int
+    released_count: int
+    producing_today_count: int
+    ready_for_production_count: int
+    active_in_production_count: int
+    total_active_wos: int
+    total_dispatched_wos: int
 
 class OARListItem(BaseModel):
     oar_number: str

@@ -124,6 +124,7 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS source_wo_id UUID;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS is_replacement BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS replacement_reason VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
@@ -146,6 +147,7 @@ def auto_migrate_schema():
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS shift VARCHAR;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS movement_date VARCHAR;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS movement_time VARCHAR;",
+        "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS remarks VARCHAR;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS created_by UUID;",
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
@@ -153,6 +155,7 @@ def auto_migrate_schema():
         # Production updates
         "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS client_request_id VARCHAR;",
         "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS operator_name VARCHAR;",
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
 
         # Stage WIP
         "ALTER TABLE stage_wip ADD COLUMN IF NOT EXISTS ent_qty INTEGER DEFAULT 0;",

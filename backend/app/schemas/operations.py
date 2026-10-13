@@ -51,6 +51,11 @@ class WOReleaseCreate(BaseModel):
         max_length=50,
         description="Required when F1 stage is selected: 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
     )
+    heat_number: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Heat number / cast batch from which parts are produced"
+    )
     remarks: Optional[str] = Field(None, max_length=2000)
 
 class WOReleaseResponse(BaseModel):
@@ -59,6 +64,7 @@ class WOReleaseResponse(BaseModel):
     released_qty: int
     route: str
     casting_process: Optional[str] = None
+    heat_number: Optional[str] = None
     stage_targets: dict[str, int]
     message: str
 

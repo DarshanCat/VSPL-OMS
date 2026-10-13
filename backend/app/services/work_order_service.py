@@ -14,7 +14,8 @@ from app.models.nc import NCRecord
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
     WorkOrderRouteResponse, TransactionHistoryItem,
-    OARListItem, OARWorkOrderSummary, OARGenealogyResponse
+    OARListItem, OARWorkOrderSummary, OARGenealogyResponse,
+    PlanningSummaryResponse
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -280,7 +281,8 @@ class WorkOrderService:
                 release_date=wo.release_date,
                 release_status=rel_status,
                 is_released=is_rel,
-                ready_for_production=ready_prod
+                ready_for_production=ready_prod,
+                heat_number=getattr(wo, "heat_number", None)
             ))
 
         return results
@@ -407,6 +409,7 @@ class WorkOrderService:
                 operator_name=m.operator_name,
                 shift=m.shift,
                 remarks=m.remarks,
+                heat_number=(getattr(m, "heat_number", None) or getattr(wo, "heat_number", None)),
                 client_request_id=m.client_request_id
             ))
         for p in prod_updates:
@@ -423,6 +426,7 @@ class WorkOrderService:
                 operator_name=p.operator_name,
                 shift=p.shift,
                 remarks=p.remarks,
+                heat_number=(getattr(p, "heat_number", None) or getattr(wo, "heat_number", None)),
                 client_request_id=p.client_request_id
             ))
         tx_list.sort(key=lambda x: x.timestamp, reverse=True)
@@ -463,7 +467,8 @@ class WorkOrderService:
             total_wip_on_hand=total_wip_held,
             total_rejected=total_rejected,
             yield_pct=yield_pct,
-            created_at=wo.created_at or datetime.now()
+            created_at=wo.created_at or datetime.now(),
+            heat_number=getattr(wo, "heat_number", None)
         )
 
     @staticmethod
@@ -648,7 +653,8 @@ class WorkOrderService:
                 created_at=wo.created_at,
                 release_date=wo.release_date,
                 is_released=is_rel,
-                ready_for_production=ready_prod
+                ready_for_production=ready_prod,
+                heat_number=getattr(wo, "heat_number", None)
             ))
 
         num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")
@@ -809,4 +815,91 @@ class WorkOrderService:
             stage_inproc_totals=stage_inproc_totals,
             stage_onhand_totals=stage_onhand_totals,
             grand_total_wip=grand_total
+        )
+
+    @staticmethod
+    def get_planning_summary(db: Session) -> PlanningSummaryResponse:
+        """Computes live planning metrics for production planners:
+        - unreleased_count: WOs pending planner release
+        - released_count: WOs released into production
+        - producing_today_count: distinct WOs that had production entries or movements logged today
+        - ready_for_production_count: WOs ready for release / production
+        - active_in_production_count: floor WIP WOs
+        - total_active_wos: all non-dispatched WOs
+        - total_dispatched_wos: dispatched/closed WOs
+        """
+        now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_str = str(date.today())
+
+        unreleased_count = db.query(WorkOrder).filter(
+            WorkOrder.release_date.is_(None),
+            WorkOrder.released_by.is_(None),
+            ~WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED]),
+            WorkOrder.current_stage != "Completed"
+        ).count()
+
+        released_count = db.query(WorkOrder).filter(
+            or_(
+                WorkOrder.release_date.isnot(None),
+                WorkOrder.released_by.isnot(None),
+                WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.READY])
+            ),
+            WorkOrder.status != WOStatus.DISPATCHED,
+            WorkOrder.status != WOStatus.CLOSED,
+            WorkOrder.current_stage != "Completed"
+        ).count()
+
+        ready_for_production_count = db.query(WorkOrder).filter(
+            or_(
+                WorkOrder.release_date.isnot(None),
+                WorkOrder.manufacturing_released_at.isnot(None),
+                WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.OPEN, WOStatus.PLANNED, WOStatus.READY])
+            ),
+            WorkOrder.status != WOStatus.DISPATCHED,
+            WorkOrder.status != WOStatus.CLOSED,
+            WorkOrder.current_stage != "Completed"
+        ).count()
+
+        active_in_production_count = db.query(WorkOrder).filter(
+            WorkOrder.status.in_([WOStatus.IN_PRODUCTION, WOStatus.RELEASED]),
+            WorkOrder.current_stage != "Completed"
+        ).count()
+
+        total_active_wos = db.query(WorkOrder).filter(
+            WorkOrder.status != WOStatus.DISPATCHED,
+            WorkOrder.status != WOStatus.CLOSED,
+            WorkOrder.current_stage != "Completed"
+        ).count()
+
+        total_dispatched_wos = db.query(WorkOrder).filter(
+            or_(
+                WorkOrder.status.in_([WOStatus.DISPATCHED, WOStatus.CLOSED]),
+                WorkOrder.current_stage == "Completed"
+            )
+        ).count()
+
+        prod_update_wo_ids = {
+            r[0] for r in db.query(ProductionUpdate.work_order_id).filter(
+                ProductionUpdate.created_at >= today_start
+            ).distinct().all() if r[0]
+        }
+        movement_wo_ids = {
+            r[0] for r in db.query(ProductionMovement.work_order_id).filter(
+                or_(
+                    ProductionMovement.created_at >= today_start,
+                    ProductionMovement.movement_date == today_str
+                )
+            ).distinct().all() if r[0]
+        }
+        producing_today_count = len(prod_update_wo_ids.union(movement_wo_ids))
+
+        return PlanningSummaryResponse(
+            unreleased_count=unreleased_count,
+            released_count=released_count,
+            producing_today_count=producing_today_count,
+            ready_for_production_count=ready_for_production_count,
+            active_in_production_count=active_in_production_count,
+            total_active_wos=total_active_wos,
+            total_dispatched_wos=total_dispatched_wos
         )

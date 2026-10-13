@@ -19,7 +19,8 @@ import {
   ArrowRightLeft,
   CheckSquare,
   FileSpreadsheet,
-  FileCheck
+  FileCheck,
+  Flame
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -210,6 +211,16 @@ function WorkOrderTrackingPageInner() {
                   </div>
 
                   <div>
+                    <span className="text-zinc-400 text-[10px] uppercase font-bold flex items-center gap-1">
+                      <Flame className="h-3 w-3 text-amber-500" /> Heat Number
+                    </span>
+                    <p className="font-mono font-bold text-amber-600 dark:text-amber-400 text-sm">
+                      {woData.heat_number || "Not assigned"}
+                    </p>
+                    <p className="text-[10px] text-zinc-500">Melt / Heat Batch</p>
+                  </div>
+
+                  <div>
                     <span className="text-zinc-400 text-[10px] uppercase font-bold">Active Stage</span>
                     <p className="font-extrabold text-blue-600 text-sm font-mono">{woData.current_stage}</p>
                     <p className="text-[10px] text-emerald-600 font-bold">{woData.available_wip} pcs available</p>
@@ -370,6 +381,7 @@ function WorkOrderTrackingPageInner() {
                         <th className="py-2.5 px-3">Timestamp</th>
                         <th className="py-2.5 px-3">Type</th>
                         <th className="py-2.5 px-3">Stage / Route</th>
+                        <th className="py-2.5 px-3">Heat #</th>
                         <th className="py-2.5 px-3 text-right">Good Qty</th>
                         <th className="py-2.5 px-3 text-right">Rej Qty</th>
                         <th className="py-2.5 px-3">Machine</th>
@@ -402,6 +414,9 @@ function WorkOrderTrackingPageInner() {
                             </td>
                             <td className="py-2.5 px-3 font-mono font-bold text-zinc-900 dark:text-zinc-100">
                               {isMove ? `${tx.stage} ➔ ${tx.to_stage}` : `Stage ${tx.stage}`}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-amber-600 dark:text-amber-400">
+                              {tx.heat_number || woData.heat_number || "—"}
                             </td>
                             <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600">
                               {tx.quantity}

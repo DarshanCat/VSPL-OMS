@@ -27,6 +27,7 @@ class ProductionMovement(Base):
     
     movement_date = Column(String, nullable=True)
     movement_time = Column(String, nullable=True)
+    heat_number = Column(String(100), nullable=True, index=True)
     remarks = Column(String, nullable=True)
     
     created_by = Column(GUID, ForeignKey("users.id"), nullable=True)

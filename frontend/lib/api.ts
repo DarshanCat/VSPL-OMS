@@ -346,6 +346,22 @@ export interface WorkOrderListItem {
   release_status?: string | null;
   is_released?: boolean;
   ready_for_production?: boolean;
+  heat_number?: string | null;
+}
+
+export interface PlanningSummary {
+  unreleased_count: number;
+  released_count: number;
+  producing_today_count: number;
+  ready_for_production_count: number;
+  active_in_production_count: number;
+  total_active_wos: number;
+  total_dispatched_wos: number;
+}
+
+export async function getPlanningSummary(): Promise<PlanningSummary> {
+  const { data } = await api.get("/api/v1/work-orders/planning-summary");
+  return data;
 }
 
 export async function getWorkOrders(params?: {
@@ -389,6 +405,7 @@ export async function recordStageProduction(payload: {
   operator_name?: string;
   shift?: string;
   defect_code?: string;
+  heat_number?: string;
   remarks?: string;
   client_request_id?: string;
 }) {
@@ -406,6 +423,7 @@ export async function moveParts(payload: {
   operator_name?: string;
   shift?: string;
   defect_code?: string;
+  heat_number?: string;
   remarks?: string;
   client_request_id?: string;
 }) {
@@ -772,6 +790,7 @@ export async function releaseWorkOrder(payload: {
   physical_wo_qty: number;
   route_stages: string[];
   casting_process?: string;
+  heat_number?: string;
   remarks?: string;
 }) {
   const { data } = await api.post("/api/v1/operations/wo-release", payload);

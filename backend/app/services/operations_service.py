@@ -434,6 +434,8 @@ class OperationsService:
         wo.release_date = datetime.now()
         wo.status = WOStatus.RELEASED
         wo.current_stage = stages[0]
+        if req.heat_number and req.heat_number.strip():
+            wo.heat_number = req.heat_number.strip()
 
         # Clear old routes and recalculate stage targets over the released route only
         db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete()
@@ -477,7 +479,7 @@ class OperationsService:
             action="WO_RELEASE",
             entity="WorkOrder",
             entity_id=wo.wo_number,
-            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}, Casting Process: {wo.casting_process or 'N/A'}",
+            new_value=f"Qty: {req.physical_wo_qty}, Route: {' -> '.join(stages)}, Casting Process: {wo.casting_process or 'N/A'}, Heat No: {wo.heat_number or 'N/A'}",
             details=req.remarks or "Work Order released to production"
         )
         db.add(audit)
@@ -491,6 +493,7 @@ class OperationsService:
             released_qty=req.physical_wo_qty,
             route=" -> ".join(stages),
             casting_process=wo.casting_process,
+            heat_number=wo.heat_number,
             stage_targets=targets,
             message=f"Work Order '{wo.wo_number}' successfully released with {req.physical_wo_qty} pieces."
         )
