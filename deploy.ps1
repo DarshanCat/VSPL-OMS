@@ -77,6 +77,10 @@ gcloud run deploy $SERVICE_NAME `
 if ($LASTEXITCODE -ne 0) {
     throw "Cloud Run deployment failed!"
 }
+
+# Ensure traffic is explicitly 100% routed to latest revision
+gcloud run services update-traffic $SERVICE_NAME --region=$REGION --project=$PROJECT_ID --to-latest
+
 Write-Host "  [OK] Cloud Run deployment completed.`n" -ForegroundColor Green
 
 # 5. Post-Deployment Verification
