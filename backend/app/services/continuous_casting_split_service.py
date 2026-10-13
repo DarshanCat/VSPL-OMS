@@ -149,6 +149,7 @@ def _split(db: Session, req: CCSplitCreate, current_user: User):
         id=uuid.uuid4(), unit_number=child_number, inward_id=parent.inward_id, parent_unit_id=parent.id,
         original_length_mm=length_mm, remaining_length_mm=length_mm,
         reserved_length_mm=0, issued_length_mm=0, consumed_length_mm=0,
+        heat_number=parent.heat_number,
         status=UNIT_STATUS_IN_STOCK, location=parent.location, created_by=actor,
     )
     db.add(child)

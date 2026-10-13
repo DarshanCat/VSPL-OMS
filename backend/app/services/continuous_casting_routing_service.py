@@ -63,6 +63,65 @@ def calculate_gross_required_length_mm(planned_blanks, blank_length_mm, planned_
     )
 
 
+import math
+
+DENSITY_CAST_IRON_KG_MM3 = 7.2e-6  # Standard continuous cast iron density: 7.20 g/cm3 = 7.20e-6 kg/mm3
+
+
+def calculate_cross_section_area_mm2(section: Optional[str], dim_a: Optional[int], dim_b: Optional[int] = None) -> float:
+    """Calculates cross-sectional area in mm2 based on shape section."""
+    if not dim_a or dim_a <= 0:
+        return 0.0
+    sec = (section or "").strip().upper()
+    if sec == "ROUND":
+        radius = dim_a / 2.0
+        return math.pi * (radius ** 2)
+    elif sec == "SQUARE":
+        return float(dim_a * dim_a)
+    else:  # RECTANGLE or default
+        b = dim_b if (dim_b is not None and dim_b > 0) else dim_a
+        return float(dim_a * b)
+
+
+def calculate_weight_per_mm_kg(section: Optional[str], dim_a: Optional[int], dim_b: Optional[int] = None,
+                               density_kg_mm3: float = DENSITY_CAST_IRON_KG_MM3) -> float:
+    """Calculates theoretical linear density in kg/mm."""
+    area = calculate_cross_section_area_mm2(section, dim_a, dim_b)
+    return area * density_kg_mm3
+
+
+def calculate_net_blank_weight_kg(blank_length_mm: Optional[int], section: Optional[str], dim_a: Optional[int],
+                                  dim_b: Optional[int] = None,
+                                  density_kg_mm3: float = DENSITY_CAST_IRON_KG_MM3) -> float:
+    """Calculates net weight of a single blank in kg."""
+    if not blank_length_mm or blank_length_mm <= 0:
+        return 0.0
+    weight_per_mm = calculate_weight_per_mm_kg(section, dim_a, dim_b, density_kg_mm3)
+    return round(blank_length_mm * weight_per_mm, 2)
+
+
+def calculate_net_blank_weight_total_kg(planned_blanks: Optional[int], blank_length_mm: Optional[int],
+                                        section: Optional[str], dim_a: Optional[int],
+                                        dim_b: Optional[int] = None,
+                                        density_kg_mm3: float = DENSITY_CAST_IRON_KG_MM3) -> float:
+    """Calculates total net weight for all planned blanks in kg using full unrounded precision before final rounding."""
+    if not planned_blanks or planned_blanks <= 0 or not blank_length_mm or blank_length_mm <= 0:
+        return 0.0
+    weight_per_mm = calculate_weight_per_mm_kg(section, dim_a, dim_b, density_kg_mm3)
+    unrounded_single_blank_wt = blank_length_mm * weight_per_mm
+    return round(planned_blanks * unrounded_single_blank_wt, 2)
+
+
+def calculate_gross_material_weight_kg(gross_required_length_mm: Optional[int], section: Optional[str],
+                                       dim_a: Optional[int], dim_b: Optional[int] = None,
+                                       density_kg_mm3: float = DENSITY_CAST_IRON_KG_MM3) -> float:
+    """Calculates total gross material weight including cuts and trim in kg."""
+    if not gross_required_length_mm or gross_required_length_mm <= 0:
+        return 0.0
+    weight_per_mm = calculate_weight_per_mm_kg(section, dim_a, dim_b, density_kg_mm3)
+    return round(gross_required_length_mm * weight_per_mm, 2)
+
+
 def _validate_routing_fields(req: CCRoutingCreate) -> None:
     """Required continuous-casting fields. The schema enforces these too; this keeps the
     service safe when called without schema validation."""
@@ -108,6 +167,31 @@ def _load_work_order(db: Session, wo_number: str) -> WorkOrder:
     return wo
 
 
+def _require_cc_eligible_work_order(wo: WorkOrder, existing_routings) -> None:
+    """A Continuous Casting routing may only be created or superseded for a Work Order that is
+    actually on the Continuous Casting route. The authoritative signal is WorkOrder.casting_process
+    -- set once, at WO release, to 'CONTINUOUS' or 'CENTRIFUGAL' (operations_service.release_work_order)
+    -- there is no separate route-master/process-plan table in this codebase to check instead, and
+    route assignment is never inferred from a part name or any other free text.
+
+    A Work Order that already carries continuous-casting routing history (any version, ACTIVE or
+    SUPERSEDED) is grandfathered in regardless of casting_process, so a pre-existing, legitimate
+    Continuous Casting Work Order and its workflow state are never blocked by this check -- even if
+    casting_process was recorded before this field existed, or is unset for some other reason. Only a
+    Work Order that was never assigned to this route AND has no prior Continuous Casting routing is
+    rejected -- closing the gap where a direct API call (bypassing the Planning screen's own filtering)
+    could otherwise attach a Continuous Casting routing to a Work Order on a different route."""
+    if any(r.material_source == MATERIAL_SOURCE_CONTINUOUS_CASTING for r in existing_routings):
+        return
+    casting_process = (getattr(wo, "casting_process", None) or "").strip().upper()
+    if casting_process == "CONTINUOUS":
+        return
+    raise _bad_request(
+        f"Work Order '{wo.wo_number}' is not assigned to the Continuous Casting route "
+        f"(casting_process={wo.casting_process!r}); it cannot take a continuous-casting routing."
+    )
+
+
 def _load_material(db: Session, material_id) -> ContinuousCastingMaterial:
     material = db.query(ContinuousCastingMaterial).filter(ContinuousCastingMaterial.id == material_id).first()
     if not material:
@@ -115,6 +199,54 @@ def _load_material(db: Session, material_id) -> ContinuousCastingMaterial:
     if not material.is_active:
         raise _bad_request(f"Material '{material.material_code}' is inactive and cannot be validated for a routing.")
     return material
+
+
+def _validate_material_geometry_consistency(req: CCRoutingCreate, material: ContinuousCastingMaterial) -> None:
+    """A routing's required_section/finished dimensions are always typed in by the operator,
+    independently of whichever material they pick -- _load_material() only checks existence
+    and is_active, never cross-checks geometry. Two checks only, both confirmed safe for
+    every section value actually used in this codebase (ROUND and SQUARE, per the existing
+    fixtures/tests -- no RECTANGLE or hollow/tube section exists anywhere yet):
+
+    1. required_section must match the linked material's own section (case-insensitive) --
+       the cutting-plan fields are otherwise free text with no link back to the material's
+       declared shape, so a mismatch here is pure operator error, not a business judgment call.
+
+    2. finished_dimension_a_mm cannot exceed the material's own stock_dimension_a_mm -- a
+       finished part is machined DOWN from stock, so a finished primary dimension larger than
+       the stock it's machined from is physically impossible for every section in use (ROUND
+       diameter, SQUARE side).
+
+    Deliberately does NOT extend check 2 to dimension_b: the model's own docstring notes
+    dimension_b could mean "outer/inner diameter" for some future hollow/tube section, where
+    finished > stock would be the CORRECT relationship (boring out a larger hole), not an
+    error -- the opposite of dimension_a's relationship. Confirmed via the existing test
+    fixtures that no current material/routing ever populates both sides' dimension_b at once
+    (ROUND never sets it; it is always None), so this check is a safe no-op today and is left
+    out entirely rather than guessed at, per the explicit instruction not to assume dimension
+    A/B are universally comparable. Revisit if/when a solid (non-hollow) rectangular section
+    with a genuine width+height pair is actually introduced.
+
+    Raises the same 400 _bad_request() every other routing validation failure uses, before
+    any row is written -- never a silent fallback, never a misleading computed value."""
+    req_section = (req.required_section or "").strip().upper()
+    mat_section = (material.section or "").strip().upper()
+    if req_section and mat_section and req_section != mat_section:
+        raise _bad_request(
+            f"Routing required_section ({req.required_section!r}) does not match material "
+            f"'{material.material_code}''s own section ({material.section!r}). Select a material "
+            f"with a matching section, or correct required_section -- never silently mixed."
+        )
+    if (
+        material.stock_dimension_a_mm is not None
+        and req.finished_dimension_a_mm is not None
+        and req.finished_dimension_a_mm > material.stock_dimension_a_mm
+    ):
+        raise _bad_request(
+            f"finished_dimension_a_mm ({req.finished_dimension_a_mm} mm) exceeds material "
+            f"'{material.material_code}''s stock_dimension_a_mm ({material.stock_dimension_a_mm} mm) -- "
+            f"a finished part cannot be larger than the raw stock it is machined from."
+        )
 
 
 def _new_routing(req: CCRoutingCreate, wo: WorkOrder, material, version: int, blank: int, gross: int,
@@ -176,9 +308,11 @@ class ContinuousCastingRoutingService:
 
         def work():
             wo = _load_work_order(db, req.wo_number)
-            material = _load_material(db, req.validated_material_id)
             existing = db.query(ContinuousCastingRouting).filter(
                 ContinuousCastingRouting.work_order_id == wo.id).all()
+            _require_cc_eligible_work_order(wo, existing)
+            material = _load_material(db, req.validated_material_id)
+            _validate_material_geometry_consistency(req, material)
             active = next((r for r in existing if r.status == ROUTING_ACTIVE), None)
             if active:
                 raise HTTPException(
@@ -213,9 +347,11 @@ class ContinuousCastingRoutingService:
 
         def work():
             wo = _load_work_order(db, req.wo_number)
-            material = _load_material(db, req.validated_material_id)
             existing = db.query(ContinuousCastingRouting).filter(
                 ContinuousCastingRouting.work_order_id == wo.id).with_for_update().all()
+            _require_cc_eligible_work_order(wo, existing)
+            material = _load_material(db, req.validated_material_id)
+            _validate_material_geometry_consistency(req, material)
             active = next((r for r in existing if r.status == ROUTING_ACTIVE), None)
             if not active:
                 raise HTTPException(

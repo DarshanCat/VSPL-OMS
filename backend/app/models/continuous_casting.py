@@ -111,6 +111,7 @@ class ContinuousCastingInward(Base):
     received_piece_count = Column(Integer, nullable=False)
     received_total_length_mm = Column(Integer, nullable=False)
     grn_reference = Column(String, nullable=True)
+    heat_number = Column(String, nullable=True, index=True)
     qa_status = Column(String, nullable=False, default="PENDING_QA")
     location = Column(String, nullable=True)
     remarks = Column(String, nullable=True)
@@ -172,6 +173,7 @@ class ContinuousCastingStockUnit(Base):
     consumed_length_mm = Column(Integer, nullable=False, default=0)
     # Cached, ledger-reconciled: cumulative length removed by SCRAP (a physical disposal, not a cut).
     scrapped_length_mm = Column(Integer, nullable=False, default=0)
+    heat_number = Column(String, nullable=True, index=True)
     status = Column(String, nullable=False, default=UNIT_STATUS_IN_STOCK)
     location = Column(String, nullable=True)
     created_by = Column(String, nullable=True)
@@ -450,6 +452,7 @@ class ContinuousCastingCutRecord(Base):
     client_request_id = Column(String, nullable=True)
     retained_remnant_unit_id = Column(GUID, ForeignKey("cc_stock_units.id"), nullable=True)
     retained_remnant_length_mm = Column(Integer, nullable=False, default=0)
+    heat_number = Column(String, nullable=True, index=True)
     nc_record_id = Column(GUID, ForeignKey("nc_records.id"), nullable=True)
     reconciliation_status = Column(String, nullable=False, default="PENDING")
     variance_mm = Column(Integer, nullable=True)

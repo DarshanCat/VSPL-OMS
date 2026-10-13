@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.order import Customer, Part, Order, next_internal_part_number
 from app.models.master_data import POMaster, POLine, ScheduleMaster, POStatus, ScheduleStatus
 from app.models.customer_part_mapping import CustomerPartMapping
@@ -12,9 +12,11 @@ from app.models.shift import Shift
 from app.models.operator import Operator
 from app.models.audit import AuditLog
 from app.models.user import User
+from app.services.work_order_service import compute_po_coverage_status, compute_wo_release_status
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    POMasterCreate, POMasterOut, POLineOut,
+    POMasterCreate, POMasterUpdate, POMasterOut, POLineOut, POLineUpdate,
+    POLineOrderSummary, POLineWorkOrderSummary,
     ScheduleCreate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
@@ -210,11 +212,25 @@ class POMasterService:
     @staticmethod
     def _line_out(line: POLine) -> POLineOut:
         allocated = sum(o.po_qty for o in line.orders)
+        orders_summary = [
+            POLineOrderSummary(
+                oar_id=str(o.id), oar_number=o.oar_number, order_status=o.status.value,
+                po_coverage_status=compute_po_coverage_status(o),
+                work_orders=[
+                    POLineWorkOrderSummary(
+                        wo_id=str(wo.id), wo_number=wo.wo_number, wo_status=wo.status.value,
+                        release_status=compute_wo_release_status(wo),
+                    )
+                    for wo in o.work_orders
+                ],
+            )
+            for o in line.orders
+        ]
         return POLineOut(
             id=str(line.id), part_number=line.part.part_number,
             customer_part_number=line.customer_part_number if hasattr(line, "customer_part_number") else None,
             po_qty=line.po_qty, allocated_qty=allocated, available_qty=max(line.po_qty - allocated, 0),
-            required_date=line.required_date,
+            required_date=line.required_date, orders=orders_summary,
         )
 
     @staticmethod
@@ -227,7 +243,13 @@ class POMasterService:
 
     @staticmethod
     def list_pos(db: Session, customer_code: Optional[str] = None) -> List[POMasterOut]:
-        query = db.query(POMaster)
+        query = db.query(POMaster).options(
+            selectinload(POMaster.customer),
+            selectinload(POMaster.lines).selectinload(POLine.part),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.work_orders),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.customer),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.po_line).selectinload(POLine.po),
+        )
         if customer_code:
             customer = db.query(Customer).filter(Customer.customer_code == customer_code.strip().upper()).first()
             if not customer:
@@ -289,6 +311,214 @@ class POMasterService:
 
             db.refresh(po)
             return POMasterService._po_out(po)
+
+    @staticmethod
+    def get_po(db: Session, po_id: str) -> POMasterOut:
+        po = db.query(POMaster).options(
+            selectinload(POMaster.customer),
+            selectinload(POMaster.lines).selectinload(POLine.part),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.work_orders),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.customer),
+            selectinload(POMaster.lines).selectinload(POLine.orders).selectinload(Order.po_line).selectinload(POLine.po),
+        ).filter(POMaster.id == po_id).first()
+        if not po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PO not found.")
+        return POMasterService._po_out(po)
+
+    @staticmethod
+    def update_po(db: Session, po_id: str, req: POMasterUpdate, current_user: Optional[User] = None) -> POMasterOut:
+        po = db.query(POMaster).filter(POMaster.id == po_id).with_for_update().first()
+        if not po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PO not found.")
+
+        # Lock all lines for this PO to prevent concurrent allocation races
+        db.query(POLine).filter(POLine.po_id == po.id).with_for_update().all()
+
+        # 1. Customer immutability check
+        if req.customer_code is not None:
+            req_cust = req.customer_code.strip().upper()
+            if req_cust != po.customer.customer_code.strip().upper():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Customer association cannot be changed once a PO is created.",
+                )
+
+        changes = []
+
+        # 2. PO number update (conditional on downstream references and scoped uniqueness)
+        if req.po_number is not None:
+            new_po_num = req.po_number.strip()
+            if not new_po_num:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PO number cannot be empty.")
+            if new_po_num != po.po_number:
+                conflict = db.query(POMaster).filter(
+                    POMaster.customer_id == po.customer_id,
+                    POMaster.po_number == new_po_num,
+                    POMaster.id != po.id,
+                ).first()
+                if conflict:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"PO number '{new_po_num}' already exists for this customer.",
+                    )
+                total_linked_orders = sum(len(line.orders) for line in po.lines)
+                if total_linked_orders > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"PO number cannot be changed because {total_linked_orders} order(s) (OARs) are already linked to this PO.",
+                    )
+                changes.append(f"po_number: {po.po_number} -> {new_po_num}")
+                po.po_number = new_po_num
+
+        # 3. Header dates
+        if req.po_date is not None:
+            if po.po_date != req.po_date:
+                changes.append(f"po_date: {po.po_date} -> {req.po_date}")
+                po.po_date = req.po_date
+
+        if req.validity_date is not None:
+            if po.validity_date != req.validity_date:
+                changes.append(f"validity_date: {po.validity_date} -> {req.validity_date}")
+                po.validity_date = req.validity_date
+
+        # 4. Status
+        if req.status is not None:
+            new_status_str = req.status.strip().lower()
+            try:
+                new_status = POStatus(new_status_str)
+            except ValueError:
+                valid_statuses = ", ".join([s.value for s in POStatus])
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid PO status '{req.status}'. Valid statuses are: {valid_statuses}.",
+                )
+            if new_status == POStatus.CANCELLED:
+                total_allocated = sum(sum(o.po_qty for o in line.orders) for line in po.lines)
+                if total_allocated > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot cancel PO because it has {total_allocated} allocated quantity across linked orders (OARs).",
+                    )
+            if po.status != new_status:
+                changes.append(f"status: {po.status.value} -> {new_status.value}")
+                po.status = new_status
+
+        # 5. PO Lines
+        if req.lines is not None:
+            if len(req.lines) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="PO must contain at least one line.",
+                )
+
+            existing_lines_by_id = {str(l.id): l for l in po.lines}
+            payload_line_ids = set()
+
+            for line_req in req.lines:
+                if line_req.po_qty <= 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="PO quantity must be greater than zero.",
+                    )
+
+                if line_req.id:
+                    line_id_str = str(line_req.id)
+                    if line_id_str not in existing_lines_by_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"PO line '{line_id_str}' not found on this PO.",
+                        )
+                    line = existing_lines_by_id[line_id_str]
+                    payload_line_ids.add(line_id_str)
+
+                    allocated = sum(o.po_qty for o in line.orders)
+                    if line_req.po_qty < allocated:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"PO line quantity ({line_req.po_qty}) for part '{line.part.part_number}' "
+                                f"cannot be reduced below the already allocated quantity ({allocated})."
+                            ),
+                        )
+
+                    # Part change check on existing line
+                    if line_req.customer_part_number or line_req.part_number:
+                        if line_req.customer_part_number:
+                            part, _, _ = resolve_customer_part(
+                                db, po.customer, line_req.customer_part_number, create_if_missing=True
+                            )
+                        else:
+                            part = _get_part(db, line_req.part_number)
+
+                        if part.id != line.part_id:
+                            if allocated > 0 or len(line.orders) > 0:
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=f"Cannot change part on PO line '{line.part.part_number}' because it already has allocated orders.",
+                                )
+                            changes.append(f"line[{line.id}] part: {line.part.part_number} -> {part.part_number}")
+                            line.part_id = part.id
+
+                    if line.po_qty != line_req.po_qty:
+                        changes.append(f"line[{line.id}] po_qty: {line.po_qty} -> {line_req.po_qty}")
+                        line.po_qty = line_req.po_qty
+
+                    if line.required_date != line_req.required_date:
+                        changes.append(f"line[{line.id}] required_date: {line.required_date} -> {line_req.required_date}")
+                        line.required_date = line_req.required_date
+
+                else:
+                    # New line addition
+                    if line_req.customer_part_number:
+                        part, _, _ = resolve_customer_part(
+                            db, po.customer, line_req.customer_part_number, create_if_missing=True
+                        )
+                    elif line_req.part_number:
+                        part = _get_part(db, line_req.part_number)
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
+                        )
+
+                    new_line = POLine(
+                        po_id=po.id,
+                        part_id=part.id,
+                        po_qty=line_req.po_qty,
+                        required_date=line_req.required_date,
+                    )
+                    db.add(new_line)
+                    changes.append(f"added line: part={part.part_number}, po_qty={line_req.po_qty}")
+
+            # Deleted lines check
+            for line_id_str, line in existing_lines_by_id.items():
+                if line_id_str not in payload_line_ids:
+                    allocated = sum(o.po_qty for o in line.orders)
+                    if allocated > 0 or len(line.orders) > 0:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                f"Cannot delete PO line for part '{line.part.part_number}' "
+                                f"because it has {allocated} allocated quantity across {len(line.orders)} linked order(s)."
+                            ),
+                        )
+                    changes.append(f"deleted line: part={line.part.part_number}, po_qty={line.po_qty}")
+                    db.delete(line)
+
+        details_str = "; ".join(changes) if changes else "No fields changed"
+        _audit(db, current_user, "PO_UPDATED", "POMaster", str(po.id), details=details_str)
+
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Could not update PO due to a database integrity or concurrency conflict.",
+            )
+
+        db.refresh(po)
+        return POMasterService._po_out(po)
 
 
 class ScheduleMasterService:

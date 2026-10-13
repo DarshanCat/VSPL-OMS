@@ -65,6 +65,7 @@ def populated_db(test_db):
             test_db,
             CCInwardCreate(
                 material_id=m.material_id,
+                heat_number="HT-OPENING-001",
                 unit_lengths_mm=[1000] * s["pcs"],
                 grn_reference="VSPL Q3 DUCTILE CAST IRON BAR",
                 location="vspl f1",

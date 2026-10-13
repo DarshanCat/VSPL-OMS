@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import require_roles, get_current_user
 from app.models.user import User
-from app.core.roles import PLANNING_ROLES
+from app.core.roles import PLANNING_ROLES, PO_MASTER_VIEW_ROLES, PO_MASTER_EDIT_ROLES
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    POMasterCreate, POMasterOut,
+    POMasterCreate, POMasterUpdate, POMasterOut,
     ScheduleCreate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
@@ -66,9 +66,18 @@ def update_customer(
 def list_pos(
     customer_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    user: User = Depends(require_roles(*PLANNING_ROLES)),
+    user: User = Depends(require_roles(*PO_MASTER_VIEW_ROLES)),
 ):
     return POMasterService.list_pos(db, customer_code=customer_code)
+
+
+@router.get("/pos/{po_id}", response_model=POMasterOut)
+def get_po(
+    po_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_VIEW_ROLES)),
+):
+    return POMasterService.get_po(db, po_id=po_id)
 
 
 @router.post("/pos", response_model=POMasterOut)
@@ -78,6 +87,16 @@ def create_po(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return POMasterService.create_po(db, payload, current_user=user)
+
+
+@router.put("/pos/{po_id}", response_model=POMasterOut)
+def update_po(
+    po_id: str,
+    payload: POMasterUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    return POMasterService.update_po(db, po_id=po_id, req=payload, current_user=user)
 
 
 # --- Customer Part Mapping (read-only lookups for the PO UI) ---

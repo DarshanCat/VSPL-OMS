@@ -86,6 +86,7 @@ class CCInwardStockOut(BaseModel):
     received_piece_count: int
     received_total_length_mm: int
     grn_reference: Optional[str] = None
+    heat_number: Optional[str] = None
     qa_status: str
     location: Optional[str] = None
     received_at: Optional[datetime] = None
@@ -174,6 +175,10 @@ class CCRoutingOut(BaseModel):
     material_source: str
     validated_material_id: Optional[str] = None
     validated_material_code: Optional[str] = None
+    validated_material_description: Optional[str] = None
+    stock_dimension_a_mm: Optional[int] = None
+    stock_dimension_b_mm: Optional[int] = None
+    stock_diameter_mm: Optional[int] = None
     required_grade: Optional[str] = None
     required_section: Optional[str] = None
     finished_dimension_a_mm: Optional[int] = None
@@ -187,6 +192,18 @@ class CCRoutingOut(BaseModel):
     kerf_mm: Optional[int] = None
     end_trim_mm: Optional[int] = None
     gross_required_length_mm: Optional[int] = None
+    # Weight calculations (authoritative backend calculations)
+    weight_per_mm_kg: Optional[float] = None
+    net_blank_weight_kg: Optional[float] = None
+    net_blank_weight_total_kg: Optional[float] = None
+    gross_material_weight_kg: Optional[float] = None
+    # Stock availability & sufficiency
+    allocated_length_mm: Optional[int] = None
+    available_stock_length_mm: Optional[int] = None
+    available_stock_bars: Optional[int] = None
+    remaining_required_length_mm: Optional[int] = None
+    stock_sufficiency_status: Optional[str] = None
+    stock_shortage_length_mm: Optional[int] = None
     validated_by: Optional[str] = None
     validated_at: Optional[datetime] = None
     superseded_at: Optional[datetime] = None
@@ -226,6 +243,7 @@ class CCStockUnitOut(BaseModel):
     consumed_length_mm: int
     scrapped_length_mm: int
     free_length_mm: int
+    heat_number: Optional[str] = None
     # One physical bar per StockUnit (the frozen model; there is no piece-quantity column).
     piece_quantity: int
     status: str
@@ -332,6 +350,7 @@ class CCCutResultOut(BaseModel):
     kerf_mm: int
     end_trim_mm: int
     consumed_length_mm: int
+    heat_number: Optional[str] = None
     reconciliation_status: str
     variance_mm: Optional[int] = None
     remarks: Optional[str] = None
@@ -401,6 +420,7 @@ class CCTraceUnit(BaseModel):
     unit_id: str
     unit_number: str
     parent_unit_number: Optional[str] = None
+    heat_number: Optional[str] = None
     original_length_mm: int
     remaining_length_mm: int
     reserved_length_mm: int
@@ -415,6 +435,7 @@ class CCTraceUnit(BaseModel):
 class CCTraceInwardRollup(BaseModel):
     inward_id: str
     inward_number: str
+    heat_number: Optional[str] = None
     unit_count: int
     allocation_count: int
     planned_length_mm: int
@@ -469,3 +490,24 @@ class CCTraceWorkOrder(BaseModel):
     cut_results_total: int
     truncated: bool
     limitations: List[str]
+
+
+class CCTraceHeat(BaseModel):
+    heat_number: str
+    inwards: List[CCInwardStockOut]
+    stock_units: List[CCStockUnitOut]
+    allocations: List[CCAllocationOut]
+    cut_results: List[CCCutResultOut]
+    work_orders: List[CCTraceWorkOrderRollup]
+    total_received_length_mm: int
+    total_remaining_length_mm: int
+    total_consumed_length_mm: int
+    total_scrapped_length_mm: int
+    total_free_length_mm: int
+    total_good_blanks: int
+    total_rejected_blanks: int
+    units_total: int
+    allocations_total: int
+    cut_results_total: int
+    limitations: List[str]
+

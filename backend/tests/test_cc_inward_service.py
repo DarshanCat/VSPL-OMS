@@ -69,11 +69,13 @@ def snapshot(db):
 
 
 def req(mat, lengths, **kw):
+    kw.setdefault("heat_number", "HT-TEST-001")
     return CCInwardCreate(material_id=mat.id, unit_lengths_mm=lengths, **kw)
 
 
 def raw_req(mat, lengths, **kw):
     """Bypasses schema validation, to exercise the service's own checks."""
+    kw.setdefault("heat_number", "HT-TEST-001")
     return CCInwardCreate.model_construct(material_id=mat.id, unit_lengths_mm=lengths, **kw)
 
 
@@ -249,7 +251,7 @@ def test_service_rejects_inconsistent_or_invalid_fields(db, store, mat, kw, frag
 
 def test_unknown_material_is_404(db, store, mat):
     with pytest.raises(HTTPException) as e:
-        Svc.create_inward(db, CCInwardCreate(material_id=uuid.uuid4(), unit_lengths_mm=[1000]), store)
+        Svc.create_inward(db, CCInwardCreate(material_id=uuid.uuid4(), unit_lengths_mm=[1000], heat_number="HT-TEST-001"), store)
     assert e.value.status_code == 404 and count(db, "cc_inwards") == 0
 
 

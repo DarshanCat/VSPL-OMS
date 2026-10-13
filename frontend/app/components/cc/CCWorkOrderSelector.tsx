@@ -9,8 +9,17 @@ const PAGE_SIZE = 10;
 
 // Search-based picker over the existing OMS Work Orders (GET /api/v1/work-orders; search matches WO number,
 // customer, part and PO). It only selects: it never creates or changes a Work Order.
-export function CCWorkOrderSelector({ selectedWoNumber, onSelect }: {
-  selectedWoNumber?: string | null; onSelect: (wo: CCWorkOrderListItem) => void;
+//
+// `eligibleOnly` restricts the list to Work Orders already assigned to the Continuous Casting route
+// (casting_process=CONTINUOUS, the authoritative OMS routing signal -- see
+// operations_service.release_work_order). Used by the Planning screen, where this selector is the entry
+// point for creating/superseding a routing, so a WO on a different route must never be offered as
+// actionable here. The backend independently re-validates this on create/supersede (a direct API call
+// cannot bypass it), so this filter is a UI convenience, not the enforcement point. Cutting and
+// Traceability pass no `eligibleOnly` and keep listing every Work Order, since they browse Work Orders
+// that may already carry Continuous Casting history regardless of this field.
+export function CCWorkOrderSelector({ selectedWoNumber, onSelect, eligibleOnly = false }: {
+  selectedWoNumber?: string | null; onSelect: (wo: CCWorkOrderListItem) => void; eligibleOnly?: boolean;
 }) {
   const [text, setText] = useState("");
   const [query, setQuery] = useState("");
@@ -24,7 +33,10 @@ export function CCWorkOrderSelector({ selectedWoNumber, onSelect }: {
     const mine = ++seq.current;
     setLoading(true);
     try {
-      const items = await ccSearchWorkOrders({ search: query.trim(), limit: PAGE_SIZE, offset });
+      const items = await ccSearchWorkOrders({
+        search: query.trim(), limit: PAGE_SIZE, offset,
+        ...(eligibleOnly ? { casting_process: "CONTINUOUS" } : {}),
+      });
       if (mine !== seq.current) return;
       setRows(items);
       setError(null);
@@ -33,7 +45,7 @@ export function CCWorkOrderSelector({ selectedWoNumber, onSelect }: {
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [query, offset]);
+  }, [query, offset, eligibleOnly]);
 
   useEffect(() => { void load(); }, [load]);
 

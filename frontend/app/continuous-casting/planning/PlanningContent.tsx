@@ -11,6 +11,7 @@ import { CCRoleGate } from "@/app/components/cc/CCRoleGate";
 import { CCRoutingFormModal } from "@/app/components/cc/CCRoutingFormModal";
 import { CCRoutingVersionHistory } from "@/app/components/cc/CCRoutingVersionHistory";
 import { CCWorkOrderSelector } from "@/app/components/cc/CCWorkOrderSelector";
+import { CCRequirementCard } from "@/app/components/cc/CCRequirementCard";
 import {
   ccErrorMessage, ccGetGateStatus, ccListMaterials, ccListRoutings, CCAllocationOut, CCGateStatus, CCMaterialOut, CCRoutingOut,
   CCWorkOrderListItem,
@@ -96,7 +97,7 @@ export default function PlanningContent() {
       <details open={!wo} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
         <summary className="cursor-pointer text-xs font-semibold">1. Select Work Order</summary>
         <div className="mt-2">
-          <CCWorkOrderSelector selectedWoNumber={wo?.wo_number} onSelect={setWo} />
+          <CCWorkOrderSelector selectedWoNumber={wo?.wo_number} onSelect={setWo} eligibleOnly />
         </div>
       </details>
 
@@ -123,6 +124,9 @@ export default function PlanningContent() {
               {kv("Delivery date", wo.delivery_date ?? "-")}
             </dl>
           </section>
+
+          {/* Authoritative Continuous Casting Requirement Card */}
+          <CCRequirementCard wo={wo} routing={activeRouting} gate={gate} />
 
           <section className="space-y-2">
             <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Material gate</h2>

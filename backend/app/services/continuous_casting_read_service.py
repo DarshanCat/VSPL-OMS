@@ -37,11 +37,15 @@ from app.schemas.continuous_casting_read import (
     CCMaterialStockSummaryOut, CCMaterialStockSummaryResponse, CCMaterialStockSummaryTotals, CCQADecisionInfo,
     CCRoutingDetail, CCRoutingListResponse, CCRoutingOut, CCStockUnitDetail, CCStockUnitListResponse,
     CCStockUnitOut, CCTraceInward, CCTraceInwardRollup, CCTraceUnit, CCTraceWorkOrder, CCTraceWorkOrderRollup,
-    CCUnitChild, CCUnitIntegrity,
+    CCUnitChild, CCUnitIntegrity, CCTraceHeat,
 )
 from app.services.continuous_casting_gate_service import ContinuousCastingGateService
 from app.services.continuous_casting_reservation_service import (
     ROUTING_ACTIVE, ROUTING_SUPERSEDED, _derive, _derive_remaining, _ledger_totals,
+)
+from app.services.continuous_casting_routing_service import (
+    calculate_cross_section_area_mm2, calculate_weight_per_mm_kg, calculate_net_blank_weight_kg,
+    calculate_net_blank_weight_total_kg, calculate_gross_material_weight_kg,
 )
 
 Material, Inward, Unit = ContinuousCastingMaterial, ContinuousCastingInward, ContinuousCastingStockUnit
@@ -104,7 +108,8 @@ def _unit_out(unit, parent_numbers: dict) -> CCStockUnitOut:
         unit_id=str(unit.id), unit_number=unit.unit_number, inward_id=str(inward.id), inward_number=inward.inward_number,
         inward_qa_status=inward.qa_status, material_id=str(inward.material_id),
         material_code=inward.material.material_code, parent_unit_id=_s(unit.parent_unit_id),
-        parent_unit_number=parent_numbers.get(unit.parent_unit_id), original_length_mm=unit.original_length_mm,
+        parent_unit_number=parent_numbers.get(unit.parent_unit_id), heat_number=unit.heat_number,
+        original_length_mm=unit.original_length_mm,
         remaining_length_mm=unit.remaining_length_mm, reserved_length_mm=unit.reserved_length_mm,
         issued_length_mm=unit.issued_length_mm, consumed_length_mm=unit.consumed_length_mm,
         scrapped_length_mm=unit.scrapped_length_mm,
@@ -114,17 +119,54 @@ def _unit_out(unit, parent_numbers: dict) -> CCStockUnitOut:
     )
 
 
-def _routing_out(r, wo_number: str, material_code: Optional[str], allocation_count: int) -> CCRoutingOut:
+def _routing_out(r, wo_number: str, material, allocation_count: int, allocated_len: int = 0,
+                 free_stock_len: int = 0, free_stock_bars: int = 0) -> CCRoutingOut:
+    mat_code = material.material_code if material else None
+    mat_desc = material.description if material else None
+    sec = r.required_section or (material.section if material else None)
+    dim_a = material.stock_dimension_a_mm if material else r.finished_dimension_a_mm
+    dim_b = material.stock_dimension_b_mm if material else r.finished_dimension_b_mm
+    diameter = dim_a if (sec and sec.strip().upper() == "ROUND") else None
+
+    # Weight calculations
+    weight_per_mm = calculate_weight_per_mm_kg(sec, dim_a, dim_b) if dim_a else None
+    net_blank_wt = calculate_net_blank_weight_kg(r.blank_length_mm, sec, dim_a, dim_b) if (r.blank_length_mm and dim_a) else None
+    net_blank_total_wt = calculate_net_blank_weight_total_kg(r.planned_blanks, r.blank_length_mm, sec, dim_a, dim_b) if (r.planned_blanks and r.blank_length_mm and dim_a) else None
+    gross_mat_wt = calculate_gross_material_weight_kg(r.gross_required_length_mm, sec, dim_a, dim_b) if (r.gross_required_length_mm and dim_a) else None
+
+    # Stock balances
+    gross_req = int(r.gross_required_length_mm or 0)
+    alloc_len = int(allocated_len or 0)
+    avail_len = int(free_stock_len or 0)
+    avail_bars = int(free_stock_bars or 0)
+    rem_req = max(0, gross_req - alloc_len)
+    is_sufficient = (alloc_len >= gross_req) or (avail_len >= rem_req)
+    sufficiency_status = "SUFFICIENT" if is_sufficient else "SHORT"
+    shortage_len = 0 if is_sufficient else (rem_req - avail_len)
+
     return CCRoutingOut(
         routing_id=str(r.id), work_order_id=str(r.work_order_id), wo_number=wo_number, version=r.version,
         status=r.status, is_active=r.status == ROUTING_ACTIVE, material_source=r.material_source,
-        validated_material_id=_s(r.validated_material_id), validated_material_code=material_code,
+        validated_material_id=_s(r.validated_material_id), validated_material_code=mat_code,
+        validated_material_description=mat_desc,
+        stock_dimension_a_mm=dim_a, stock_dimension_b_mm=dim_b, stock_diameter_mm=diameter,
         required_grade=r.required_grade, required_section=r.required_section,
         finished_dimension_a_mm=r.finished_dimension_a_mm, finished_dimension_b_mm=r.finished_dimension_b_mm,
         finished_axial_length_mm=r.finished_axial_length_mm, machining_stock_a_mm=r.machining_stock_a_mm,
         machining_stock_b_mm=r.machining_stock_b_mm, blank_length_mm=r.blank_length_mm,
         planned_blanks=r.planned_blanks, planned_cuts=r.planned_cuts, kerf_mm=r.kerf_mm, end_trim_mm=r.end_trim_mm,
-        gross_required_length_mm=r.gross_required_length_mm, validated_by=r.validated_by,
+        gross_required_length_mm=r.gross_required_length_mm,
+        weight_per_mm_kg=weight_per_mm,
+        net_blank_weight_kg=net_blank_wt,
+        net_blank_weight_total_kg=net_blank_total_wt,
+        gross_material_weight_kg=gross_mat_wt,
+        allocated_length_mm=alloc_len,
+        available_stock_length_mm=avail_len,
+        available_stock_bars=avail_bars,
+        remaining_required_length_mm=rem_req,
+        stock_sufficiency_status=sufficiency_status,
+        stock_shortage_length_mm=shortage_len,
+        validated_by=r.validated_by,
         validated_at=r.validated_at, superseded_at=r.superseded_at, superseded_by=r.superseded_by,
         supersede_reason=r.supersede_reason, created_by=r.created_by, created_at=r.created_at,
         allocation_count=int(allocation_count or 0),
@@ -150,7 +192,8 @@ def _cut_out(row) -> CCCutResultOut:
         work_order_id=str(wo.id), wo_number=wo.wo_number, routing_id=str(routing.id),
         routing_version=routing.version, routing_status=routing.status, allocation_id=str(alloc.id),
         allocation_number=alloc.allocation_number, stock_unit_id=str(unit.id), stock_unit_number=unit.unit_number,
-        inward_number=inward.inward_number, planned_blanks=cut.planned_blanks, actual_cuts=cut.actual_cuts,
+        inward_number=inward.inward_number, heat_number=cut.heat_number or unit.heat_number or inward.heat_number,
+        planned_blanks=cut.planned_blanks, actual_cuts=cut.actual_cuts,
         actual_good_blanks=cut.actual_good_blanks, rejected_blanks=cut.rejected_blanks,
         blank_length_mm=cut.blank_length_mm, kerf_mm=cut.kerf_mm, end_trim_mm=cut.end_trim_mm,
         consumed_length_mm=cut.consumed_length_mm, reconciliation_status=cut.reconciliation_status,
@@ -235,7 +278,7 @@ def _inward_stock_out(row, cls=CCInwardStockOut, **extra):
         material_code=material_code, grade=inward.grade, section=inward.section,
         stock_dimension_a_mm=inward.stock_dimension_a_mm, stock_dimension_b_mm=inward.stock_dimension_b_mm,
         received_piece_count=inward.received_piece_count, received_total_length_mm=inward.received_total_length_mm,
-        grn_reference=inward.grn_reference, qa_status=inward.qa_status, location=inward.location,
+        grn_reference=inward.grn_reference, heat_number=inward.heat_number, qa_status=inward.qa_status, location=inward.location,
         received_at=inward.received_at, unit_count=int(unit_count or 0), remaining_length_mm=int(remaining or 0),
         reserved_length_mm=int(reserved or 0), issued_length_mm=int(issued or 0),
         consumed_length_mm=int(consumed or 0), scrapped_length_mm=int(scrapped or 0), free_length_mm=int(free or 0),
@@ -250,12 +293,30 @@ def _parent_numbers(db: Session, units) -> dict:
 
 
 def _routing_rows(db: Session):
-    counts = db.query(Alloc.routing_id.label("routing_id"), func.count(Alloc.id).label("n")).group_by(
-        Alloc.routing_id).subquery()
-    query = (db.query(Routing, WorkOrder.wo_number, Material.material_code, counts.c.n)
-             .join(WorkOrder, WorkOrder.id == Routing.work_order_id)
-             .outerjoin(Material, Material.id == Routing.validated_material_id)
-             .outerjoin(counts, counts.c.routing_id == Routing.id))
+    alloc_agg = db.query(
+        Alloc.routing_id.label("routing_id"),
+        func.count(Alloc.id).label("n"),
+        func.coalesce(func.sum(Alloc.planned_length_mm), 0).label("allocated_len"),
+    ).filter(Alloc.status != "CANCELLED").group_by(Alloc.routing_id).subquery()
+
+    mat_stock = db.query(
+        Inward.material_id.label("material_id"),
+        func.count(Unit.id).label("stock_bars"),
+        func.coalesce(func.sum(Unit.remaining_length_mm - Unit.reserved_length_mm - Unit.issued_length_mm), 0).label("free_length"),
+    ).join(Inward, Inward.id == Unit.inward_id).filter(
+        Inward.qa_status == ALLOCATABLE_QA_STATUS,
+        Unit.status == UNIT_STATUS_IN_STOCK,
+        (Unit.remaining_length_mm - Unit.reserved_length_mm - Unit.issued_length_mm) > 0,
+    ).group_by(Inward.material_id).subquery()
+
+    query = (db.query(
+        Routing, WorkOrder.wo_number, Material, alloc_agg.c.n, alloc_agg.c.allocated_len,
+        mat_stock.c.free_length, mat_stock.c.stock_bars,
+    )
+    .join(WorkOrder, WorkOrder.id == Routing.work_order_id)
+    .outerjoin(Material, Material.id == Routing.validated_material_id)
+    .outerjoin(alloc_agg, alloc_agg.c.routing_id == Routing.id)
+    .outerjoin(mat_stock, mat_stock.c.material_id == Routing.validated_material_id))
     return query
 
 
@@ -426,12 +487,16 @@ class ContinuousCastingReadService:
 
     # ============================================================== inwards
     @staticmethod
-    def list_inwards(db: Session, *, inward_number: Optional[str], material_id, qa_status: Optional[str],
-                     location: Optional[str], received_from: Optional[datetime], received_to: Optional[datetime],
-                     has_free_stock: Optional[bool], limit: int, offset: int) -> CCInwardListResponse:
+    def list_inwards(db: Session, *, inward_number: Optional[str] = None, heat_number: Optional[str] = None,
+                     material_id = None, qa_status: Optional[str] = None,
+                     location: Optional[str] = None, received_from: Optional[datetime] = None,
+                     received_to: Optional[datetime] = None,
+                     has_free_stock: Optional[bool] = None, limit: int = 50, offset: int = 0) -> CCInwardListResponse:
         query, agg = _inward_stock_query(db)
         if inward_number:
             query = query.filter(_contains(Inward.inward_number, inward_number))
+        if heat_number:
+            query = query.filter(_contains(Inward.heat_number, heat_number))
         if material_id is not None:
             query = query.filter(Inward.material_id == material_id)
         if qa_status:
@@ -481,14 +546,17 @@ class ContinuousCastingReadService:
                 .options(contains_eager(Unit.inward).contains_eager(Inward.material)))
 
     @staticmethod
-    def list_stock_units(db: Session, *, inward_id, material_id, status_filter: Optional[str], location: Optional[str],
-                         on_hold: Optional[bool], available: Optional[bool], parent_unit_id, limit: int,
-                         offset: int) -> CCStockUnitListResponse:
+    def list_stock_units(db: Session, *, inward_id = None, material_id = None, heat_number: Optional[str] = None,
+                         status_filter: Optional[str] = None, location: Optional[str] = None,
+                         on_hold: Optional[bool] = None, available: Optional[bool] = None, parent_unit_id = None,
+                         limit: int = 50, offset: int = 0) -> CCStockUnitListResponse:
         query = ContinuousCastingReadService._unit_query(db)
         if inward_id is not None:
             query = query.filter(Unit.inward_id == inward_id)
         if material_id is not None:
             query = query.filter(Inward.material_id == material_id)
+        if heat_number:
+            query = query.filter((_contains(Unit.heat_number, heat_number)) | (_contains(Inward.heat_number, heat_number)))
         if status_filter:
             query = query.filter(Unit.status == status_filter.strip().upper())
         if location:
@@ -607,9 +675,11 @@ class ContinuousCastingReadService:
 
     # ============================================================== cut results
     @staticmethod
-    def list_cut_results(db: Session, *, wo_number: Optional[str], routing_id, allocation_id, stock_unit_id,
-                         ledger_transaction_number: Optional[str], reconciliation_status: Optional[str],
-                         limit: int, offset: int, inward_id=None) -> CCCutResultListResponse:
+    def list_cut_results(db: Session, *, wo_number: Optional[str] = None, routing_id = None,
+                         allocation_id = None, stock_unit_id = None, heat_number: Optional[str] = None,
+                         ledger_transaction_number: Optional[str] = None,
+                         reconciliation_status: Optional[str] = None, limit: int = 50,
+                         offset: int = 0, inward_id = None) -> CCCutResultListResponse:
         query = _cut_query(db)
         if wo_number:
             query = query.filter(WorkOrder.wo_number == wo_number.strip())
@@ -619,6 +689,9 @@ class ContinuousCastingReadService:
             query = query.filter(Cut.allocation_id == allocation_id)
         if stock_unit_id is not None:
             query = query.filter(Cut.stock_unit_id == stock_unit_id)
+        if heat_number and heat_number.strip():
+            hn = heat_number.strip()
+            query = query.filter((_contains(Cut.heat_number, hn)) | (_contains(Unit.heat_number, hn)) | (_contains(Inward.heat_number, hn)))
         if ledger_transaction_number:
             query = query.filter(Ledger.transaction_number == ledger_transaction_number.strip())
         if reconciliation_status:
@@ -746,6 +819,7 @@ class ContinuousCastingReadService:
             by_unit.setdefault(row[3].id, []).append(_alloc_out(*row))
         return [CCTraceUnit(
             unit_id=str(u.id), unit_number=u.unit_number, parent_unit_number=parents.get(u.parent_unit_id),
+            heat_number=u.heat_number,
             original_length_mm=u.original_length_mm, remaining_length_mm=u.remaining_length_mm,
             reserved_length_mm=u.reserved_length_mm, issued_length_mm=u.issued_length_mm,
             consumed_length_mm=u.consumed_length_mm, scrapped_length_mm=u.scrapped_length_mm,
@@ -815,7 +889,8 @@ class ContinuousCastingReadService:
         inward_roll = {}
         for a, _routing, _wo, unit, inward in rows:
             units[unit.id] = unit
-            r = inward_roll.setdefault(inward.id, dict(number=inward.inward_number, units=set(), n=0, planned=0,
+            r = inward_roll.setdefault(inward.id, dict(number=inward.inward_number, heat_number=inward.heat_number,
+                                                       units=set(), n=0, planned=0,
                                                        reserved=0, issued=0, consumed=0))
             r["units"].add(unit.id)
             r["n"] += 1
@@ -832,7 +907,8 @@ class ContinuousCastingReadService:
             active_routing_version=next((r.version for r in routings if r.is_active), None),
             allocations=[_alloc_out(*r) for r in rows],
             inwards=[CCTraceInwardRollup(
-                inward_id=str(i), inward_number=r["number"], unit_count=len(r["units"]), allocation_count=r["n"],
+                inward_id=str(i), inward_number=r["number"], heat_number=r.get("heat_number"),
+                unit_count=len(r["units"]), allocation_count=r["n"],
                 planned_length_mm=r["planned"], reserved_length_mm=r["reserved"], issued_length_mm=r["issued"],
                 consumed_length_mm=r["consumed"]) for i, r in sorted(inward_roll.items(), key=lambda kv: kv[1]["number"])],
             units=service._trace_units(db, sorted(units.values(), key=lambda u: u.unit_number), rows),
@@ -841,3 +917,83 @@ class ContinuousCastingReadService:
                                 if active is not None else None),
             allocations_total=int(allocations_total), cut_results_total=cuts.total,
             truncated=bool(allocs_cut or cuts.total > TRACE_CUT_RESULT_CAP), limitations=TRACE_LIMITATIONS)
+
+    @staticmethod
+    def trace_heat(db: Session, heat_number: str) -> CCTraceHeat:
+        clean_heat = heat_number.strip() if heat_number else ""
+        if not clean_heat:
+            raise _bad("heat_number is required for heat traceability.")
+
+        # Inwards with this heat number
+        inward_rows = _inward_stock_query(db)[0].filter(Inward.heat_number == clean_heat).all()
+        inwards = [_inward_stock_out(r) for r in inward_rows]
+        inward_ids = [r[0].id for r in inward_rows]
+
+        # Stock units matching heat_number or inward
+        units = ContinuousCastingReadService._unit_query(db).filter(
+            (Unit.heat_number == clean_heat) | (Unit.inward_id.in_(inward_ids) if inward_ids else False)
+        ).order_by(Unit.unit_number).limit(TRACE_UNIT_CAP).all()
+        parents = _parent_numbers(db, units)
+        stock_units = [_unit_out(u, parents) for u in units]
+        unit_ids = [u.id for u in units]
+
+        # Allocations
+        alloc_query = _alloc_query(db).filter(Alloc.stock_unit_id.in_(unit_ids)) if unit_ids else None
+        alloc_rows = alloc_query.order_by(Alloc.allocation_number).limit(TRACE_ALLOCATION_CAP).all() if alloc_query is not None else []
+        allocations = [_alloc_out(*r) for r in alloc_rows]
+
+        # Work orders rollup
+        wo_roll = {}
+        for a, routing, wo, _unit, _inward in alloc_rows:
+            r = wo_roll.setdefault(wo.wo_number, dict(versions=set(), active=None, n=0, planned=0, reserved=0, issued=0, consumed=0))
+            r["versions"].add(routing.version)
+            if routing.status == ROUTING_ACTIVE:
+                r["active"] = routing.version
+            r["n"] += 1
+            r["planned"] += a.planned_length_mm
+            r["reserved"] += a.reserved_length_mm
+            r["issued"] += a.issued_length_mm
+            r["consumed"] += a.consumed_length_mm
+
+        work_orders = [CCTraceWorkOrderRollup(
+            wo_number=n, routing_versions=sorted(r["versions"]), active_routing_version=r["active"],
+            allocation_count=r["n"], planned_length_mm=r["planned"], reserved_length_mm=r["reserved"],
+            issued_length_mm=r["issued"], consumed_length_mm=r["consumed"]
+        ) for n, r in sorted(wo_roll.items())]
+
+        # Cut results
+        cut_query = _cut_query(db).filter(
+            (Cut.heat_number == clean_heat) | (Cut.stock_unit_id.in_(unit_ids) if unit_ids else False)
+        )
+        cut_rows = cut_query.order_by(Cut.cut_number.desc()).limit(TRACE_CUT_RESULT_CAP).all()
+        cut_results = [_cut_out(r) for r in cut_rows]
+
+        # Summary sums
+        total_received = sum(i.received_total_length_mm for i in inwards)
+        total_remaining = sum(u.remaining_length_mm for u in stock_units)
+        total_consumed = sum(u.consumed_length_mm for u in stock_units)
+        total_scrapped = sum(u.scrapped_length_mm for u in stock_units)
+        total_free = sum(u.free_length_mm for u in stock_units)
+        total_good_blanks = sum(c.actual_good_blanks for c in cut_results)
+        total_rejected_blanks = sum(c.rejected_blanks for c in cut_results)
+
+        return CCTraceHeat(
+            heat_number=clean_heat,
+            inwards=inwards,
+            stock_units=stock_units,
+            allocations=allocations,
+            cut_results=cut_results,
+            work_orders=work_orders,
+            total_received_length_mm=total_received,
+            total_remaining_length_mm=total_remaining,
+            total_consumed_length_mm=total_consumed,
+            total_scrapped_length_mm=total_scrapped,
+            total_free_length_mm=total_free,
+            total_good_blanks=total_good_blanks,
+            total_rejected_blanks=total_rejected_blanks,
+            units_total=len(stock_units),
+            allocations_total=len(allocations),
+            cut_results_total=len(cut_results),
+            limitations=TRACE_LIMITATIONS,
+        )
+

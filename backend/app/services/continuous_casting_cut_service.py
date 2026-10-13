@@ -165,8 +165,8 @@ def _record(db: Session, req: CCCutResultCreate, current_user: User) -> CCCutRes
         ledger_entry_id=ledger.id, planned_blanks=routing.planned_blanks, actual_good_blanks=req.actual_good_blanks,
         rejected_blanks=req.rejected_blanks, blank_length_mm=routing.blank_length_mm, kerf_mm=routing.kerf_mm,
         actual_cuts=req.actual_cuts, end_trim_mm=req.end_trim_mm, consumed_length_mm=ledger.length_mm,
-        retained_remnant_unit_id=None, retained_remnant_length_mm=0, reconciliation_status=status_value,
-        variance_mm=variance, remarks=req.remarks, client_request_id=key,
+        retained_remnant_unit_id=None, retained_remnant_length_mm=0, heat_number=unit.heat_number,
+        reconciliation_status=status_value, variance_mm=variance, remarks=req.remarks, client_request_id=key,
         performed_by_id=current_user.id, performed_by_name=actor,
     )
     db.add(rec)

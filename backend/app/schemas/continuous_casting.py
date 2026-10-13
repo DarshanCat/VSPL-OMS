@@ -21,6 +21,7 @@ class CCInwardCreate(BaseModel):
 
     material_id: uuid.UUID
     unit_lengths_mm: List[BarLengthMm] = Field(..., min_length=1)
+    heat_number: str = Field(..., min_length=1, max_length=100)
     received_piece_count: Optional[int] = Field(None, gt=0)
     received_total_length_mm: Optional[int] = Field(None, gt=0)
     stock_dimension_a_mm: Optional[int] = Field(None, gt=0)
@@ -28,6 +29,12 @@ class CCInwardCreate(BaseModel):
     grn_reference: Optional[str] = Field(None, max_length=100)
     location: Optional[str] = Field(None, max_length=100)
     remarks: Optional[str] = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _validate_heat_number_non_empty(self):
+        if not (self.heat_number and self.heat_number.strip()):
+            raise PydanticCustomError("heat_number_required", "Heat number cannot be empty or whitespace.")
+        return self
 
 
 PositiveMm = Annotated[int, Field(gt=0, le=INT32_MAX)]
@@ -43,19 +50,43 @@ class CCRoutingCreate(BaseModel):
     `end_trim_mm` is the TOTAL end trim for the routing."""
     model_config = ConfigDict(extra="forbid")
 
-    wo_number: str = Field(..., min_length=1, max_length=100)
-    validated_material_id: uuid.UUID
-    required_grade: str = Field(..., min_length=1, max_length=100)
-    required_section: str = Field(..., min_length=1, max_length=100)
-    finished_dimension_a_mm: PositiveMm
-    finished_dimension_b_mm: Optional[PositiveMm] = None
-    finished_axial_length_mm: PositiveMm
-    machining_stock_a_mm: NonNegativeMm
-    machining_stock_b_mm: NonNegativeMm
-    planned_blanks: PositiveMm
-    planned_cuts: NonNegativeMm
-    kerf_mm: NonNegativeMm
-    end_trim_mm: NonNegativeMm
+    wo_number: str = Field(..., min_length=1, max_length=100,
+        description="The existing OMS Work Order this routing is for. Never creates or changes the Work Order.")
+    validated_material_id: uuid.UUID = Field(
+        ..., description="The continuous-casting material Engineering has validated as stock for this routing.")
+    required_grade: str = Field(..., min_length=1, max_length=100,
+        description="Grade the cutting plan requires. Defaults from the selected material; may be overridden.")
+    required_section: str = Field(..., min_length=1, max_length=100,
+        description="Cross-section shape the cutting plan requires (e.g. ROUND, SQUARE). Must match the "
+                     "selected material's own section.")
+    finished_dimension_a_mm: PositiveMm = Field(
+        ..., description="Finished part's primary dimension (diameter for ROUND, side for SQUARE), in whole mm. "
+                          "Cannot exceed the material's stock_dimension_a_mm -- a finished part is machined "
+                          "down from stock, never up.")
+    finished_dimension_b_mm: Optional[PositiveMm] = Field(
+        None, description="Finished part's secondary dimension in whole mm, where the section has one. Not "
+                           "cross-checked against the material's own secondary dimension (see "
+                           "_validate_material_geometry_consistency).")
+    finished_axial_length_mm: PositiveMm = Field(
+        ..., description="Finished part's length along the cutting axis, in whole mm.")
+    machining_stock_a_mm: NonNegativeMm = Field(
+        ..., description="Extra length added to the finished axial length for machining allowance, in whole mm.")
+    machining_stock_b_mm: NonNegativeMm = Field(
+        ..., description="A second machining allowance added to the finished axial length, in whole mm "
+                          "(e.g. for machining both ends).")
+    planned_blanks: PositiveMm = Field(
+        ..., description="Number of raw blanks required for this routing. Entered by the operator, not "
+                          "derived from the Work Order quantity: no deterministic rule tying WO quantity to "
+                          "blank count is established anywhere in this codebase.")
+    planned_cuts: NonNegativeMm = Field(
+        ..., description="Number of actual cutting operations this routing plans, per the approved cutting "
+                          "convention. Entered by the operator, not derived: it is not always equal to "
+                          "planned_blanks (both a 1-extra-cut and a 0-cut worked example are valid).")
+    kerf_mm: NonNegativeMm = Field(
+        ..., description="Material lost to the saw blade per cut, in whole mm. Whole-millimetre only by "
+                          "design -- a fractional value is rejected, never silently rounded.")
+    end_trim_mm: NonNegativeMm = Field(
+        ..., description="Total end trim for the whole routing (not per blank), in whole mm.")
 
 
 class CCRoutingSupersede(CCRoutingCreate):
@@ -518,6 +549,7 @@ class CCInwardUnitOut(BaseModel):
     ledger_transaction_number: str
     original_length_mm: int
     remaining_length_mm: int
+    heat_number: Optional[str] = None
 
 
 class CCInwardResult(BaseModel):
@@ -526,6 +558,7 @@ class CCInwardResult(BaseModel):
     inward_number: str
     material_code: str
     grn_reference: Optional[str] = None
+    heat_number: Optional[str] = None
     qa_status: str
     # Physical existence and allocation eligibility are separate answers.
     physical_stock_status: str
@@ -540,3 +573,21 @@ class CCInwardResult(BaseModel):
     reconciled: bool
     units: List[CCInwardUnitOut]
     message: str
+
+
+class CCHeatReconcileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    heat_number: RequiredText100 = Field(..., description="Verified foundry heat number")
+    reason: RequiredText500 = Field(..., description="Audit reason for reconciliation / correction")
+
+
+class CCHeatReconcileResult(BaseModel):
+    success: bool
+    entity: str
+    entity_id: str
+    heat_number: str
+    units_updated: int
+    cuts_updated: int
+    message: str
+

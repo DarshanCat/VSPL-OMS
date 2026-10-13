@@ -49,6 +49,7 @@ export interface CCMaterialPatch {
 
 export interface CCInwardCreate {
   material_id: string;
+  heat_number: string;
   unit_lengths_mm: number[];
   received_piece_count?: number | null;
   received_total_length_mm?: number | null;
@@ -185,6 +186,7 @@ export interface CCMaterialResult {
 
 export interface CCInwardUnitOut {
   unit_number: string;
+  heat_number?: string | null;
   ledger_transaction_number: string;
   original_length_mm: number;
   remaining_length_mm: number;
@@ -194,6 +196,7 @@ export interface CCInwardResult {
   success: boolean;
   inward_id: string;
   inward_number: string;
+  heat_number?: string | null;
   material_code: string;
   grn_reference: string | null;
   qa_status: string;
@@ -449,6 +452,7 @@ export interface CCMaterialStockSummaryParams extends CCPageParams {
 export interface CCInwardStockOut {
   inward_id: string;
   inward_number: string;
+  heat_number?: string | null;
   material_id: string;
   material_code: string;
   grade: string;
@@ -526,6 +530,10 @@ export interface CCRoutingOut {
   material_source: string;
   validated_material_id: string | null;
   validated_material_code: string | null;
+  validated_material_description?: string | null;
+  stock_dimension_a_mm?: number | null;
+  stock_dimension_b_mm?: number | null;
+  stock_diameter_mm?: number | null;
   required_grade: string | null;
   required_section: string | null;
   finished_dimension_a_mm: number | null;
@@ -539,6 +547,18 @@ export interface CCRoutingOut {
   kerf_mm: number | null;
   end_trim_mm: number | null;
   gross_required_length_mm: number | null;
+  // Weight calculations
+  weight_per_mm_kg?: number | null;
+  net_blank_weight_kg?: number | null;
+  net_blank_weight_total_kg?: number | null;
+  gross_material_weight_kg?: number | null;
+  // Stock availability & sufficiency
+  allocated_length_mm?: number | null;
+  available_stock_length_mm?: number | null;
+  available_stock_bars?: number | null;
+  remaining_required_length_mm?: number | null;
+  stock_sufficiency_status?: string | null;
+  stock_shortage_length_mm?: number | null;
   validated_by: string | null;
   validated_at: string | null;
   superseded_at: string | null;
@@ -556,6 +576,7 @@ export interface CCRoutingDetail extends CCRoutingOut {
 export interface CCStockUnitOut {
   unit_id: string;
   unit_number: string;
+  heat_number?: string | null;
   inward_id: string;
   inward_number: string;
   inward_qa_status: string;
@@ -639,6 +660,7 @@ export interface CCLedgerOut {
 export interface CCCutResultOut {
   cut_result_id: string;
   cut_number: string;
+  heat_number?: string | null;
   ledger_transaction_number: string | null;
   work_order_id: string;
   wo_number: string;
@@ -704,10 +726,30 @@ export interface CCGateStatus {
   reasons: string[];
 }
 
+// ------------------------------------------------------------------ reconciliation
+export interface CCHeatReconcileRequest {
+  heat_number: string;
+  reason: string;
+}
+
+export interface CCHeatReconcileResult {
+  success: boolean;
+  target_type: "INWARD" | "STOCK_UNIT";
+  target_id: string;
+  target_number: string;
+  previous_heat_number: string | null;
+  heat_number: string;
+  affected_units_count: number;
+  affected_cuts_count: number;
+  reconciled_by: string;
+  message: string;
+}
+
 // ------------------------------------------------------------------ traceability
 export interface CCTraceUnit {
   unit_id: string;
   unit_number: string;
+  heat_number?: string | null;
   parent_unit_number: string | null;
   original_length_mm: number;
   remaining_length_mm: number;
@@ -723,6 +765,7 @@ export interface CCTraceUnit {
 export interface CCTraceInwardRollup {
   inward_id: string;
   inward_number: string;
+  heat_number?: string | null;
   unit_count: number;
   allocation_count: number;
   planned_length_mm: number;
@@ -740,6 +783,20 @@ export interface CCTraceWorkOrderRollup {
   reserved_length_mm: number;
   issued_length_mm: number;
   consumed_length_mm: number;
+}
+
+export interface CCTraceHeat {
+  heat_number: string;
+  inwards: CCInwardStockOut[];
+  units: CCStockUnitOut[];
+  allocations: CCAllocationOut[];
+  cut_results: CCCutResultOut[];
+  work_orders: CCTraceWorkOrderRollup[];
+  total_units: number;
+  total_inwards: number;
+  total_allocations: number;
+  total_cuts: number;
+  total_work_orders: number;
 }
 
 export interface CCTraceInward {
@@ -778,11 +835,11 @@ export interface CCMaterialListParams extends CCPageParams {
   search?: string; is_active?: boolean; grade?: string; section?: string;
 }
 export interface CCInwardListParams extends CCPageParams {
-  inward_number?: string; material_id?: string; qa_status?: CCQAStatus; location?: string;
+  inward_number?: string; heat_number?: string; material_id?: string; qa_status?: CCQAStatus; location?: string;
   received_from?: string; received_to?: string; has_free_stock?: boolean;
 }
 export interface CCStockUnitListParams extends CCPageParams {
-  inward_id?: string; material_id?: string; status?: CCStockUnitStatus; location?: string;
+  inward_id?: string; heat_number?: string; material_id?: string; status?: CCStockUnitStatus; location?: string;
   on_hold?: boolean; available?: boolean; parent_unit_id?: string;
 }
 export interface CCRoutingListParams extends CCPageParams {
@@ -797,7 +854,7 @@ export interface CCLedgerListParams extends CCPageParams {
 }
 export interface CCCutResultListParams extends CCPageParams {
   wo_number?: string; routing_id?: string; allocation_id?: string; stock_unit_id?: string;
-  ledger_transaction_number?: string; reconciliation_status?: CCReconciliationStatus;
+  heat_number?: string; ledger_transaction_number?: string; reconciliation_status?: CCReconciliationStatus;
 }
 export interface CCCutAvailableParams extends CCPageParams {
   routing_id?: string; wo_number?: string;
@@ -817,6 +874,7 @@ export interface CCWorkOrderListItem {
   grade: string | null;
   order_qty: number;
   physical_wo_qty: number;
+  casting_process: string | null;
   match_size: number | null;
   current_stage: string;
   next_allowed_stage: string | null;
@@ -831,4 +889,5 @@ export interface CCWorkOrderListItem {
 export interface CCWorkOrderSearchParams extends CCPageParams {
   search?: string;
   status_filter?: string;
+  casting_process?: string;
 }

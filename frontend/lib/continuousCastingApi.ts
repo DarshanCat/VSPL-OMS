@@ -7,7 +7,8 @@ import { api, logout } from "@/lib/api";
 import type {
   CCAdjustmentCreate, CCAllocationCreate, CCAllocationListParams, CCAllocationOut, CCAllocationResult,
   CCCutAvailableOut, CCCutAvailableParams, CCCutConsumeCreate, CCCutResultCreate, CCCutResultListParams,
-  CCCutResultOut, CCCutResultResult, CCGateStatus, CCHoldCreate, CCHoldReleaseCreate, CCInwardCreate,
+  CCCutResultOut, CCCutResultResult, CCGateStatus, CCHeatReconcileRequest, CCHeatReconcileResult,
+  CCHoldCreate, CCHoldReleaseCreate, CCInwardCreate,
   CCInwardDetail, CCInwardListParams, CCInwardQADecisionBody, CCInwardQADecisionResult, CCInwardResult,
   CCInwardStockOut, CCIssueCreate, CCLedgerListParams, CCLedgerOut, CCListResponse, CCMaterialCreate,
   CCMaterialListParams, CCMaterialOut, CCMaterialPatch, CCMaterialResult,
@@ -15,7 +16,7 @@ import type {
   CCReleaseCreate, CCReserveCreate,
   CCReturnCreate, CCRoutingCreate, CCRoutingDetail, CCRoutingListParams, CCRoutingOut, CCRoutingReleaseBody,
   CCRoutingReleaseResult, CCRoutingResult, CCRoutingSupersede, CCScrapCreate, CCSplitCreate, CCSplitResult,
-  CCStockMovementResult, CCStockUnitDetail, CCStockUnitListParams, CCStockUnitOut, CCTraceInward,
+  CCStockMovementResult, CCStockUnitDetail, CCStockUnitListParams, CCStockUnitOut, CCTraceHeat, CCTraceInward,
   CCTraceWorkOrder, CCUnitMovementResult, CCWorkOrderListItem, CCWorkOrderSearchParams,
 } from "@/lib/continuousCastingTypes";
 
@@ -176,8 +177,16 @@ export const ccListLedger = (params?: CCLedgerListParams) => get<CCListResponse<
 export const ccTraceInward = (inwardId: string) => get<CCTraceInward>(`/traceability/inwards/${inwardId}`);
 export const ccTraceWorkOrder = (woNumber: string) =>
   get<CCTraceWorkOrder>(`/traceability/work-orders/${encodeURIComponent(woNumber)}`);
+export const ccTraceHeat = (heatNumber: string) =>
+  get<CCTraceHeat>(`/traceability/heats/${encodeURIComponent(heatNumber)}`);
 export const ccGetGateStatus = (woNumber: string) =>
   get<CCGateStatus>(`/work-orders/${encodeURIComponent(woNumber)}/gate-status`);
+
+// ------------------------------------------------------------------ Heat Reconciliation
+export const ccReconcileInwardHeat = (inwardId: string, body: CCHeatReconcileRequest) =>
+  post<CCHeatReconcileResult>(`/inwards/${inwardId}/reconcile-heat`, body);
+export const ccReconcileStockUnitHeat = (unitId: string, body: CCHeatReconcileRequest) =>
+  post<CCHeatReconcileResult>(`/stock-units/${unitId}/reconcile-heat`, body);
 
 // ------------------------------------------------------------------ OMS Work Order lookup (read only)
 // Thin typed wrapper over the existing GET /api/v1/work-orders (it returns a plain array, no total).

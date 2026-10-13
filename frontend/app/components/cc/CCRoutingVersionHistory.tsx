@@ -44,6 +44,13 @@ export function CCRoutingVersionHistory({ routings, renderActions }: {
             {kv("Kerf", <CCLengthCell mm={active.kerf_mm} />)}
             {kv("End trim (total)", <CCLengthCell mm={active.end_trim_mm} />)}
             {kv("Gross required length", <b><CCLengthCell mm={active.gross_required_length_mm} /></b>)}
+            {kv("Net blank weight", active.net_blank_weight_kg !== undefined && active.net_blank_weight_kg !== null ? <span className="font-mono">{active.net_blank_weight_kg.toFixed(2)} kg / blank</span> : "-")}
+            {kv("Gross material weight", active.gross_material_weight_kg !== undefined && active.gross_material_weight_kg !== null ? <span className="font-mono font-bold text-purple-600 dark:text-purple-400">{active.gross_material_weight_kg.toFixed(2)} kg</span> : "-")}
+            {kv("Stock status", active.stock_sufficiency_status ? (
+              <span className={`font-bold ${active.stock_sufficiency_status === "SUFFICIENT" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                {active.stock_sufficiency_status === "SUFFICIENT" ? "🟢 SUFFICIENT" : "🔴 SHORT"}
+              </span>
+            ) : "-")}
             {kv("Allocations", <span className="font-mono">{active.allocation_count}</span>)}
             {kv("Validated by / at", `${active.validated_by ?? "-"} / ${fmtDateTime(active.validated_at)}`)}
             {kv("Created by / at", `${active.created_by ?? "-"} / ${fmtDateTime(active.created_at)}`)}

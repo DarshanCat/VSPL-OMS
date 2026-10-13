@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part
-from app.models.master_data import POLine, POMaster, ScheduleMaster, ScheduleStatus
+from app.models.master_data import POLine, POMaster, ScheduleMaster, ScheduleStatus, POStatus
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.master_data import (
@@ -108,6 +108,11 @@ class POMatchingService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Schedule '{schedule.schedule_number}' is already '{schedule.po_status.value}' and cannot be matched again.")
 
         po = po_line.po
+        if po.status in (POStatus.CLOSED, POStatus.CANCELLED):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot match schedule to PO '{po.po_number}' because it is in '{po.status.value}' status.",
+            )
         if po.customer_id != schedule.customer_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PO and schedule belong to different customers -- cannot match.")
         if po_line.part_id != schedule.part_id:

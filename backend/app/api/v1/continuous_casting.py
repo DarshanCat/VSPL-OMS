@@ -29,7 +29,7 @@ from app.api.deps import get_current_user, require_roles
 from app.core.database import get_db
 from app.core.roles import (
     CC_ADJUSTMENT_ROLES, CC_CUT_ROLES, CC_HOLD_RELEASE_ROLES, CC_HOLD_ROLES, CC_INWARD_ROLES, CC_ISSUE_ROLES,
-    CC_MATERIAL_MASTER_ROLES, CC_QA_ROLES, CC_RESERVE_ROLES, CC_ROUTING_ROLES, CC_SCRAP_ROLES,
+    CC_MATERIAL_MASTER_ROLES, CC_QA_ROLES, CC_RESERVE_ROLES, CC_ROUTING_ROLES, CC_SCRAP_ROLES, CC_HEAT_RECONCILE_ROLES,
 )
 from app.models.user import User
 from app.schemas.continuous_casting import (
@@ -39,12 +39,13 @@ from app.schemas.continuous_casting import (
     CCMaterialPatch, CCMaterialResult, CCMaterialUpdate, CCReleaseCreate, CCReserveCreate, CCReturnCreate,
     CCRoutingCreate, CCRoutingReleaseBody, CCRoutingReleaseCreate, CCRoutingReleaseResult, CCRoutingResult,
     CCRoutingSupersede, CCScrapCreate, CCSplitCreate, CCSplitResult, CCStockMovementResult, CCUnitMovementResult,
+    CCHeatReconcileRequest, CCHeatReconcileResult,
 )
 from app.schemas.continuous_casting_read import (
     CCAllocationListResponse, CCCutAvailableListResponse, CCCutResultListResponse, CCCutResultOut, CCGateStatus,
     CCInwardDetail, CCInwardListResponse, CCLedgerListResponse, CCMaterialListResponse,
     CCMaterialStockSummaryResponse, CCRoutingDetail, CCRoutingListResponse, CCStockUnitDetail,
-    CCStockUnitListResponse, CCTraceInward, CCTraceWorkOrder,
+    CCStockUnitListResponse, CCTraceInward, CCTraceWorkOrder, CCTraceHeat,
 )
 from app.services.continuous_casting_cut_service import ContinuousCastingCutService
 from app.services.continuous_casting_material_service import ContinuousCastingMaterialService
@@ -110,6 +111,16 @@ def decide_inward_qa(
 ):
     request = CCInwardQADecisionCreate(inward_id=inward_id, **payload.model_dump())
     return ContinuousCastingQAService.decide(db, request, current_user=user)
+
+
+@router.post("/inwards/{inward_id}/reconcile-heat", response_model=CCHeatReconcileResult)
+def reconcile_inward_heat(
+    inward_id: uuid.UUID,
+    payload: CCHeatReconcileRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*CC_HEAT_RECONCILE_ROLES)),
+):
+    return ContinuousCastingPhysicalService.reconcile_inward_heat(db, inward_id, payload, current_user=user)
 
 
 # ------------------------------------------------------------------ routing and allocation
@@ -252,6 +263,16 @@ def adjust_in(
     return ContinuousCastingPhysicalService.adjust_in(db, payload, current_user=user)
 
 
+@router.post("/stock-units/{unit_id}/reconcile-heat", response_model=CCHeatReconcileResult)
+def reconcile_stock_unit_heat(
+    unit_id: uuid.UUID,
+    payload: CCHeatReconcileRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*CC_HEAT_RECONCILE_ROLES)),
+):
+    return ContinuousCastingPhysicalService.reconcile_stock_unit_heat(db, unit_id, payload, current_user=user)
+
+
 # ------------------------------------------------------------------ cut result
 @router.post("/cut-results", response_model=CCCutResultResult)
 def record_cut_result(
@@ -290,6 +311,7 @@ def list_materials(
 @router.get("/inwards", response_model=CCInwardListResponse)
 def list_inwards(
     inward_number: Optional[str] = Query(None, max_length=100),
+    heat_number: Optional[str] = Query(None, max_length=100),
     material_id: Optional[uuid.UUID] = Query(None),
     qa_status: Optional[Literal["PENDING_QA", "ACCEPTED", "REJECTED", "ON_HOLD"]] = Query(None),
     location: Optional[str] = Query(None, max_length=100),
@@ -302,9 +324,9 @@ def list_inwards(
     user: User = Depends(get_current_user),
 ):
     return ContinuousCastingReadService.list_inwards(
-        db, inward_number=inward_number, material_id=material_id, qa_status=qa_status, location=location,
-        received_from=received_from, received_to=received_to, has_free_stock=has_free_stock, limit=limit,
-        offset=offset)
+        db, inward_number=inward_number, heat_number=heat_number, material_id=material_id,
+        qa_status=qa_status, location=location, received_from=received_from, received_to=received_to,
+        has_free_stock=has_free_stock, limit=limit, offset=offset)
 
 
 @router.get("/inwards/{inward_id}", response_model=CCInwardDetail)
@@ -337,6 +359,7 @@ def list_material_stock_summary(
 def list_stock_units(
     inward_id: Optional[uuid.UUID] = Query(None),
     material_id: Optional[uuid.UUID] = Query(None),
+    heat_number: Optional[str] = Query(None, max_length=100),
     status: Optional[Literal["IN_STOCK", "ON_HOLD", "CONSUMED", "SCRAPPED"]] = Query(None),
     location: Optional[str] = Query(None, max_length=100),
     on_hold: Optional[bool] = Query(None),
@@ -348,8 +371,9 @@ def list_stock_units(
     user: User = Depends(get_current_user),
 ):
     return ContinuousCastingReadService.list_stock_units(
-        db, inward_id=inward_id, material_id=material_id, status_filter=status, location=location,
-        on_hold=on_hold, available=available, parent_unit_id=parent_unit_id, limit=limit, offset=offset)
+        db, inward_id=inward_id, material_id=material_id, heat_number=heat_number, status_filter=status,
+        location=location, on_hold=on_hold, available=available, parent_unit_id=parent_unit_id,
+        limit=limit, offset=offset)
 
 
 @router.get("/stock-units/{unit_id}", response_model=CCStockUnitDetail)
@@ -428,6 +452,7 @@ def list_cut_results(
     routing_id: Optional[uuid.UUID] = Query(None),
     allocation_id: Optional[uuid.UUID] = Query(None),
     stock_unit_id: Optional[uuid.UUID] = Query(None),
+    heat_number: Optional[str] = Query(None, max_length=100),
     ledger_transaction_number: Optional[str] = Query(None, max_length=100),
     reconciliation_status: Optional[Literal["PENDING", "RECONCILED", "VARIANCE"]] = Query(None),
     limit: int = Query(50, ge=1, le=500),
@@ -437,8 +462,8 @@ def list_cut_results(
 ):
     return ContinuousCastingReadService.list_cut_results(
         db, wo_number=wo_number, routing_id=routing_id, allocation_id=allocation_id, stock_unit_id=stock_unit_id,
-        ledger_transaction_number=ledger_transaction_number, reconciliation_status=reconciliation_status,
-        limit=limit, offset=offset)
+        heat_number=heat_number, ledger_transaction_number=ledger_transaction_number,
+        reconciliation_status=reconciliation_status, limit=limit, offset=offset)
 
 
 # declared BEFORE /cut-results/{cut_result_id}, so "available" is never read as an id
@@ -480,6 +505,15 @@ def trace_work_order(
     user: User = Depends(get_current_user),
 ):
     return ContinuousCastingReadService.trace_work_order(db, wo_number)
+
+
+@router.get("/traceability/heats/{heat_number}", response_model=CCTraceHeat)
+def trace_heat(
+    heat_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return ContinuousCastingReadService.trace_heat(db, heat_number)
 
 
 @router.get("/work-orders/{wo_number}/gate-status", response_model=CCGateStatus)

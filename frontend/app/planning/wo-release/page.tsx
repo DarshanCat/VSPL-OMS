@@ -1,6 +1,7 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Factory,
   Search,
@@ -10,10 +11,22 @@ import {
   Route,
   Check,
   ClipboardCheck,
-  Wrench
+  Wrench,
+  X,
+  RefreshCw,
+  Layers,
+  Boxes,
+  FileText
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { getWorkOrders, releaseWorkOrder, engineeringReleaseWorkOrder, manufacturingReleaseWorkOrder } from "@/lib/api";
+import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
+import {
+  getWorkOrders,
+  releaseWorkOrder,
+  engineeringReleaseWorkOrder,
+  manufacturingReleaseWorkOrder,
+  WorkOrderListItem
+} from "@/lib/api";
 
 const ALL_POSSIBLE_STAGES = [
   { code: "F1", name: "F1 (Centrifugal Casting / Melt)", required: true },
@@ -26,9 +39,34 @@ const ALL_POSSIBLE_STAGES = [
 ];
 
 export default function WOReleasePage() {
-  const [wos, setWos] = useState<any[]>([]);
-  const [selectedWO, setSelectedWO] = useState<string>("WO-1002");
-  const [physicalQty, setPhysicalQty] = useState<number | "">(500);
+  return (
+    <Suspense
+      fallback={
+        <AppShell>
+          <div className="max-w-3xl mx-auto py-12 text-center text-xs text-zinc-500 font-mono">
+            Loading Work Order Release...
+          </div>
+        </AppShell>
+      }
+    >
+      <WOReleasePageInner />
+    </Suspense>
+  );
+}
+
+function WOReleasePageInner() {
+  const searchParams = useSearchParams();
+  const urlWo = searchParams.get("wo") || "";
+
+  const [wos, setWos] = useState<WorkOrderListItem[]>([]);
+  const [selectedWO, setSelectedWO] = useState<string>(urlWo);
+  const [selectedWODetail, setSelectedWODetail] = useState<WorkOrderListItem | null>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState<string>(urlWo);
+  const [searching, setSearching] = useState<boolean>(false);
+
+  const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
   const [selectedStages, setSelectedStages] = useState<string[]>([
     "F1",
@@ -44,7 +82,7 @@ export default function WOReleasePage() {
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
 
-  // Release chain: Engineering Release -> Manufacturing Release -> WO Release (below).
+  // Release chain: Engineering Release -> Manufacturing Release -> WO Release
   const [chainBusy, setChainBusy] = useState<"engineering" | "manufacturing" | null>(null);
   const [chainError, setChainError] = useState("");
   const [chainResult, setChainResult] = useState<{ engineering?: any; manufacturing?: any }>({});
@@ -54,6 +92,120 @@ export default function WOReleasePage() {
   const [docUrl, setDocUrl] = useState("");
   const [docRevision, setDocRevision] = useState("");
   const [releaseRemarks, setReleaseRemarks] = useState("");
+
+  const applyWO = useCallback((found: WorkOrderListItem) => {
+    setSelectedWO(found.wo_number);
+    setSelectedWODetail(found);
+    setPhysicalQty(found.physical_wo_qty);
+    setChainResult({});
+    setChainError("");
+    setError("");
+
+    if (found.casting_process === "CONTINUOUS") {
+      setCastingProcess("CONTINUOUS");
+      setSelectedStages((prev) => prev.filter((s) => s !== "F1"));
+    } else {
+      setCastingProcess("CENTRIFUGAL");
+      setSelectedStages((prev) => (prev.includes("F1") ? prev : ["F1", ...prev.filter((s) => s !== "F1")]));
+    }
+  }, []);
+
+  const handleSearch = useCallback(
+    async (term: string) => {
+      setSearching(true);
+      setError("");
+      try {
+        const queryTerm = term.trim();
+        const data = await getWorkOrders({
+          search: queryTerm || undefined,
+          limit: 100,
+        });
+        const list = Array.isArray(data) ? data : [];
+        setWos(list);
+
+        if (queryTerm) {
+          // Check for exact WO match
+          const exact = list.find((w) => w.wo_number.toUpperCase() === queryTerm.toUpperCase());
+          if (exact) {
+            applyWO(exact);
+          } else if (list.length > 0 && !list.some((w) => w.wo_number === selectedWO)) {
+            applyWO(list[0]);
+          }
+        }
+      } catch (err: any) {
+        setError("Failed to search Work Orders.");
+      } finally {
+        setSearching(false);
+      }
+    },
+    [applyWO, selectedWO]
+  );
+
+  useEffect(() => {
+    // If a specific WO was passed in the URL, search specifically for it first
+    if (urlWo) {
+      setSearching(true);
+      getWorkOrders({ search: urlWo.trim(), limit: 50 })
+        .then((data) => {
+          const list = Array.isArray(data) ? data : [];
+          const found = list.find((w) => w.wo_number.toUpperCase() === urlWo.trim().toUpperCase()) || list[0];
+          if (found) {
+            setWos(list);
+            applyWO(found);
+          } else {
+            // Fallback load default list
+            getWorkOrders({ limit: 100 }).then((fallbackData) => {
+              const fList = Array.isArray(fallbackData) ? fallbackData : [];
+              setWos(fList);
+              if (fList.length > 0) applyWO(fList[0]);
+            });
+          }
+        })
+        .catch(() => {
+          setError("Failed to load requested Work Order.");
+        })
+        .finally(() => {
+          setSearching(false);
+        });
+    } else {
+      // General load
+      setSearching(true);
+      getWorkOrders({ limit: 100 })
+        .then((data) => {
+          const list = Array.isArray(data) ? data : [];
+          setWos(list);
+          if (list.length > 0) {
+            const candidate = list.find((w) => w.status === "planned" || w.status === "in_production") || list[0];
+            applyWO(candidate);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          setSearching(false);
+        });
+    }
+  }, [urlWo, applyWO]);
+
+  const handleWOSelect = (woNum: string) => {
+    const found = wos.find((w) => w.wo_number === woNum);
+    if (found) {
+      applyWO(found);
+    } else {
+      setSelectedWO(woNum);
+    }
+  };
+
+  const toggleStage = (stgCode: string) => {
+    if (stgCode === "DISPATCH") return; // Dispatch is always terminal
+    if (stgCode === "F1" && castingProcess === "CONTINUOUS") return; // F1 is bypassed for Continuous Casting
+    if (selectedStages.includes(stgCode)) {
+      setSelectedStages(selectedStages.filter((s) => s !== stgCode));
+    } else {
+      const order = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"];
+      const newStages = [...selectedStages, stgCode].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      setSelectedStages(newStages);
+    }
+  };
 
   const handleEngineeringRelease = async () => {
     setChainError("");
@@ -101,46 +253,15 @@ export default function WOReleasePage() {
     }
   };
 
-  useEffect(() => {
-    getWorkOrders()
-      .then((data) => {
-        setWos(data);
-        if (data.length > 0) {
-          const candidate = data.find((w: any) => w.status === "planned" || w.status === "in_production") || data[0];
-          setSelectedWO(candidate.wo_number);
-          setPhysicalQty(candidate.physical_wo_qty);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleWOSelect = (woNum: string) => {
-    setSelectedWO(woNum);
-    setChainResult({});
-    setChainError("");
-    const found = wos.find((w) => w.wo_number === woNum);
-    if (found) {
-      setPhysicalQty(found.physical_wo_qty);
-    }
-  };
-
-  const toggleStage = (stgCode: string) => {
-    if (stgCode === "DISPATCH") return; // Dispatch is always terminal
-    if (stgCode === "F1" && castingProcess === "CONTINUOUS") return; // F1 is bypassed for Continuous Casting
-    if (selectedStages.includes(stgCode)) {
-      setSelectedStages(selectedStages.filter((s) => s !== stgCode));
-    } else {
-      // Keep in canonical order
-      const order = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"];
-      const newStages = [...selectedStages, stgCode].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-      setSelectedStages(newStages);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccessResult(null);
+
+    if (!selectedWO) {
+      setError("Please select a Work Order to release.");
+      return;
+    }
 
     const qty = Number(physicalQty);
     if (qty <= 0) {
@@ -184,24 +305,29 @@ export default function WOReleasePage() {
         <div>
           <div className="flex items-center gap-2">
             <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-              Planning & WO Release
+              Planning &amp; WO Release
             </span>
             <span className="text-xs text-zinc-400">Dynamic Stage Routing</span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-            Work Order Release & Custom Routing
+            Work Order Release &amp; Custom Routing
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Planner declares physical released quantity and sets custom stage routing (skipping non-applicable gates).
           </p>
         </div>
 
+        {/* Global Error Banner */}
         {error && (
-          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-500 font-semibold">
-            {error}
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-500 font-semibold flex items-center justify-between">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError("")} className="text-rose-400 hover:text-rose-600">
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
 
+        {/* Success Banner */}
         {successResult && (
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 space-y-3">
             <div className="flex items-center gap-3">
@@ -248,10 +374,138 @@ export default function WOReleasePage() {
           </div>
         )}
 
+        {/* WO Live Search & Lookup Bar */}
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm space-y-2">
+          <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
+            <span>Find &amp; Select Work Order</span>
+            {searching && (
+              <span className="flex items-center gap-1 text-[11px] text-blue-600 font-normal">
+                <RefreshCw className="h-3 w-3 animate-spin" /> Searching...
+              </span>
+            )}
+          </label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSearch(searchQuery);
+                  }
+                }}
+                placeholder="Search WO ID (e.g. WO-17608), Part #, Customer, or PO..."
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-3 py-2 text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSearch(searchQuery)}
+              disabled={searching}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Search
+            </button>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  handleSearch("");
+                }}
+                className="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                title="Reset search"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="text-[11px] text-zinc-400 flex items-center justify-between">
+            <span>
+              {wos.length} Work Order{wos.length === 1 ? "" : "s"} available
+            </span>
+            {urlWo && (
+              <span className="text-purple-600 font-semibold font-mono">
+                Linked from OAR List: {urlWo}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Active Work Order Context Card */}
+        {selectedWODetail && (
+          <div className="rounded-2xl border border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20 p-4 shadow-sm space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/40 dark:border-blue-800/40 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-base font-extrabold text-blue-700 dark:text-blue-300">
+                  {selectedWODetail.wo_number}
+                </span>
+                <Badge variant={getRAGVariant(selectedWODetail.status)} size="sm">
+                  {selectedWODetail.status.replace(/_/g, " ").toUpperCase()}
+                </Badge>
+                {selectedWODetail.current_stage && (
+                  <span className="rounded bg-blue-100 dark:bg-blue-900/60 px-2 py-0.5 text-[10px] font-bold text-blue-800 dark:text-blue-200 font-mono">
+                    Stage: {selectedWODetail.current_stage}
+                  </span>
+                )}
+              </div>
+              <Link
+                href={`/production/tracking?wo=${encodeURIComponent(selectedWODetail.wo_number)}`}
+                className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                <span>Floor Tracking</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+              <div>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Customer</span>
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100 truncate block">
+                  {selectedWODetail.customer_name}
+                </span>
+                <span className="text-[10px] text-zinc-400 font-mono">{selectedWODetail.customer_code}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Part Number</span>
+                <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                  {selectedWODetail.part_number}
+                </span>
+                {selectedWODetail.part_name && (
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate block">
+                    {selectedWODetail.part_name}
+                  </span>
+                )}
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold block">OAR &amp; PO</span>
+                <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200 block">
+                  {selectedWODetail.oar_number || "—"}
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  PO: {selectedWODetail.customer_po || "—"}
+                </span>
+              </div>
+              <div>
+                <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Quantities</span>
+                <span className="font-mono font-bold text-emerald-600 block">
+                  WO: {selectedWODetail.physical_wo_qty} pcs
+                </span>
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  Order: {selectedWODetail.order_qty} pcs
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Release chain: Engineering Release -> Manufacturing Release -> WO Release */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-3">
           <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-            Release Chain for <span className="font-mono">{selectedWO}</span>
+            Release Chain for <span className="font-mono">{selectedWO || "..."}</span>
           </h3>
           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
             Engineering Release &rarr; Manufacturing Release &rarr; WO Release (below) &rarr; Production. Each step is optional for WOs that don&apos;t use this gated flow, but once started, all three are required before production.
@@ -262,37 +516,38 @@ export default function WOReleasePage() {
               <span>{chainError}</span>
             </div>
           )}
-          {/* Document Evidence inputs */}
-          <div className="rounded-xl border border-zinc-100 dark:border-zinc-800/80 bg-zinc-50 dark:bg-zinc-800/40 p-3 space-y-2.5">
-            <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-              Release Document Evidence (Optional / Gated Releases)
-            </h4>
+
+          {/* Release Evidence inputs */}
+          <div className="rounded-xl border border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-950/40 p-3 space-y-2">
+            <div className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+              Release Evidence (optional document attachment for audit trail)
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document Name</label>
                 <input
                   type="text"
-                  placeholder="e.g. Drawing / Tech Spec"
+                  placeholder="e.g., Drawing / Spec"
                   value={docName}
                   onChange={(e) => setDocName(e.target.value)}
                   className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
                 />
               </div>
               <div>
-                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document URL (HTTPS only)</label>
+                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document URL (https://)</label>
                 <input
                   type="url"
                   placeholder="https://..."
                   value={docUrl}
                   onChange={(e) => setDocUrl(e.target.value)}
-                  className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-mono text-[11px]"
+                  className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
                 />
               </div>
               <div>
-                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Document Revision</label>
+                <label className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">Revision</label>
                 <input
                   type="text"
-                  placeholder="e.g. Rev C"
+                  placeholder="e.g., Rev C"
                   value={docRevision}
                   onChange={(e) => setDocRevision(e.target.value)}
                   className="w-full mt-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-blue-500"
@@ -328,7 +583,7 @@ export default function WOReleasePage() {
             <button
               type="button"
               onClick={handleEngineeringRelease}
-              disabled={chainBusy !== null || !!chainResult.engineering}
+              disabled={chainBusy !== null || !!chainResult.engineering || !selectedWO}
               className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
             >
               <ClipboardCheck className="h-3.5 w-3.5" />
@@ -337,7 +592,7 @@ export default function WOReleasePage() {
             <button
               type="button"
               onClick={handleManufacturingRelease}
-              disabled={chainBusy !== null || !!chainResult.manufacturing}
+              disabled={chainBusy !== null || !!chainResult.manufacturing || !selectedWO}
               className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-purple-500 disabled:opacity-50 transition-colors"
             >
               <Wrench className="h-3.5 w-3.5" />
@@ -346,24 +601,30 @@ export default function WOReleasePage() {
           </div>
         </div>
 
-        {/* Form */}
+        {/* Release & Route Declaration Form */}
         <form
           onSubmit={handleSubmit}
           className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-5"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Select Work Order</label>
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                Target Work Order *
+              </label>
               <select
                 value={selectedWO}
                 onChange={(e) => handleWOSelect(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
               >
-                {wos.map((w) => (
-                  <option key={w.wo_number} value={w.wo_number}>
-                    {w.wo_number} — {w.part_number} ({w.customer_code})
-                  </option>
-                ))}
+                {wos.length === 0 ? (
+                  <option value="">{searching ? "Searching..." : "No Work Orders found"}</option>
+                ) : (
+                  wos.map((w) => (
+                    <option key={w.wo_number} value={w.wo_number}>
+                      {w.wo_number} — {w.part_number} ({w.customer_code || w.customer_name}) [{w.physical_wo_qty} pcs]
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -530,11 +791,11 @@ export default function WOReleasePage() {
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !physicalQty || selectedStages.length === 0}
+              disabled={loading || !physicalQty || selectedStages.length === 0 || !selectedWO}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 disabled:opacity-50 transition-colors cursor-pointer"
             >
               <Factory className="h-4 w-4" />
-              <span>{loading ? "Releasing to Floor..." : `Release Work Order ${selectedWO}`}</span>
+              <span>{loading ? "Releasing to Floor..." : `Release Work Order ${selectedWO || ""}`}</span>
             </button>
           </div>
         </form>

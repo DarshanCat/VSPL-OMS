@@ -272,6 +272,50 @@ def test_4_release_wo_without_f1(client, db_session):
     assert db_wo.current_stage == "F2"
 
 
+def test_4b_re_releasing_without_f1_or_casting_process_preserves_continuous(client, db_session):
+    """TEST 4b: A WO already released as CONTINUOUS, re-released on a non-F1 route with no
+    casting_process supplied (e.g. a quantity or route correction), must KEEP casting_process
+    == 'CONTINUOUS' -- not have it silently cleared to None. Regression test for the bug where
+    the non-F1 branch unconditionally wrote `wo.casting_process = casting_proc` even when
+    casting_proc was None, wiping out an already-CONTINUOUS WO and causing every subsequent
+    Continuous Casting routing attempt on it to be rejected by the eligibility gate."""
+    customer, part, order, wo, planner, _, _ = _seed_base_data(db_session)
+
+    first = client.post(
+        "/api/v1/operations/wo-release",
+        headers=_auth_headers(planner),
+        json={
+            "wo_number": "WO-9001",
+            "physical_wo_qty": 100,
+            "route_stages": ["F1", "F2", "F3", "FI", "PACKING", "DISPATCH"],
+            "casting_process": "CONTINUOUS",
+        },
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["casting_process"] == "CONTINUOUS"
+
+    # Correction: same WO, a different quantity, no F1, and casting_process omitted entirely --
+    # exactly the shape a route/quantity correction would take once the process is already set.
+    second = client.post(
+        "/api/v1/operations/wo-release",
+        headers=_auth_headers(planner),
+        json={
+            "wo_number": "WO-9001",
+            "physical_wo_qty": 75,
+            "route_stages": ["F2", "F3", "FI", "PACKING", "DISPATCH"],
+        },
+    )
+    assert second.status_code == 200, second.text
+    data = second.json()
+    assert data["success"] is True
+    assert data["casting_process"] == "CONTINUOUS"
+
+    db_wo = db_session.query(WorkOrder).filter(WorkOrder.wo_number == "WO-9001").first()
+    assert db_wo.casting_process == "CONTINUOUS"
+    assert db_wo.physical_wo_qty == 75
+    assert db_wo.current_stage == "F2"
+
+
 # ==============================================================================
 # CONTINUOUS CASTING EXECUTION GATE TESTS
 # ==============================================================================

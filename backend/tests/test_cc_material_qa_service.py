@@ -48,6 +48,7 @@ def update(db, material_id, user=None, **fields):
 
 
 def receive(db, material_id, lengths=(1000,), **over):
+    over.setdefault("heat_number", "HT-TEST-001")
     return InwardSvc.create_inward(db, CCInwardCreate(material_id=material_id, unit_lengths_mm=list(lengths), **over),
                                    _user(db, UserRole.STORE))
 

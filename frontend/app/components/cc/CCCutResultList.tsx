@@ -14,6 +14,16 @@ const PAGE_SIZE = 25;
 export function ccCutResultColumns(extended = false): CCColumn<CCCutResultOut>[] {
   return [
     { header: "Cut number", render: (r) => <b><CCTxnNumber value={r.cut_number} /></b> },
+    {
+      header: "Heat no.",
+      render: (r) => r.heat_number ? (
+        <span className="font-mono text-xs font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+          {r.heat_number}
+        </span>
+      ) : (
+        <span className="text-amber-500 font-mono text-[11px] italic">UNRECONCILED</span>
+      ),
+    },
     { header: "CUT_CONSUME transaction", render: (r) => <CCTxnNumber value={r.ledger_transaction_number} /> },
     { header: "Recorded", render: (r) => <span>{fmtDateTime(r.created_at)}<br /><span className="text-zinc-400">{r.performed_by ?? ""}</span></span> },
     { header: "Routing", render: (r) => <span><span className="font-mono">v{r.routing_version}</span> <CCStatusBadge status={r.routing_status} /></span> },

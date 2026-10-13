@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part, OrderStatus
-from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus
+from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus, POStatus
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
 from app.models.conversion import Conversion
@@ -104,6 +104,11 @@ class OperationsService:
             po_line = db.query(POLine).filter(POLine.id == req.po_line_id).with_for_update().first()
             if not po_line:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PO line '{req.po_line_id}' not found.")
+            if po_line.po.status in (POStatus.CLOSED, POStatus.CANCELLED):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot raise OAR against PO '{po_line.po.po_number}' because it is in '{po_line.po.status.value}' status.",
+                )
             allocated = sum(o.po_qty for o in po_line.orders)
             available = max(po_line.po_qty - allocated, 0)
             if req.po_quantity > available:
@@ -408,7 +413,11 @@ class OperationsService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid casting process '{req.casting_process}'. Must be 'CENTRIFUGAL' (Centrifugal Casting / Melt) or 'CONTINUOUS' (Continuous Casting)."
                 )
-            wo.casting_process = casting_proc
+            if casting_proc:
+                wo.casting_process = casting_proc
+            # else: no process was specified for this non-F1 release -- preserve whatever
+            # casting_process the WO already had (None, CENTRIFUGAL, or CONTINUOUS) rather
+            # than silently clearing it as a side effect of an unrelated route/qty correction.
 
 
         # Continuous Casting bypasses F1; it enters production at the first downstream stage (normally F2).

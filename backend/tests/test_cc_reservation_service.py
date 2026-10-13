@@ -83,7 +83,10 @@ def _user(db, role):
     return u
 
 
-def make_wo(db, number, status=WOStatus.IN_PRODUCTION):
+def make_wo(db, number, status=WOStatus.IN_PRODUCTION, casting_process="CONTINUOUS"):
+    """casting_process defaults to 'CONTINUOUS' -- the authoritative route-eligibility signal
+    (WorkOrder.casting_process, set at WO release) that create_routing()/supersede_routing() now
+    enforce -- since every Work Order built here goes on to take a real Continuous Casting routing."""
     cust = Customer(customer_code=f"C-{number}", name="Cust")
     part = Part(part_number=f"P-{number}", description="p")
     db.add_all([cust, part])
@@ -93,7 +96,7 @@ def make_wo(db, number, status=WOStatus.IN_PRODUCTION):
     db.add(order)
     db.flush()
     wo = WorkOrder(wo_number=number, order_id=order.id, physical_wo_qty=10, current_stage="F1",
-                   projected_final_good=10, status=status)
+                   projected_final_good=10, status=status, casting_process=casting_process)
     db.add(wo)
     db.flush()
     for seq, stage in enumerate(["F1", "F2", "DISPATCH"], start=1):
@@ -121,7 +124,7 @@ def routing_fields(mat, wo="WO-1001", **kw):
 
 def accepted_units(db, mat, lengths, accept=True):
     store = _user(db, UserRole.STORE)
-    r = InwardSvc.create_inward(db, CCInwardCreate(material_id=mat.id, unit_lengths_mm=lengths), store)
+    r = InwardSvc.create_inward(db, CCInwardCreate(material_id=mat.id, unit_lengths_mm=lengths, heat_number="HT-TEST-001"), store)
     inward = db.query(Inward).filter_by(inward_number=r.inward_number).one()
     if accept:
         inward.qa_status = "ACCEPTED"

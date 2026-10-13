@@ -22,6 +22,7 @@ from app.services.continuous_casting_gate_service import ContinuousCastingGateSe
 from test_cc_api_router import api, test_db, ok, ROUTING, PREFIX, _reset_rate_limiter  # noqa: F401
 from test_cc_reservation_service import make_wo
 from test_cc_phase10_gate import build, reconciled, produce, do_cut, record, PER_BLANK
+from test_cc_reservation_service import _material, accepted_units, new_routing, allocate
 
 Unit, Inward, Alloc, Routing, Ledger, Cut = (cc.ContinuousCastingStockUnit, cc.ContinuousCastingInward,
                                              cc.ContinuousCastingAllocation, cc.ContinuousCastingRouting,
@@ -86,10 +87,10 @@ def rich_world(api):
     ok(api.post("/materials", UserRole.ENGINEERING,                          # a second, unreferenced material
                 dict(material_code="CC-R2", grade="SG450", section="ROUND", stock_dimension_a_mm=250)))
     i1 = ok(api.post("/inwards", UserRole.STORE, dict(material_id=mid, unit_lengths_mm=[1000, 800, 600],
-                                                      location="RACK-A", grn_reference="GRN-1")))
+                                                      location="RACK-A", grn_reference="GRN-1", heat_number="HT-R1-01")))
     i2 = ok(api.post("/inwards", UserRole.STORE, dict(material_id=mid, unit_lengths_mm=[900], location="RACK-B",
-                                                      grn_reference="GRN-2")))
-    i3 = ok(api.post("/inwards", UserRole.STORE, dict(material_id=mid, unit_lengths_mm=[500], location="RACK-C")))
+                                                      grn_reference="GRN-2", heat_number="HT-R1-02")))
+    i3 = ok(api.post("/inwards", UserRole.STORE, dict(material_id=mid, unit_lengths_mm=[500], location="RACK-C", heat_number="HT-R1-03")))
     ok(api.post(f"/inwards/{i1['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED", reason="mill cert")))
     ok(api.post(f"/inwards/{i2['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED")))
     make_wo(db, "WO-1001")
@@ -289,7 +290,7 @@ def test_inward_list_aggregates_and_filters(api, world):
 
 def test_an_inward_with_no_free_stock_is_filtered_by_has_free_stock(api):
     m = ok(api.post("/materials", UserRole.ENGINEERING, dict(material_code="X", grade="G", section="S", stock_dimension_a_mm=5)))
-    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[300])))
+    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[300], heat_number="HT-X1")))
     ok(api.post(f"/inwards/{inw['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED")))
     unit = api.db.query(Unit).one()
     ok(api.post("/scrap", UserRole.STORE, dict(stock_unit_id=str(unit.id), inward_id=inw["inward_id"], length_mm=300,
@@ -357,7 +358,7 @@ def test_available_means_exactly_the_allocation_eligibility_conditions(api, worl
 
 def test_stock_unit_with_no_free_length_is_not_available(api):
     m = ok(api.post("/materials", UserRole.ENGINEERING, dict(material_code="Y", grade="G", section="S", stock_dimension_a_mm=5)))
-    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[300])))
+    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[300], heat_number="HT-Y1")))
     ok(api.post(f"/inwards/{inw['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED")))
     unit = api.db.query(Unit).one()
     assert page(api, "/stock-units", {"available": "true"})["total"] == 1
@@ -672,7 +673,17 @@ def test_gate_status_capacity_boundary_matches_real_production(api):
 
 
 def test_gate_status_when_f1_is_still_the_first_route_stage(api):
-    ctx = build(api.db, "WO-G5", route=("F1", "F2", "DISPATCH"))
+    """Same data-inconsistency scenario as the enforcement-side test in test_cc_phase10_gate.py: a
+    Continuous Casting WO whose released WORoute was never corrected to drop F1. This cannot arise
+    through a normal release call for a WO that starts out CONTINUOUS (release_work_order always
+    strips F1 for it) -- released as CENTRIFUGAL instead (keeping F1 as a real stage) and flipped to
+    CONTINUOUS directly, simulating a stale/legacy record."""
+    ctx = build(api.db, "WO-G5", route=("F1", "F2", "DISPATCH"), with_routing=False)
+    ctx["wo"].casting_process = "CONTINUOUS"
+    api.db.commit()
+    (unit,) = accepted_units(api.db, ctx["mat"], [2000])
+    rid = new_routing(api.db, ctx["mat"], "WO-G5")
+    ctx.update(unit=unit, rid=rid, alloc=allocate(api.db, rid, unit, 1070))
     reconciled(ctx, 4)
     s = pin(api, "WO-G5")
     assert (s["verdict"], s["gate_applies"], s["first_stage_valid"], s["first_route_stage"]) == (
@@ -681,12 +692,15 @@ def test_gate_status_when_f1_is_still_the_first_route_stage(api):
 
 
 @pytest.mark.parametrize("status", ["SUPERSEDED", "DRAFT"])
-def test_gate_status_ignores_a_non_active_routing(api, status):
+def test_gate_status_blocks_on_a_non_active_routing(api, status):
+    """A SUPERSEDED or DRAFT routing does not satisfy the active-routing requirement; the read-only
+    status endpoint must report BLOCKED_NO_ACTIVE_ROUTING, matching the real gate's own enforcement
+    (see ContinuousCastingGateService.enforce_first_stage_production, check 2)."""
     ctx = build(api.db, "WO-G6")
     api.db.query(Routing).one().status = status
     api.db.commit()
     s = pin(api, "WO-G6")
-    assert s["verdict"] == "NOT_GATED" and s["gate_applies"] is False
+    assert s["verdict"] == "BLOCKED_NO_ACTIVE_ROUTING" and s["gate_applies"] is True
 
 
 def test_gate_status_is_read_only_and_404s_for_unknown_work_orders(api, spy):
@@ -702,7 +716,7 @@ def populate(api, inwards):
     m = ok(api.post("/materials", UserRole.ENGINEERING, dict(material_code="PERF", grade="G", section="S", stock_dimension_a_mm=9)))
     for k in range(inwards):
         inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[500, 400],
-                                                           location=f"R{k}")))
+                                                           location=f"R{k}", heat_number=f"HT-PERF-{k}")))
         ok(api.post(f"/inwards/{inw['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED")))
 
 

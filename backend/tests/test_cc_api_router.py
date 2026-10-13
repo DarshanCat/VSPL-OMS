@@ -43,6 +43,8 @@ ENDPOINTS = [
     ("GET", "/materials/{id}", None),
     ("POST", "/inwards", R.CC_INWARD_ROLES),
     ("POST", "/inwards/{id}/qa", R.CC_QA_ROLES),
+    ("POST", "/inwards/{id}/reconcile-heat", R.CC_HEAT_RECONCILE_ROLES),
+    ("POST", "/stock-units/{id}/reconcile-heat", R.CC_HEAT_RECONCILE_ROLES),
     ("POST", "/routings", R.CC_ROUTING_ROLES),
     ("POST", "/routings/supersede", R.CC_ROUTING_ROLES),
     ("POST", "/allocations", R.CC_RESERVE_ROLES),
@@ -66,6 +68,7 @@ READ_ENDPOINTS_11C = [
     "/materials", "/stock-summary", "/inwards", "/inwards/{inward_id}", "/stock-units", "/stock-units/{unit_id}", "/routings",
     "/routings/{routing_id}", "/allocations", "/ledger", "/cut-results", "/cut-results/available",
     "/cut-results/{cut_result_id}", "/traceability/inwards/{inward_id}", "/traceability/work-orders/{wo_number}",
+    "/traceability/heats/{heat_number}",
     "/work-orders/{wo_number}/gate-status",
 ]
 
@@ -165,7 +168,7 @@ def build_world(api):
     db = api.db
     m = ok(api.post("/materials", UserRole.ENGINEERING,
                     dict(material_code="CC-API-1", grade="SG450", section="ROUND", stock_dimension_a_mm=200)))
-    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[1000, 800])))
+    inw = ok(api.post("/inwards", UserRole.STORE, dict(material_id=m["material_id"], unit_lengths_mm=[1000, 800], heat_number="HT-ROUTER-01")))
     ok(api.post(f"/inwards/{inw['inward_id']}/qa", UserRole.QA, dict(decision="ACCEPTED")))
     make_wo(db, "WO-1001")
     routing = ok(api.post("/routings", UserRole.ENGINEERING,
@@ -188,11 +191,11 @@ def test_all_endpoints_are_registered_under_one_prefix():
     paths = app.openapi()["paths"]
     found = sorted((p, m.upper()) for p, v in paths.items() if p.startswith(PREFIX) for m in v)
     expected = sorted((PREFIX + path.replace("{id}", "{" + (
-        "material_id" if "/materials/" in path else "inward_id" if "/inwards/" in path else "routing_id") + "}"),
+        "material_id" if "/materials/" in path else "inward_id" if "/inwards/" in path else "unit_id" if "/stock-units/" in path else "routing_id") + "}"),
         method) for method, path, _r in ENDPOINTS)
-    assert len(expected) == 21                                       # the Phase 11B operations, unchanged
+    assert len(expected) == 23                                       # the Phase 11B operations + Phase 3 reconcile
     expected = sorted(expected + [(PREFIX + path, "GET") for path in READ_ENDPOINTS_11C])
-    assert found == expected and len(found) == 37
+    assert found == expected and len(found) == 40
 
 
 def test_the_router_contains_no_business_logic_and_never_touches_the_database():
@@ -212,7 +215,7 @@ def test_the_router_contains_no_business_logic_and_never_touches_the_database():
     assert not any(m and m.startswith("app.models") and m != "app.models.user" for m in modules)
     assert "fastapi.exceptions" not in modules
     handlers = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    assert len(handlers) == 37                   # 21 write handlers (Phase 11B) + 16 read handlers (Phase 11C/Stock Summary)
+    assert len(handlers) == 40                   # 23 write handlers + 17 read handlers
     for fn in handlers:                          # a handler is: (optionally) build the request, then return ONE service call
         statements = [s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
         assert isinstance(statements[-1], ast.Return), fn.name
@@ -449,8 +452,8 @@ def test_every_write_endpoint_is_covered_by_the_flow():
     covered = {"/materials", "/materials/{id}", "/inwards", "/inwards/{id}/qa", "/routings", "/routings/supersede",
                "/allocations", "/reservations", "/reservations/release", "/routings/{id}/release-superseded", "/issues",
                "/cut-consume", "/returns", "/splits", "/holds", "/holds/release", "/scrap", "/adjustments/out",
-               "/adjustments/in", "/cut-results"}
-    assert {p for _m, p, _r in ENDPOINTS} == covered | set()
+               "/adjustments/in", "/cut-results", "/inwards/{id}/reconcile-heat", "/stock-units/{id}/reconcile-heat"}
+    assert {p for _m, p, _r in ENDPOINTS} == covered
 
 
 # ================================================================== the router never commits by itself

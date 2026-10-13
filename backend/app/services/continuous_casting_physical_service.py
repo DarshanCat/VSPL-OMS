@@ -34,16 +34,20 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.roles import CC_HOLD_ROLES, CC_HOLD_RELEASE_ROLES, CC_SCRAP_ROLES, CC_ADJUSTMENT_ROLES
+from app.core.roles import (
+    CC_HOLD_ROLES, CC_HOLD_RELEASE_ROLES, CC_SCRAP_ROLES, CC_ADJUSTMENT_ROLES, CC_HEAT_RECONCILE_ROLES,
+)
 from app.models.audit import AuditLog
 from app.models.nc import NCRecord
 from app.models.user import User
 from app.models.continuous_casting import (
     ContinuousCastingInward, ContinuousCastingStockUnit, ContinuousCastingStockLedger,
+    ContinuousCastingCutRecord,
     UNIT_STATUS_IN_STOCK, next_cc_ledger_transaction_number,
 )
 from app.schemas.continuous_casting import (
     CCHoldCreate, CCHoldReleaseCreate, CCScrapCreate, CCAdjustmentCreate, CCUnitMovementResult,
+    CCHeatReconcileRequest, CCHeatReconcileResult,
 )
 from app.services.continuous_casting_service import _require_role, _bad_request
 from app.services.continuous_casting_reservation_service import (
@@ -229,3 +233,117 @@ class ContinuousCastingPhysicalService:
         """ADJUSTMENT_IN: restore length removed by an earlier ADJUSTMENT_OUT (never beyond the receipt)."""
         _require_role(current_user, CC_ADJUSTMENT_ROLES, "adjust continuous-casting stock")
         return _run(db, lambda: _apply(db, ADJUSTMENT_IN, req, current_user))
+
+    @staticmethod
+    def reconcile_inward_heat(db: Session, inward_id, req: CCHeatReconcileRequest,
+                             current_user: Optional[User] = None) -> CCHeatReconcileResult:
+        """Reconcile/update heat number on an inward and propagate to its stock units and cut records with full audit."""
+        _require_role(current_user, CC_HEAT_RECONCILE_ROLES, "reconcile continuous-casting heat number")
+        return _run(db, lambda: _reconcile_inward_heat(db, inward_id, req, current_user))
+
+    @staticmethod
+    def reconcile_stock_unit_heat(db: Session, stock_unit_id, req: CCHeatReconcileRequest,
+                                 current_user: Optional[User] = None) -> CCHeatReconcileResult:
+        """Reconcile/update heat number on a single stock unit and its cut records with full audit."""
+        _require_role(current_user, CC_HEAT_RECONCILE_ROLES, "reconcile continuous-casting stock unit heat number")
+        return _run(db, lambda: _reconcile_unit_heat(db, stock_unit_id, req, current_user))
+
+
+def _reconcile_inward_heat(db: Session, inward_id, req: CCHeatReconcileRequest, current_user: User) -> CCHeatReconcileResult:
+    heat_number = req.heat_number.strip() if req.heat_number else ""
+    reason = req.reason.strip() if req.reason else ""
+    if not heat_number:
+        raise _bad_request("Heat number cannot be empty or whitespace.")
+    if not reason:
+        raise _bad_request("Reason is required for heat number reconciliation.")
+
+    inward = db.query(ContinuousCastingInward).filter(
+        ContinuousCastingInward.id == inward_id
+    ).with_for_update().first()
+    if not inward:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Continuous casting inward not found.")
+
+    old_heat = inward.heat_number
+    inward.heat_number = heat_number
+    inward.updated_by = current_user.full_name
+
+    # Update stock units belonging to this inward
+    stock_units = db.query(ContinuousCastingStockUnit).filter(
+        ContinuousCastingStockUnit.inward_id == inward.id
+    ).with_for_update().all()
+
+    units_updated = 0
+    unit_ids = []
+    for unit in stock_units:
+        if unit.heat_number != heat_number:
+            unit.heat_number = heat_number
+            units_updated += 1
+        unit_ids.append(unit.id)
+
+    # Update cut records for these stock units
+    cuts_updated = 0
+    if unit_ids:
+        cut_records = db.query(ContinuousCastingCutRecord).filter(
+            ContinuousCastingCutRecord.stock_unit_id.in_(unit_ids)
+        ).all()
+        for cut in cut_records:
+            if cut.heat_number != heat_number:
+                cut.heat_number = heat_number
+                cuts_updated += 1
+
+    actor = current_user.full_name
+    db.add(AuditLog(
+        user_id=current_user.id, user_name=actor, action="CC_HEAT_RECONCILE",
+        entity="ContinuousCastingInward", entity_id=inward.inward_number,
+        old_value=f"heat={old_heat or 'UNRECONCILED'}",
+        new_value=f"heat={heat_number}",
+        details=f"Reason: {reason} | Updated {units_updated} unit(s), {cuts_updated} cut result(s)",
+    ))
+    db.flush()
+    return CCHeatReconcileResult(
+        success=True, entity="ContinuousCastingInward", entity_id=inward.inward_number,
+        heat_number=heat_number, units_updated=units_updated, cuts_updated=cuts_updated,
+        message=f"Heat number reconciled to '{heat_number}' for inward {inward.inward_number} and {units_updated} unit(s).",
+    )
+
+
+def _reconcile_unit_heat(db: Session, stock_unit_id, req: CCHeatReconcileRequest, current_user: User) -> CCHeatReconcileResult:
+    heat_number = req.heat_number.strip() if req.heat_number else ""
+    reason = req.reason.strip() if req.reason else ""
+    if not heat_number:
+        raise _bad_request("Heat number cannot be empty or whitespace.")
+    if not reason:
+        raise _bad_request("Reason is required for heat number reconciliation.")
+
+    unit = _lock(db, ContinuousCastingStockUnit, stock_unit_id)
+    if not unit:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Stock unit not found.")
+
+    old_heat = unit.heat_number
+    unit.heat_number = heat_number
+
+    # Update cut records for this unit
+    cut_records = db.query(ContinuousCastingCutRecord).filter(
+        ContinuousCastingCutRecord.stock_unit_id == unit.id
+    ).all()
+    cuts_updated = 0
+    for cut in cut_records:
+        if cut.heat_number != heat_number:
+            cut.heat_number = heat_number
+            cuts_updated += 1
+
+    actor = current_user.full_name
+    db.add(AuditLog(
+        user_id=current_user.id, user_name=actor, action="CC_HEAT_RECONCILE",
+        entity="ContinuousCastingStockUnit", entity_id=unit.unit_number,
+        old_value=f"heat={old_heat or 'UNRECONCILED'}",
+        new_value=f"heat={heat_number}",
+        details=f"Reason: {reason} | Reconciled unit {unit.unit_number}",
+    ))
+    db.flush()
+    return CCHeatReconcileResult(
+        success=True, entity="ContinuousCastingStockUnit", entity_id=unit.unit_number,
+        heat_number=heat_number, units_updated=1, cuts_updated=cuts_updated,
+        message=f"Heat number reconciled to '{heat_number}' for unit {unit.unit_number}.",
+    )
+

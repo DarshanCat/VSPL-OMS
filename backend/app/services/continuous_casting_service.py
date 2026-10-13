@@ -47,6 +47,8 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 def _validate_request(req: CCInwardCreate) -> None:
     """Request-only checks. Re-checks what the schema already enforces so the service
     stays safe when called without going through request validation."""
+    if not getattr(req, "heat_number", None) or not str(req.heat_number).strip():
+        raise _bad_request("A valid foundry heat number is required for new inward receipts.")
     lengths = list(req.unit_lengths_mm or [])
     if not lengths:
         raise _bad_request("An inward must receive at least one physical bar.")
@@ -97,6 +99,7 @@ def _post_inward(db: Session, req: CCInwardCreate, current_user: User) -> CCInwa
     lengths = list(req.unit_lengths_mm)
     total = sum(lengths)
     actor = current_user.full_name
+    heat_number = req.heat_number.strip()
     grn = req.grn_reference.strip() if req.grn_reference and req.grn_reference.strip() else None
     location = req.location.strip() if req.location and req.location.strip() else None
 
@@ -111,7 +114,7 @@ def _post_inward(db: Session, req: CCInwardCreate, current_user: User) -> CCInwa
         stock_dimension_a_mm=material.stock_dimension_a_mm,
         stock_dimension_b_mm=material.stock_dimension_b_mm,
         received_piece_count=len(lengths), received_total_length_mm=total,
-        grn_reference=grn, qa_status=INWARD_INITIAL_QA_STATUS, location=location, remarks=req.remarks,
+        grn_reference=grn, heat_number=heat_number, qa_status=INWARD_INITIAL_QA_STATUS, location=location, remarks=req.remarks,
         created_by=actor, updated_by=actor,
     ))
     unit_rows = []
@@ -121,6 +124,7 @@ def _post_inward(db: Session, req: CCInwardCreate, current_user: User) -> CCInwa
             id=unit_id, unit_number=unit_number, inward_id=inward_id,
             original_length_mm=length, remaining_length_mm=length,
             reserved_length_mm=0, issued_length_mm=0, consumed_length_mm=0,
+            heat_number=heat_number,
             status=UNIT_STATUS_IN_STOCK, location=location, created_by=actor,
         ))
         db.add(ContinuousCastingStockLedger(
@@ -132,12 +136,13 @@ def _post_inward(db: Session, req: CCInwardCreate, current_user: User) -> CCInwa
         unit_rows.append(CCInwardUnitOut(
             unit_number=unit_number, ledger_transaction_number=txn_number,
             original_length_mm=length, remaining_length_mm=length,
+            heat_number=heat_number,
         ))
     db.add(AuditLog(
         user_id=current_user.id, user_name=actor, action="CC_INWARD",
         entity="ContinuousCastingInward", entity_id=inward_number,
-        new_value=f"{len(lengths)} bar(s), {total} mm, material {material.material_code}",
-        details=f"GRN: {grn or 'n/a'}, QA: {INWARD_INITIAL_QA_STATUS}",
+        new_value=f"{len(lengths)} bar(s), {total} mm, material {material.material_code}, heat {heat_number}",
+        details=f"Heat: {heat_number}, GRN: {grn or 'n/a'}, QA: {INWARD_INITIAL_QA_STATUS}",
     ))
     db.flush()
 
@@ -172,7 +177,7 @@ def _post_inward(db: Session, req: CCInwardCreate, current_user: User) -> CCInwa
     block_reason = qa_allocation_block_reason(INWARD_INITIAL_QA_STATUS)
     return CCInwardResult(
         success=True, inward_id=str(inward_id), inward_number=inward_number,
-        material_code=material.material_code, grn_reference=grn,
+        material_code=material.material_code, grn_reference=grn, heat_number=heat_number,
         qa_status=INWARD_INITIAL_QA_STATUS, physical_stock_status=UNIT_STATUS_IN_STOCK,
         allocation_eligible=block_reason is None, allocation_ineligible_reason=block_reason,
         received_piece_count=len(lengths), received_total_length_mm=total,

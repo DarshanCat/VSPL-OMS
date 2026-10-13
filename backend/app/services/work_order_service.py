@@ -25,7 +25,76 @@ from app.services.oms_integration_service import (
     DEFAULT_YIELDS
 )
 
+import re
+
+SCHEDULE_KEYWORDS_REGEX = re.compile(
+    r'^(SCH|SCHDULE|SCHEDULE|FORECAST|PLANNED)([\s\-_/]|$)|'
+    r'(\b(JAN|FEB|MAR|APR|MAY|JUN|JULY|AUG|SEP|OCT|NOV|DEC)\s+(SCH|SCHEDULE|SCHDULE)\b)|'
+    r'^(AWAITING[-_ ]PO)',
+    re.IGNORECASE
+)
+
 STANDARD_STAGES = ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
+
+def compute_po_coverage_status(order: Optional[Order]) -> str:
+    """Determines authoritative PO coverage status for an Order (OAR):
+    - PO_MATCHED: Authoritative PO Master line is validly linked (po_line exists, po exists and is not cancelled,
+      and customer/part IDs match).
+    - SCHEDULED_AWAITING_PO: Sourced from a schedule / forecast reference awaiting formal PO creation
+      (authoritative source_type/schedule_id/oar_po_status or heuristic schedule indicator).
+    - COMMERCIAL_PO_PENDING: Commercial PO reference recorded, awaiting PO Master entry / linking.
+    - UNCONFIRMED: Missing, placeholder, or conflicting reference data.
+    """
+    if not order:
+        return "UNCONFIRMED"
+
+    # 1. Authoritative PO Master match validation
+    if (
+        order.po_line_id is not None
+        and order.po_line is not None
+        and getattr(order.po_line, "po", None) is not None
+        and getattr(order.po_line.po, "status", None) != "cancelled"
+        and (order.customer_id is None or getattr(order.po_line.po, "customer_id", None) == order.customer_id)
+        and (order.part_id is None or getattr(order.po_line, "part_id", None) == order.part_id)
+    ):
+        return "PO_MATCHED"
+
+    # 2. Authoritative Schedule intake (takes precedence over heuristic strings)
+    if (
+        getattr(order, "source_type", None) == "schedule"
+        or getattr(order, "schedule_id", None) is not None
+        or getattr(order, "oar_po_status", None) == "awaiting_po"
+    ):
+        return "SCHEDULED_AWAITING_PO"
+
+    raw_po = (order.customer_po or "").strip()
+
+    # 3. Heuristic Schedule fallback (for legacy orders where source_type was default 'po')
+    if raw_po and SCHEDULE_KEYWORDS_REGEX.search(raw_po):
+        return "SCHEDULED_AWAITING_PO"
+
+    # 4. Commercial PO reference recorded
+    if raw_po and raw_po.upper() not in ("N/A", "NONE", "—", "-", ""):
+        return "COMMERCIAL_PO_PENDING"
+
+    # 5. Unconfirmed / missing
+    return "UNCONFIRMED"
+
+
+def compute_wo_release_status(wo: WorkOrder) -> str:
+    """The WO's position in the release chain (OAR -> WO Created -> Engineering Release ->
+    Manufacturing Release -> WO Released -> Production), derived only from its own
+    timestamp/actor pairs -- never a separate stored flag, never inferred from any other
+    field. Shared by OAR genealogy and PO traceability views so the same WO always shows
+    the same release label everywhere."""
+    if wo.released_by or wo.release_date:
+        return "RELEASED"
+    if wo.manufacturing_released_by or wo.manufacturing_released_at:
+        return "AWAITING_WO_RELEASE"
+    if wo.engineering_released_by or wo.engineering_released_at:
+        return "AWAITING_MFG_RELEASE"
+    return "AWAITING_ENG_RELEASE"
+
 
 class WorkOrderService:
     @staticmethod
@@ -35,6 +104,7 @@ class WorkOrderService:
         stage: Optional[str] = None,
         customer_code: Optional[str] = None,
         status_filter: Optional[str] = None,
+        casting_process: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
@@ -45,6 +115,7 @@ class WorkOrderService:
             query = query.filter(
                 or_(
                     WorkOrder.wo_number.ilike(s),
+                    Order.oar_number.ilike(s),
                     Customer.customer_code.ilike(s),
                     Customer.name.ilike(s),
                     Part.part_number.ilike(s),
@@ -60,6 +131,9 @@ class WorkOrderService:
 
         if status_filter:
             query = query.filter(WorkOrder.status == status_filter)
+
+        if casting_process:
+            query = query.filter(WorkOrder.casting_process == casting_process.strip().upper())
 
         wos = query.order_by(WorkOrder.created_at.desc()).offset(offset).limit(limit).all()
         results = []
@@ -84,6 +158,9 @@ class WorkOrderService:
             avail_wip = cur_wip_rec.available_wip if cur_wip_rec else (wo.physical_wo_qty if cur_stage == route_stages[0] else 0)
 
             risk = calculate_delivery_risk(order.delivery_date if order else None, cur_stage, wo.status.value, route_stages)
+            po_cov_status = compute_po_coverage_status(order) if order else "UNCONFIRMED"
+            src_type = order.source_type if (order and getattr(order, "source_type", None)) else ("schedule" if (order and "SCH" in (order.customer_po or "").upper()) else "po")
+            cust_po = order.customer_po if order else None
 
             results.append(WorkOrderListItem(
                 id=str(wo.id),
@@ -91,6 +168,9 @@ class WorkOrderService:
                 oar_number=order.oar_number if order else None,
                 customer_code=order.customer.customer_code if (order and order.customer) else "N/A",
                 customer_name=order.customer.name if (order and order.customer) else "VSPL Internal",
+                customer_po=cust_po,
+                source_type=src_type,
+                po_coverage_status=po_cov_status,
                 part_number=order.part.part_number if (order and order.part) else "N/A",
                 part_name=order.part.description if (order and order.part) else None,
                 grade=order.part.grade if (order and order.part) else None,
@@ -252,6 +332,9 @@ class WorkOrderService:
             ))
         tx_list.sort(key=lambda x: x.timestamp, reverse=True)
 
+        po_cov_status = compute_po_coverage_status(order) if order else "UNCONFIRMED"
+        src_type = order.source_type if (order and getattr(order, "source_type", None)) else ("schedule" if (order and "SCH" in (order.customer_po or "").upper()) else "po")
+
         return WorkOrderTrackingDetail(
             id=str(wo.id),
             wo_number=wo.wo_number,
@@ -259,6 +342,8 @@ class WorkOrderService:
             customer_code=order.customer.customer_code if (order and order.customer) else "CUST-001",
             customer_name=order.customer.name if (order and order.customer) else "VSPL Internal",
             customer_po=order.customer_po if order else "PO-GEN",
+            source_type=src_type,
+            po_coverage_status=po_cov_status,
             part_number=order.part.part_number if (order and order.part) else "N/A",
             part_name=order.part.description if (order and order.part) else None,
             grade=order.part.grade if (order and order.part) else None,
@@ -351,7 +436,8 @@ class WorkOrderService:
                     Order.customer_po.ilike(s),
                     Customer.customer_code.ilike(s),
                     Customer.name.ilike(s),
-                    Part.part_number.ilike(s)
+                    Part.part_number.ilike(s),
+                    Order.work_orders.any(WorkOrder.wo_number.ilike(s))
                 )
             )
 
@@ -435,14 +521,7 @@ class WorkOrderService:
                 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
             )
 
-            if wo.released_by or wo.release_date:
-                rel_status = "RELEASED"
-            elif wo.manufacturing_released_by or wo.manufacturing_released_at:
-                rel_status = "AWAITING_WO_RELEASE"
-            elif wo.engineering_released_by or wo.engineering_released_at:
-                rel_status = "AWAITING_MFG_RELEASE"
-            else:
-                rel_status = "AWAITING_ENG_RELEASE"
+            rel_status = compute_wo_release_status(wo)
 
             wo_type = "PATCH" if wo.is_replacement else "ORIGINAL"
             source_wo_num = wo.source_wo.wo_number if wo.source_wo else None
@@ -478,12 +557,21 @@ class WorkOrderService:
         oar_fulfilled = sum(w.final_good_contribution for w in wo_summaries)
         oar_shortfall = max(order.po_qty - oar_fulfilled, 0)
 
+        po_cov_status = compute_po_coverage_status(order)
+        src_type = order.source_type if getattr(order, "source_type", None) else ("schedule" if (order and "SCH" in (order.customer_po or "").upper()) else "po")
+        po_matched_flag = (po_cov_status == "PO_MATCHED")
+        oar_po_st = order.oar_po_status if getattr(order, "oar_po_status", None) else None
+
         return OARListItem(
             oar_number=order.oar_number or "—",
             order_id=str(order.id),
             customer_code=order.customer.customer_code if order.customer else "N/A",
             customer_name=order.customer.name if order.customer else "N/A",
             customer_po=order.customer_po,
+            source_type=src_type,
+            oar_po_status=oar_po_st,
+            po_matched=po_matched_flag,
+            po_coverage_status=po_cov_status,
             part_number=order.part.part_number if order.part else "N/A",
             oar_qty=order.po_qty,
             allocated_qty=allocated_total,
@@ -514,6 +602,10 @@ class WorkOrderService:
             customer_code=summary.customer_code,
             customer_name=summary.customer_name,
             customer_po=summary.customer_po,
+            source_type=summary.source_type,
+            oar_po_status=summary.oar_po_status,
+            po_matched=summary.po_matched,
+            po_coverage_status=summary.po_coverage_status,
             part_number=summary.part_number,
             oar_qty=summary.oar_qty,
             num_wos=summary.num_wos,

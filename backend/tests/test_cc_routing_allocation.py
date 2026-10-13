@@ -30,6 +30,7 @@ from app.services.continuous_casting_routing_service import (
     calculate_blank_length_mm, calculate_gross_required_length_mm,
 )
 from app.services.continuous_casting_service import ContinuousCastingInwardService as InwardSvc
+from app.services.work_order_service import WorkOrderService
 
 OMS_TABLES = ["work_orders", "wo_routes", "stage_wips", "orders", "production_movements",
               "production_updates", "nc_records", "packing_records", "dispatches", "conversions"]
@@ -85,7 +86,11 @@ def mat(db):
     return _material(db)
 
 
-def make_wo(db, number, status=WOStatus.IN_PRODUCTION):
+def make_wo(db, number, status=WOStatus.IN_PRODUCTION, casting_process="CONTINUOUS"):
+    """casting_process defaults to 'CONTINUOUS' -- the authoritative route-eligibility signal
+    (WorkOrder.casting_process, set at WO release) -- since every existing fixture/test in this
+    file exercises a genuine Continuous Casting Work Order. Pass casting_process=None or
+    "CENTRIFUGAL" explicitly to build a Work Order on a different route."""
     cust = Customer(customer_code=f"C-{number}", name="Cust")
     part = Part(part_number=f"P-{number}", description="p")
     db.add_all([cust, part])
@@ -95,7 +100,7 @@ def make_wo(db, number, status=WOStatus.IN_PRODUCTION):
     db.add(order)
     db.flush()
     wo = WorkOrder(wo_number=number, order_id=order.id, physical_wo_qty=10, current_stage="F1",
-                   projected_final_good=10, status=status)
+                   projected_final_good=10, status=status, casting_process=casting_process)
     db.add(wo)
     db.flush()
     for seq, stage in enumerate(["F1", "F2", "DISPATCH"], start=1):
@@ -147,7 +152,7 @@ def sreq(mat, reason="design change", wo_number="WO-1001", **kw):
 
 def accepted_units(db, store, mat, lengths, accept=True):
     """Post a real inward, then (simulating the existing QA process) accept it."""
-    r = InwardSvc.create_inward(db, CCInwardCreate(material_id=mat.id, unit_lengths_mm=lengths), store)
+    r = InwardSvc.create_inward(db, CCInwardCreate(material_id=mat.id, unit_lengths_mm=lengths, heat_number="HT-TEST-001"), store)
     inward = db.query(cc.ContinuousCastingInward).filter_by(inward_number=r.inward_number).one()
     if accept:
         inward.qa_status = "ACCEPTED"
@@ -464,6 +469,156 @@ def test_unknown_or_inactive_validated_material(db, engineer, mat, wo1):
     with pytest.raises(HTTPException) as e:
         new_routing(db, engineer, mat)
     assert e.value.status_code == 400 and count(db, "cc_routings") == 0
+
+
+# ------------------------------------------------------------------ routing: material/geometry consistency
+# mat fixture: section="ROUND", stock_dimension_a_mm=200, stock_dimension_b_mm=None (default rreq()
+# uses required_section="ROUND", finished_dimension_a_mm=80 -- always <= 200, always consistent).
+
+def test_consistent_geometry_is_accepted(db, engineer, mat, wo1):
+    """Baseline: section matches, finished_dimension_a_mm (80) <= stock_dimension_a_mm (200)."""
+    assert new_routing(db, engineer, mat).success
+
+
+def test_section_mismatch_is_rejected_on_create(db, engineer, mat, wo1):
+    before = china_counts(db)
+    with pytest.raises(HTTPException) as e:
+        new_routing(db, engineer, mat, required_section="SQUARE")
+    assert e.value.status_code == 400
+    assert "section" in e.value.detail.lower()
+    assert china_counts(db) == before
+
+
+def test_section_mismatch_is_rejected_on_supersede(db, engineer, mat, wo1):
+    new_routing(db, engineer, mat)
+    with pytest.raises(HTTPException) as e:
+        RouteSvc.supersede_routing(db, sreq(mat, required_section="SQUARE"), engineer)
+    assert e.value.status_code == 400
+    assert "section" in e.value.detail.lower()
+    assert db.query(cc.ContinuousCastingRouting).one().status == "ACTIVE"  # nothing superseded
+
+
+def test_section_match_is_case_insensitive(db, engineer, mat, wo1):
+    """material.section == 'ROUND'; 'round' (lowercase) must still match, not be rejected."""
+    assert new_routing(db, engineer, mat, required_section="round").success
+
+
+def test_finished_dimension_a_exceeding_stock_is_rejected_on_create(db, engineer, mat, wo1):
+    """mat.stock_dimension_a_mm == 200; a 201mm finished part cannot be machined from it."""
+    before = china_counts(db)
+    with pytest.raises(HTTPException) as e:
+        new_routing(db, engineer, mat, finished_dimension_a_mm=201)
+    assert e.value.status_code == 400
+    assert "stock_dimension_a_mm" in e.value.detail
+    assert china_counts(db) == before
+
+
+def test_finished_dimension_a_exceeding_stock_is_rejected_on_supersede(db, engineer, mat, wo1):
+    new_routing(db, engineer, mat)
+    with pytest.raises(HTTPException) as e:
+        RouteSvc.supersede_routing(db, sreq(mat, finished_dimension_a_mm=201), engineer)
+    assert e.value.status_code == 400
+    assert "stock_dimension_a_mm" in e.value.detail
+    assert db.query(cc.ContinuousCastingRouting).one().status == "ACTIVE"
+
+
+def test_finished_dimension_a_exactly_equal_to_stock_is_accepted(db, engineer, mat, wo1):
+    """Boundary: finished == stock (zero machining allowance on that dimension) is valid,
+    only STRICTLY greater is rejected."""
+    assert new_routing(db, engineer, mat, finished_dimension_a_mm=200).success
+
+
+def test_dimension_b_is_not_cross_checked_when_material_has_none(db, engineer, mat, wo1):
+    """mat.stock_dimension_b_mm is None (ROUND material, confirmed by the `mat` fixture) --
+    a routing may supply any finished_dimension_b_mm without being rejected, since there is
+    nothing on the material side to compare it against. This is the documented, deliberate
+    scope limit from _validate_material_geometry_consistency(), not an oversight: dimension_b's
+    business meaning (e.g. a hollow section's inner diameter) is not established anywhere in
+    this codebase, so it is never guessed at."""
+    assert new_routing(db, engineer, mat, finished_dimension_b_mm=9999).success
+
+
+# ------------------------------------------------------------------ routing: Work Order route eligibility
+# wo1/wo2 (via make_wo) default to casting_process="CONTINUOUS"; these tests build their own
+# Work Orders with a different casting_process to prove the backend -- not just the Planning
+# screen's own filtering -- rejects a Work Order that was never assigned to this route.
+
+def test_wo_not_on_the_continuous_casting_route_is_rejected_on_create(db, engineer, mat):
+    wo = make_wo(db, "WO-CENTRIFUGAL", casting_process="CENTRIFUGAL")
+    before = china_counts(db)
+    with pytest.raises(HTTPException) as e:
+        new_routing(db, engineer, mat, wo_number=wo.wo_number)
+    assert e.value.status_code == 400
+    assert "continuous casting route" in e.value.detail.lower()
+    assert china_counts(db) == before
+
+
+def test_wo_with_no_casting_process_at_all_is_rejected_on_create(db, engineer, mat):
+    wo = make_wo(db, "WO-NOPROCESS", casting_process=None)
+    with pytest.raises(HTTPException) as e:
+        new_routing(db, engineer, mat, wo_number=wo.wo_number)
+    assert e.value.status_code == 400
+
+
+def test_eligibility_is_enforced_by_the_service_even_when_the_schema_is_bypassed(db, engineer, mat):
+    """Proves this is a real backend gate, not UI-only filtering: a raw, schema-bypassing
+    request against a non-eligible Work Order is still rejected by the service."""
+    wo = make_wo(db, "WO-DIRECTAPI", casting_process="CENTRIFUGAL")
+    with pytest.raises(HTTPException) as e:
+        RouteSvc.create_routing(db, raw_rreq(mat, wo_number=wo.wo_number), engineer)
+    assert e.value.status_code == 400
+
+
+def test_wo_not_on_the_continuous_casting_route_is_rejected_on_supersede(db, engineer, mat):
+    """A direct supersede call against a Work Order that never had a Continuous Casting
+    routing (so there is nothing to grandfather in) is rejected the same way as create."""
+    wo = make_wo(db, "WO-CENTRIFUGAL-2", casting_process="CENTRIFUGAL")
+    with pytest.raises(HTTPException) as e:
+        RouteSvc.supersede_routing(db, sreq(mat, wo_number=wo.wo_number), engineer)
+    assert e.value.status_code == 400
+
+
+def test_work_order_list_can_be_filtered_to_continuous_casting_eligible_wos(db):
+    """The Planning screen's selector asks GET /api/v1/work-orders?casting_process=CONTINUOUS --
+    proves WorkOrderService.list_work_orders actually filters on it, rather than returning
+    every Work Order and relying on the frontend to hide the ineligible ones."""
+    cc_wo = make_wo(db, "WO-LIST-CC", casting_process="CONTINUOUS")
+    make_wo(db, "WO-LIST-CENTRIFUGAL", casting_process="CENTRIFUGAL")
+    make_wo(db, "WO-LIST-NONE", casting_process=None)
+
+    eligible = WorkOrderService.list_work_orders(db, casting_process="CONTINUOUS", limit=500)
+    numbers = {w.wo_number for w in eligible}
+    assert cc_wo.wo_number in numbers
+    assert "WO-LIST-CENTRIFUGAL" not in numbers
+    assert "WO-LIST-NONE" not in numbers
+
+    # Unfiltered, every Work Order still comes back (Cutting/Traceability pass no filter).
+    unfiltered = WorkOrderService.list_work_orders(db, limit=500)
+    unfiltered_numbers = {w.wo_number for w in unfiltered}
+    assert {cc_wo.wo_number, "WO-LIST-CENTRIFUGAL", "WO-LIST-NONE"} <= unfiltered_numbers
+
+
+def test_a_wo_with_existing_cc_routing_history_is_grandfathered_in_regardless_of_casting_process(db, engineer, mat):
+    """A Work Order that already has a Continuous Casting routing stays supersedable even if its
+    casting_process is unset or not 'CONTINUOUS' -- the real-world case this covers is a routing
+    recorded before this eligibility check shipped. create_routing() cannot produce that state
+    itself any more (it is gated the same way), so the pre-existing routing is inserted directly,
+    exactly as it would already exist in a production database untouched by this change. Route
+    eligibility must never be re-litigated once a WO already has real CC routing history."""
+    wo = make_wo(db, "WO-LEGACY-CC", casting_process=None)
+    blank = calculate_blank_length_mm(100, 2, 2)
+    gross = calculate_gross_required_length_mm(10, blank, 10, 3, 0)
+    pre_existing = cc.ContinuousCastingRouting(
+        work_order_id=wo.id, version=1, material_source=rsvc.MATERIAL_SOURCE_CONTINUOUS_CASTING, status="ACTIVE",
+        required_grade="SG450", required_section="ROUND", finished_dimension_a_mm=80, finished_axial_length_mm=100,
+        machining_stock_a_mm=2, machining_stock_b_mm=2, planned_blanks=10, blank_length_mm=blank,
+        kerf_mm=3, planned_cuts=10, end_trim_mm=0, gross_required_length_mm=gross,
+        validated_material_id=mat.id, validated_by="seed", created_by="seed",
+    )
+    db.add(pre_existing)
+    db.commit()
+    result = RouteSvc.supersede_routing(db, sreq(mat, wo_number=wo.wo_number), engineer)
+    assert result.success and result.version == 2
 
 
 @pytest.mark.parametrize("role", [UserRole.ADMIN, UserRole.ENGINEERING])

@@ -14,6 +14,16 @@ export function CCUnitBalances({ unit }: { unit: CCStockUnitOut }) {
     <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
       {kv("Unit", <CCTxnNumber value={unit.unit_number} />)}
       {kv("Inward", <span className="font-mono">{unit.inward_number}</span>)}
+      {kv(
+        "Heat number",
+        unit.heat_number ? (
+          <span className="font-mono font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+            {unit.heat_number}
+          </span>
+        ) : (
+          <span className="text-amber-500 font-mono italic">UNRECONCILED</span>
+        )
+      )}
       {kv("Material", <span className="font-mono">{unit.material_code}</span>)}
       {kv("Physical status", <CCStatusBadge status={unit.status} />)}
       {kv("Inward QA", <CCStatusBadge status={unit.inward_qa_status} />)}

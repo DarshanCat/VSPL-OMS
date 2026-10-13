@@ -315,13 +315,41 @@ export async function getDashboardStats() {
 }
 
 // Work Orders & Tracking
+export interface WorkOrderListItem {
+  id: string;
+  wo_number: string;
+  oar_number?: string | null;
+  customer_code: string;
+  customer_name: string;
+  customer_po?: string | null;
+  source_type?: string;
+  po_coverage_status?: "SCHEDULED_AWAITING_PO" | "COMMERCIAL_PO_PENDING" | "PO_MATCHED" | "UNCONFIRMED" | string;
+  part_number: string;
+  part_name?: string | null;
+  grade?: string | null;
+  order_qty: number;
+  physical_wo_qty: number;
+  casting_process?: string | null;
+  match_size?: number | null;
+  current_stage: string;
+  next_allowed_stage?: string | null;
+  available_wip_at_current_stage: number;
+  status: string;
+  delivery_risk: string;
+  shortfall: string;
+  delivery_date?: string | null;
+  created_at: string;
+}
+
 export async function getWorkOrders(params?: {
   search?: string;
   stage?: string;
   customer_code?: string;
   status_filter?: string;
+  casting_process?: string;
   limit?: number;
-}) {
+  offset?: number;
+}): Promise<WorkOrderListItem[]> {
   const { data } = await api.get("/api/v1/work-orders", { params });
   return data;
 }
@@ -498,6 +526,21 @@ export async function updateMasterCustomer(payload: {
   return data;
 }
 
+export interface POLineWorkOrderSummary {
+  wo_id: string;
+  wo_number: string;
+  wo_status: string;
+  release_status: "AWAITING_ENG_RELEASE" | "AWAITING_MFG_RELEASE" | "AWAITING_WO_RELEASE" | "RELEASED";
+}
+
+export interface POLineOrderSummary {
+  oar_id: string;
+  oar_number?: string | null;
+  order_status: string;
+  po_coverage_status: "PO_MATCHED" | "SCHEDULED_AWAITING_PO" | "COMMERCIAL_PO_PENDING" | "UNCONFIRMED";
+  work_orders: POLineWorkOrderSummary[];
+}
+
 export interface POLineOut {
   id: string;
   part_number: string;
@@ -505,6 +548,7 @@ export interface POLineOut {
   allocated_qty: number;
   available_qty: number;
   required_date?: string | null;
+  orders: POLineOrderSummary[];
 }
 
 export interface POMasterOut {
@@ -533,6 +577,28 @@ export async function createPOMaster(payload: {
   lines: { part_number: string; po_qty: number; required_date?: string }[];
 }): Promise<POMasterOut> {
   const { data } = await api.post("/api/v1/masters/pos", payload);
+  return data;
+}
+
+export interface POLineUpdatePayload {
+  id?: string;
+  part_number?: string;
+  customer_part_number?: string;
+  po_qty: number;
+  required_date?: string;
+}
+
+export interface POMasterUpdatePayload {
+  po_number?: string;
+  customer_code?: string;
+  po_date?: string;
+  validity_date?: string;
+  status?: string;
+  lines?: POLineUpdatePayload[];
+}
+
+export async function updatePOMaster(poId: string, payload: POMasterUpdatePayload): Promise<POMasterOut> {
+  const { data } = await api.put(`/api/v1/masters/pos/${encodeURIComponent(poId)}`, payload);
   return data;
 }
 
@@ -644,6 +710,10 @@ export interface OARListItem {
   customer_code: string;
   customer_name: string;
   customer_po: string;
+  source_type?: string;
+  oar_po_status?: string | null;
+  po_matched?: boolean;
+  po_coverage_status?: "SCHEDULED_AWAITING_PO" | "COMMERCIAL_PO_PENDING" | "PO_MATCHED" | "UNCONFIRMED" | string;
   part_number: string;
   oar_qty: number;
   allocated_qty: number;

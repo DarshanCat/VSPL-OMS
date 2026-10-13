@@ -68,8 +68,28 @@ def build(db, wo_no="WO-1001", route=("F2", "F3", "DISPATCH"), qty=10, with_rout
         db.add(RejectionType(code="DEF-POROSITY", name="Porosity", is_active=True))
         db.commit()
     make_wo(db, wo_no)
-    OperationsService.release_work_order(
-        db, WOReleaseCreate(wo_number=wo_no, physical_wo_qty=qty, route_stages=list(route)), _user(db, UserRole.ADMIN))
+    # Most callers pass the default `route` (no F1 -- "this is a plain Continuous Casting
+    # WO"); for those, release through the real, intended path: F1 included in
+    # route_stages and casting_process explicitly "CONTINUOUS", letting the service strip
+    # F1 itself (see "Continuous Casting bypasses F1" in release_work_order) so the
+    # resulting route still matches what callers expect. Previously this released with F1
+    # omitted and no casting_process at all, which (after the eligibility gate was added)
+    # silently cleared casting_process back to None and broke every CC routing created
+    # afterward on these WOs.
+    #
+    # A few callers deliberately pass their OWN route that already starts with "F1" --
+    # those are testing F1/non-Continuous-Casting production scenarios on purpose (e.g.
+    # "an F1 production routing is completely unchanged"), so F1 must stay a real,
+    # present stage and casting_process must NOT be forced to CONTINUOUS for them.
+    if "F1" in route:
+        OperationsService.release_work_order(
+            db, WOReleaseCreate(wo_number=wo_no, physical_wo_qty=qty, route_stages=list(route)),
+            _user(db, UserRole.ADMIN))
+    else:
+        OperationsService.release_work_order(
+            db, WOReleaseCreate(wo_number=wo_no, physical_wo_qty=qty, route_stages=["F1"] + list(route),
+                                casting_process="CONTINUOUS"),
+            _user(db, UserRole.ADMIN))
     ctx = dict(db=db, mat=mat, wo_no=wo_no, wo=db.query(WorkOrder).filter_by(wo_number=wo_no).one())
     if with_routing:
         (unit,) = accepted_units(db, mat, [2000])
@@ -601,11 +621,23 @@ def test_moving_already_produced_pieces_adds_no_new_production(china):
 
 
 def test_pieces_produced_before_the_routing_became_active_can_still_be_moved(db):
-    """existing first-stage production (4) already exceeds the usable blanks (0) when a China routing becomes
-    ACTIVE; moving those already-produced pieces creates NO new production, so it must stay allowed, while
-    any new piece is still gated."""
+    """A Continuous Casting WO requires an ACTIVE routing before ANY first-stage production -- confirmed
+    first. Separately: pieces already produced before this WO had an active routing (e.g. produced while
+    it was not yet flagged Continuous Casting) are not retroactively un-produced once a routing exists;
+    moving them out creates NO new production, so it must stay allowed, while any new piece is still
+    gated by usable capacity."""
     ctx = build(db, "WO-8001", with_routing=False)
-    assert produce(ctx, "F2", 4).success                                   # ordinary OMS production, no routing yet
+    rejected_by_gate(lambda: produce(ctx, "F2", 4), "no active Continuous Casting routing")
+
+    # Realistic predecessor state: the 4 pieces were legitimately produced through the ordinary path
+    # while this WO was not yet marked Continuous Casting (or before the gate applied to it) -- not
+    # produced in defiance of the gate.
+    ctx["wo"].casting_process = None
+    db.commit()
+    assert produce(ctx, "F2", 4).success
+    ctx["wo"].casting_process = "CONTINUOUS"
+    db.commit()
+
     (unit,) = accepted_units(db, ctx["mat"], [2000])
     rid = new_routing(db, ctx["mat"], "WO-8001")                           # the China routing becomes ACTIVE now
     ctx.update(unit=unit, rid=rid, alloc=allocate(db, rid, unit, 1070))
@@ -624,11 +656,22 @@ def test_the_gate_only_applies_to_the_first_stage(china):
 
 
 def test_f1_as_the_first_route_stage_is_rejected_for_an_active_china_routing(db):
-    ctx = build(db, "WO-3001", route=("F1", "F2", "DISPATCH"))
+    """Data-inconsistency scenario: a Continuous Casting WO has a real, ACTIVE routing with usable
+    blanks, but its own released WORoute still literally starts at F1. release_work_order always
+    strips F1 when casting_process is CONTINUOUS at release time, so this state cannot arise through a
+    normal release call -- the WO is released as CENTRIFUGAL instead (which keeps F1 as a real stage,
+    with its own StageWIP) and then flipped to CONTINUOUS directly, simulating a stale/legacy record."""
+    ctx = build(db, "WO-3001", route=("F1", "F2", "DISPATCH"), with_routing=False)
+    ctx["wo"].casting_process = "CONTINUOUS"
+    db.commit()
+    (unit,) = accepted_units(db, ctx["mat"], [2000])
+    rid = new_routing(db, ctx["mat"], "WO-3001")
+    ctx.update(unit=unit, rid=rid, alloc=allocate(db, rid, unit, 1070))
+
     reconciled(ctx, 4, 1)                                                  # even with usable blanks
     before = oms_snapshot(db)
     detail = rejected_by_gate(lambda: produce(ctx, "F1", 1), "bypasses F1")
-    assert "cannot produce at F1" in detail
+    assert "Use the Continuous Casting workflow" in detail
     rejected_by_gate(lambda: move(ctx, "F1", "F2", 1), "bypasses F1")
     assert oms_snapshot(db) == before and db.query(StageWIP).filter_by(stage="F1").one().ok_qty == 0
     with pytest.raises(HTTPException) as e:                               # the second stage is outside the China gate
@@ -637,12 +680,15 @@ def test_f1_as_the_first_route_stage_is_rejected_for_an_active_china_routing(db)
 
 
 @pytest.mark.parametrize("status_value", ["SUPERSEDED", "DRAFT"])
-def test_a_superseded_or_draft_routing_does_not_gate(china, status_value):
+def test_a_superseded_or_draft_routing_is_not_an_active_routing(china, status_value):
+    """A SUPERSEDED or DRAFT routing does not satisfy the Continuous Casting active-routing
+    requirement -- it is treated exactly like having no routing at all: production is blocked
+    until a routing is actually ACTIVE, not merely present in some non-active form."""
     db = china["db"]
     db.query(Routing).one().status = status_value
     db.commit()
     assert Gate.active_china_routing(db, china["wo"]) is None
-    assert produce(china, "F2", 10).success                               # unchanged OMS behaviour (no gate)
+    rejected_by_gate(lambda: produce(china, "F2", 10), "no active Continuous Casting routing")
 
 
 def test_after_a_supersession_only_the_new_active_routings_cut_results_count(china):

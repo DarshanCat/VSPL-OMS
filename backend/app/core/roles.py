@@ -20,6 +20,15 @@ from app.models.user import UserRole
 # administration -- only Admin (Super Admin) and Planner do.
 PLANNING_ROLES = (UserRole.ADMIN, UserRole.PLANNER)
 
+# PO Master visibility and editing specifically -- NOT the rest of PLANNING_ROLES'
+# remit (Customer/Schedule/OAR creation, PO<->Schedule matching, Conversion Part
+# Mapping, OMS Engine batch tools). Sales needs to see and edit commercial PO data
+# (and its OAR/WO traceability) but must not gain OAR creation, WO creation, or WO
+# release through this grant -- those stay on their own existing, narrower tuples
+# (PLANNING_ROLES, WO_RELEASE_ROLES) untouched by this addition.
+PO_MASTER_VIEW_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES)
+PO_MASTER_EDIT_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES)
+
 # WO release specifically: Production Manager already held this permission before the
 # Roles & Responsibilities spec was written, and the spec's own carve-out ("Cannot: WO
 # release unless existing explicit permission already grants it") preserves it rather
@@ -135,4 +144,6 @@ CC_ROUTING_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
 # repository's existing quality role -- the same one QUALITY_APPROVAL_ROLES uses).
 CC_MATERIAL_MASTER_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
 CC_QA_ROLES = (UserRole.ADMIN, UserRole.QA)
+CC_HEAT_RECONCILE_ROLES = (UserRole.ADMIN, UserRole.QA, UserRole.PLANNER, UserRole.STORE)
+
 

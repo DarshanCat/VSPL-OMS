@@ -11,9 +11,10 @@ import { CCTxnNumber } from "@/app/components/cc/CCTxnNumber";
 import { CCUnitBalances } from "@/app/components/cc/CCUnitBalances";
 import { CCUnitList } from "@/app/components/cc/CCUnitList";
 import { CCMaterialStockSummary } from "@/app/components/cc/CCMaterialStockSummary";
+import { CCReconcileHeatModal } from "@/app/components/cc/CCReconcileHeatModal";
 import { ccErrorMessage, ccGetStockUnit, CCAllocationOut, CCStockUnitDetail, CCUnitChild } from "@/lib/continuousCastingApi";
 import {
-  CC_ADJUSTMENT_ROLES, CC_HOLD_ROLES, CC_HOLD_RELEASE_ROLES, CC_ISSUE_ROLES, CC_SCRAP_ROLES,
+  CC_ADJUSTMENT_ROLES, CC_HOLD_ROLES, CC_HOLD_RELEASE_ROLES, CC_ISSUE_ROLES, CC_SCRAP_ROLES, CC_HEAT_RECONCILE_ROLES,
 } from "@/lib/continuousCastingRoles";
 import { fmtDateTime } from "@/lib/continuousCastingForm";
 
@@ -83,6 +84,7 @@ function StockUnitDetailPanel({ unitId, onSelect, onClose }: {
   unitId: string; onSelect: (id: string) => void; onClose: () => void;
 }) {
   const [unit, setUnit] = useState<CCStockUnitDetail | null>(null);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -129,6 +131,15 @@ function StockUnitDetailPanel({ unitId, onSelect, onClose }: {
           Stock unit {unit && <span className="ml-1 font-mono">{unit.unit_number}</span>}
         </h2>
         <div className="flex items-center gap-3">
+          <CCRoleGate allowed={CC_HEAT_RECONCILE_ROLES}>
+            <button
+              type="button"
+              onClick={() => setReconcileOpen(true)}
+              className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Reconcile Heat
+            </button>
+          </CCRoleGate>
           <CCRoleGate allowed={ANY_STORES_ROLE}>
             <Link href={`/continuous-casting/stores?unit=${unitId}`} className="font-semibold text-blue-600 hover:underline dark:text-blue-400">
               Open in Stores Transactions
@@ -199,6 +210,18 @@ function StockUnitDetailPanel({ unitId, onSelect, onClose }: {
               onPageChange={() => {}} rowKey={(a) => a.allocation_id} emptyText="No allocations." />
           </div>
         </>
+      )}
+
+      {unit && (
+        <CCReconcileHeatModal
+          isOpen={reconcileOpen}
+          onClose={() => setReconcileOpen(false)}
+          onSuccess={() => void load()}
+          targetType="STOCK_UNIT"
+          targetId={unit.unit_id}
+          targetNumber={unit.unit_number}
+          currentHeatNumber={unit.heat_number}
+        />
       )}
     </section>
   );

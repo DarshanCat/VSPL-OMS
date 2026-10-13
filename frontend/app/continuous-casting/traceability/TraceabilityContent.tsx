@@ -6,10 +6,13 @@ import { CCInwardSelector } from "@/app/components/cc/CCInwardSelector";
 import { CCInwardTraceView } from "@/app/components/cc/CCInwardTraceView";
 import { CCWorkOrderSelector } from "@/app/components/cc/CCWorkOrderSelector";
 import { CCWorkOrderTraceView } from "@/app/components/cc/CCWorkOrderTraceView";
+import { CCHeatTraceView } from "@/app/components/cc/CCHeatTraceView";
+import { ccInputCls, ccLabelCls, ccSecondaryBtnCls } from "@/lib/continuousCastingForm";
 
-type Tab = "inward" | "wo";
+type Tab = "heat" | "inward" | "wo";
 
-// Traceability (read-only; any authenticated user). Two views share one page.
+// Traceability (read-only; any authenticated user). Three views share one page.
+//   By Heat Number: ?heat=<heat_number>
 //   By Inward:      ?inward=<inward UUID>   (the trace endpoint takes the UUID; the inward NUMBER is only for searching)
 //   By Work Order:  ?wo=<wo_number>
 // The selection lives in the URL, so a link is a complete deep link. Switching tabs clears the other selection and only
@@ -18,25 +21,48 @@ export default function TraceabilityContent() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const heatParam = params.get("heat");
   const inwardParam = params.get("inward");
   const woParam = params.get("wo");
-  const [tab, setTab] = useState<Tab>(woParam && !inwardParam ? "wo" : "inward");
+  const [tab, setTab] = useState<Tab>(
+    heatParam ? "heat" : woParam && !inwardParam ? "wo" : "heat"
+  );
+  const [heatInput, setHeatInput] = useState(heatParam ?? "");
 
   // Follow the URL when it names exactly one selection (for example a link from elsewhere, or back/forward).
   useEffect(() => {
-    if (woParam && !inwardParam) setTab("wo");
-    else if (inwardParam && !woParam) setTab("inward");
-  }, [woParam, inwardParam]);
+    if (heatParam) {
+      setTab("heat");
+      setHeatInput(heatParam);
+    } else if (woParam && !inwardParam) {
+      setTab("wo");
+    } else if (inwardParam && !woParam) {
+      setTab("inward");
+    }
+  }, [heatParam, woParam, inwardParam]);
 
   const go = (query: string) => router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  const selectHeat = (heat: string) => go(`heat=${encodeURIComponent(heat)}`);
   const selectInward = (id: string) => go(`inward=${encodeURIComponent(id)}`);
   const selectWo = (woNumber: string) => go(`wo=${encodeURIComponent(woNumber)}`);
-  const switchTab = (next: Tab) => { if (next !== tab) { setTab(next); go(""); } }; // clears the other selection
+  const switchTab = (next: Tab) => {
+    if (next !== tab) {
+      setTab(next);
+      go("");
+    }
+  }; // clears the other selection
 
   const tabBtn = (key: Tab, label: string) => (
     <button
-      type="button" onClick={() => switchTab(key)} role="tab" aria-selected={tab === key}
-      className={`rounded-t-lg border-b-2 px-4 py-2 text-xs font-semibold ${tab === key ? "border-blue-600 text-blue-600 dark:text-blue-400" : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"}`}
+      type="button"
+      onClick={() => switchTab(key)}
+      role="tab"
+      aria-selected={tab === key}
+      className={`rounded-t-lg border-b-2 px-4 py-2 text-xs font-semibold ${
+        tab === key
+          ? "border-blue-600 text-blue-600 dark:text-blue-400"
+          : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+      }`}
     >
       {label}
     </button>
@@ -50,15 +76,44 @@ export default function TraceabilityContent() {
         </p>
         <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">Traceability</h1>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Read-only view of where continuous casting material came from and where it went. All figures and relationships come
-          from the backend.
+          Read-only view of where continuous casting material came from and where it went. Bidirectional heat number, inward, and Work Order tracing.
         </p>
       </div>
 
       <div role="tablist" className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {tabBtn("heat", "By Heat Number")}
         {tabBtn("inward", "By Inward")}
         {tabBtn("wo", "By Work Order")}
       </div>
+
+      {tab === "heat" && (
+        <div className="space-y-4">
+          <section className="rounded-xl border border-zinc-200 bg-white p-4 text-xs dark:border-zinc-800 dark:bg-zinc-900">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (heatInput.trim()) selectHeat(heatInput.trim());
+              }}
+              className="flex flex-wrap items-end gap-3"
+            >
+              <div className="min-w-[280px]">
+                <label className={ccLabelCls}>Enter Heat / Melt Number</label>
+                <input
+                  className={ccInputCls}
+                  placeholder="e.g. HT-2026-089A"
+                  value={heatInput}
+                  onChange={(e) => setHeatInput(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className={ccSecondaryBtnCls}>
+                Trace Heat
+              </button>
+            </form>
+          </section>
+          {heatParam && <CCHeatTraceView key={heatParam} heatNumber={heatParam} />}
+        </div>
+      )}
 
       {tab === "inward" && (
         <div className="space-y-4">

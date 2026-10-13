@@ -17,6 +17,8 @@ def list_work_orders(
     stage: Optional[str] = Query(None, description="Filter by current stage"),
     customer_code: Optional[str] = Query(None, description="Filter by customer code"),
     status_filter: Optional[str] = Query(None, description="Filter by WO status"),
+    casting_process: Optional[str] = Query(
+        None, description="Filter by casting process / route, e.g. 'CONTINUOUS' for Continuous Casting-eligible WOs"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -29,6 +31,7 @@ def list_work_orders(
         stage=stage,
         customer_code=customer_code,
         status_filter=status_filter,
+        casting_process=casting_process,
         limit=limit,
         offset=offset
     )

@@ -312,6 +312,21 @@ def auto_migrate_schema():
         # Conversion part mappings
         "ALTER TABLE conversion_part_mappings ADD COLUMN IF NOT EXISTS created_by_id UUID;",
         "ALTER TABLE conversion_part_mappings ADD COLUMN IF NOT EXISTS updated_by_id UUID;",
+
+        # Continuous Casting Heat Number Tracking
+        "ALTER TABLE cc_inwards ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
+        "ALTER TABLE cc_stock_units ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
+        "ALTER TABLE cc_cut_records ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
+
+        # PO Master uniqueness: some pre-existing installations only ever got the old,
+        # single-column unique index on po_number (from before the model's composite
+        # (customer_id, po_number) uniqueness existed), which wrongly rejects the same
+        # po_number for two different customers. Replace it with the composite unique
+        # index the current model intends, restoring po_number's own index as a plain,
+        # non-unique lookup index.
+        "DROP INDEX IF EXISTS ix_po_master_po_number;",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_po_master_customer_po ON po_master (customer_id, po_number);",
+        "CREATE INDEX IF NOT EXISTS ix_po_master_po_number ON po_master (po_number);",
     ]
 
 

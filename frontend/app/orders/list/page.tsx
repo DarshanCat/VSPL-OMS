@@ -20,6 +20,45 @@ import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
 import { getOarList, OARListItem, createReplacement, ReplacementResult } from "@/lib/api";
 
+function POCoverageBadge({
+  status,
+  customerPo,
+  size = "sm",
+}: {
+  status?: string | null;
+  customerPo?: string | null;
+  size?: "sm" | "md";
+}) {
+  const po = customerPo || "—";
+  switch (status) {
+    case "SCHEDULED_AWAITING_PO":
+      return (
+        <Badge variant="purple" size={size} className="font-semibold whitespace-nowrap">
+          Schedule — Awaiting PO
+        </Badge>
+      );
+    case "COMMERCIAL_PO_PENDING":
+      return (
+        <Badge variant="amber" size={size} className="font-semibold whitespace-nowrap">
+          PO: {po} — Pending PO Master
+        </Badge>
+      );
+    case "PO_MATCHED":
+      return (
+        <Badge variant="green" size={size} className="font-semibold whitespace-nowrap">
+          PO: {po} — Matched
+        </Badge>
+      );
+    case "UNCONFIRMED":
+    default:
+      return (
+        <Badge variant="gray" size={size} className="font-semibold whitespace-nowrap">
+          PO status unconfirmed
+        </Badge>
+      );
+  }
+}
+
 export default function OarWoListPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -47,7 +86,15 @@ export default function OarWoListPage() {
         status_filter: status || undefined,
         limit: 200
       });
-      setOars(Array.isArray(data) ? data : []);
+      const items = Array.isArray(data) ? data : [];
+      setOars(items);
+      if (searchTerm.trim()) {
+        const nextExpanded: Record<string, boolean> = {};
+        items.forEach((item) => {
+          nextExpanded[item.oar_number] = true;
+        });
+        setExpanded(nextExpanded);
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to load OAR & WO list.");
       setOars([]);
@@ -229,7 +276,9 @@ export default function OarWoListPage() {
                         <div className="text-[10px] text-zinc-400 font-mono">{oar.customer_code}</div>
                       </td>
                       <td className="py-3 px-3">
-                        <div className="font-mono text-zinc-600 dark:text-zinc-400">{oar.customer_po}</div>
+                        <div className="mb-1">
+                          <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
+                        </div>
                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">{oar.part_number}</div>
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-zinc-900 dark:text-zinc-100">
@@ -335,13 +384,14 @@ export default function OarWoListPage() {
                             {/* WO-level genealogy table */}
                             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-xs">
                               <div className="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
                                     Work Order Genealogy Breakdown
                                   </span>
                                   <span className="text-[10px] text-zinc-400 font-mono">
                                     ({oar.work_orders.length} Work Order{oar.work_orders.length === 1 ? "" : "s"} linked to {oar.oar_number})
                                   </span>
+                                  <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
                                 </div>
 
                                 {oar.oar_shortfall > 0 && (
@@ -441,15 +491,17 @@ export default function OarWoListPage() {
                                           </td>
                                           <td className="py-2 px-2.5 text-right">
                                             <div className="flex items-center justify-end gap-2">
-                                              {wo.release_status !== "RELEASED" && (
-                                                <Link
-                                                  href="/planning/wo-release"
-                                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 hover:text-purple-700 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800"
-                                                >
-                                                  <span>Release</span>
-                                                  <ArrowRight className="h-2.5 w-2.5" />
-                                                </Link>
-                                              )}
+                                              <Link
+                                                href={`/planning/wo-release?wo=${encodeURIComponent(wo.wo_number)}`}
+                                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${
+                                                  wo.release_status === "RELEASED"
+                                                    ? "text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100"
+                                                    : "text-purple-600 hover:text-purple-700 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800"
+                                                }`}
+                                              >
+                                                <span>{wo.release_status === "RELEASED" ? "Route / Release" : "Release"}</span>
+                                                <ArrowRight className="h-2.5 w-2.5" />
+                                              </Link>
                                               <Link
                                                 href={`/production/tracking?wo=${wo.wo_number}`}
                                                 className="inline-flex items-center gap-1 text-blue-600 hover:underline font-bold text-[10px]"
@@ -542,7 +594,7 @@ export default function OarWoListPage() {
                       Close
                     </button>
                     <Link
-                      href="/planning/wo-release"
+                      href={patchSuccess?.replacement_wo_number ? `/planning/wo-release?wo=${encodeURIComponent(patchSuccess.replacement_wo_number)}` : "/planning/wo-release"}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm transition-colors"
                     >
                       <span>Proceed to WO Release</span>

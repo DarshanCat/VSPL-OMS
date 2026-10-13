@@ -1,13 +1,19 @@
 import math
+import re
 from datetime import datetime, date
 from typing import List, Dict, Optional, Tuple, Union
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.nc import NCRecord
+from app.models.order import Order, Customer, Part, OrderStatus
+from app.models.audit import AuditLog
+from app.models.oms_exception import OMSException
 from app.schemas.production import ReconciliationItem, PlantReconciliationResponse
+from app.schemas.oms import WOOarLinkRow, LinkResult, LinkException, LinkResultItem
 
 # Authoritative OMS Yields & Defaults from oms_core/oms_engine.py
 DEFAULT_YIELDS: Dict[str, float] = {
@@ -461,3 +467,337 @@ class OMSIntegrationService:
             reconciliations=recs,
             is_plant_balanced=(mismatched_count == 0)
         )
+
+    @staticmethod
+    def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
+        return link_wo_to_oar(db, rows)
+
+
+def _normalize_code(val: Optional[str]) -> str:
+    if not val:
+        return ""
+    s = str(val).strip().upper()
+    return re.sub(r"\s*-\s*", "-", s)
+
+
+def _parse_delivery_date(val: Optional[Union[date, datetime, str]]) -> Optional[date]:
+    if not val:
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "null", "nan"):
+        return None
+    date_part = s.split()[0].split("T")[0]
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(date_part, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _record_exception(db: Session, exc_type: str, detail: str, wo_id: Optional[str] = None):
+    try:
+        exc = OMSException(
+            exception_type=exc_type,
+            detail=detail,
+            wo_id=wo_id
+        )
+        db.add(exc)
+        db.flush()
+    except Exception:
+        pass
+    try:
+        audit = AuditLog(
+            user_name="system:wo-oar-link",
+            action="LINK_EXCEPTION",
+            entity="WorkOrder" if wo_id else "OAR",
+            entity_id=wo_id,
+            new_value=exc_type,
+            details=detail
+        )
+        db.add(audit)
+        db.flush()
+    except Exception:
+        pass
+
+
+def next_oar_sequence(db: Session) -> str:
+    """Collision-free next OAR sequence generator."""
+    pattern = re.compile(r"^OAR-(\d+)$", re.IGNORECASE)
+    highest = 0
+    for (oar_num,) in db.query(Order.oar_number).filter(Order.oar_number.isnot(None)).all():
+        if oar_num:
+            m = pattern.match(oar_num.strip())
+            if m:
+                try:
+                    highest = max(highest, int(m.group(1)))
+                except ValueError:
+                    pass
+    if highest == 0:
+        count = db.query(Order).count()
+        return f"OAR-{count + 1:04d}"
+    return f"OAR-{highest + 1:04d}"
+
+
+def _find_or_create_customer(db: Session, cust_str: str) -> Customer:
+    cleaned = cust_str.strip()
+    cust = db.query(Customer).filter(
+        or_(
+            func.lower(Customer.name) == cleaned.lower(),
+            func.lower(Customer.customer_code) == cleaned.lower()
+        )
+    ).first()
+    if cust:
+        return cust
+    norm_input = re.sub(r"[^a-zA-Z0-9]", "", cleaned).lower()
+    for c in db.query(Customer).all():
+        if (
+            re.sub(r"[^a-zA-Z0-9]", "", c.name).lower() == norm_input
+            or re.sub(r"[^a-zA-Z0-9]", "", c.customer_code).lower() == norm_input
+        ):
+            return c
+    prefix = re.sub(r"[^A-Za-z]", "", cleaned)[:4].upper() or "CUST"
+    code = prefix
+    counter = 1
+    while db.query(Customer).filter(Customer.customer_code == code).first():
+        code = f"{prefix[:3]}{counter}"
+        counter += 1
+    cust = Customer(customer_code=code, name=cleaned, is_active=True)
+    db.add(cust)
+    db.flush()
+    return cust
+
+
+def _find_or_create_part(db: Session, part_no_str: str, grade: Optional[str] = None) -> Part:
+    cleaned = part_no_str.strip()
+    part = db.query(Part).filter(
+        func.lower(Part.part_number) == cleaned.lower()
+    ).first()
+    if part:
+        return part
+    norm_input = re.sub(r"[^a-zA-Z0-9]", "", cleaned).lower()
+    for p in db.query(Part).all():
+        if re.sub(r"[^a-zA-Z0-9]", "", p.part_number).lower() == norm_input:
+            return p
+    part = Part(
+        part_number=cleaned,
+        grade=grade or "Standard",
+        description=f"Component {cleaned}"
+    )
+    db.add(part)
+    db.flush()
+    return part
+
+
+def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
+    """
+    Links team-assigned Work Order IDs to OARs (Orders) idempotently.
+    Creates the OAR (= accepting a PO) only when one doesn't already exist for that order.
+    Executes in a single DB transaction per row so one invalid row does not abort the batch.
+    """
+    result = LinkResult(
+        total_processed=len(rows),
+        linked_count=0,
+        already_linked_count=0,
+        created_oars_count=0,
+        exceptions_count=0
+    )
+
+    for row in rows:
+        try:
+            # 1. SKIP IF ALREADY LINKED
+            # If WorkOrder.query.filter_by(wo_id=row.wo_id).first() exists -> record as "already_linked", continue.
+            norm_wo = _normalize_code(row.wo_id)
+            existing_wo = db.query(WorkOrder).filter(
+                or_(
+                    WorkOrder.wo_number == row.wo_id.strip(),
+                    WorkOrder.wo_number == norm_wo
+                )
+            ).first()
+
+            if existing_wo:
+                result.already_linked.append(row.wo_id)
+                result.items.append(LinkResultItem(
+                    wo_id=row.wo_id,
+                    oar_no=existing_wo.order.oar_number if existing_wo.order else None,
+                    status="already_linked",
+                    detail="Work Order already exists in software"
+                ))
+                continue
+
+            # 2. REQUIRED FIELDS
+            # If any of customer_po_number, part_no, customer, wo_quantity is missing/blank,
+            # or wo_quantity <= 0 -> insert into Exceptions table, continue.
+            missing_fields = []
+            if not row.customer_po_number or not str(row.customer_po_number).strip():
+                missing_fields.append("customer_po_number")
+            if not row.part_no or not str(row.part_no).strip():
+                missing_fields.append("part_no")
+            if not row.customer or not str(row.customer).strip():
+                missing_fields.append("customer")
+            if row.wo_quantity is None or row.wo_quantity <= 0:
+                missing_fields.append(f"wo_quantity (got {row.wo_quantity})")
+
+            if missing_fields:
+                detail = f"WO {row.wo_id}: missing or invalid required field(s): {', '.join(missing_fields)}"
+                _record_exception(db, "missing_field", detail, row.wo_id)
+                db.commit()
+                result.exceptions.append(LinkException(type="missing_field", detail=detail, wo_id=row.wo_id))
+                result.items.append(LinkResultItem(wo_id=row.wo_id, oar_no=None, status="exception", detail=detail))
+                continue
+
+            # Resolve Customer and Part
+            cust = _find_or_create_customer(db, row.customer)
+            part = _find_or_create_part(db, row.part_no, grade=row.grade)
+
+            # 3. FIND OR CREATE THE OAR — idempotent on (customer_po_number, part_no).
+            # This is the 'one accepted order = one OAR' rule.
+            clean_po = row.customer_po_number.strip()
+            clean_part_no = row.part_no.strip()
+
+            existing_oar = db.query(Order).join(Part).filter(
+                func.lower(func.trim(Order.customer_po)) == clean_po.lower(),
+                func.lower(func.trim(Part.part_number)) == clean_part_no.lower()
+            ).first()
+
+            if not existing_oar:
+                existing_oar = db.query(Order).filter(
+                    Order.part_id == part.id,
+                    func.lower(func.trim(Order.customer_po)) == clean_po.lower()
+                ).first()
+
+            oar = None
+            if existing_oar:
+                # CASE A — existing_oar found:
+                # If row.oar_no and row.oar_no != existing_oar.oar_no:
+                # insert Exceptions(type="oar_mismatch", detail=f"WO {row.wo_id}: input says {row.oar_no}, DB has {existing_oar.oar_no}")
+                # proceed using existing_oar.oar_no — DB is source of truth
+                if row.oar_no and row.oar_no.strip():
+                    norm_row_oar = _normalize_code(row.oar_no)
+                    norm_db_oar = _normalize_code(existing_oar.oar_number)
+                    if norm_row_oar != norm_db_oar:
+                        detail = f"WO {row.wo_id}: input says {row.oar_no}, DB has {existing_oar.oar_number}"
+                        _record_exception(db, "oar_mismatch", detail, row.wo_id)
+                        result.exceptions.append(LinkException(type="oar_mismatch", detail=detail, wo_id=row.wo_id))
+
+                # If existing_oar.customer.lower() != row.customer.lower():
+                # insert Exceptions(type="customer_mismatch", detail=f"WO {row.wo_id}: OAR {existing_oar.oar_no}")
+                # continue
+                existing_cust_name = existing_oar.customer.name.strip().lower() if existing_oar.customer else ""
+                existing_cust_code = existing_oar.customer.customer_code.strip().lower() if existing_oar.customer else ""
+                input_cust = row.customer.strip().lower()
+
+                cust_matched = (
+                    input_cust == existing_cust_name
+                    or input_cust == existing_cust_code
+                    or input_cust in existing_cust_name
+                    or existing_cust_name in input_cust
+                    or re.sub(r"[^a-zA-Z0-9]", "", input_cust) == re.sub(r"[^a-zA-Z0-9]", "", existing_cust_name)
+                )
+
+                if not cust_matched:
+                    detail = f"WO {row.wo_id}: OAR {existing_oar.oar_number} customer mismatch (input says '{row.customer}', DB has '{existing_oar.customer.name if existing_oar.customer else ''}')"
+                    _record_exception(db, "customer_mismatch", detail, row.wo_id)
+                    db.commit()
+                    result.exceptions.append(LinkException(type="customer_mismatch", detail=detail, wo_id=row.wo_id))
+                    result.items.append(LinkResultItem(wo_id=row.wo_id, oar_no=existing_oar.oar_number, status="exception", detail=detail))
+                    continue
+
+                oar = existing_oar
+                # do NOT create a new OAR row, do NOT modify oar.po_quantity
+            else:
+                # CASE B — no existing_oar (genuinely new order):
+                if row.oar_no and row.oar_no.strip():
+                    cand_oar = _normalize_code(row.oar_no)
+                    if not db.query(Order).filter(Order.oar_number == cand_oar).first():
+                        oar_num = cand_oar
+                    else:
+                        oar_num = next_oar_sequence(db)
+                else:
+                    oar_num = next_oar_sequence(db)
+
+                deliv_date = _parse_delivery_date(row.cust_delivery_date)
+                po_qty = row.po_quantity if (row.po_quantity and row.po_quantity > 0) else row.wo_quantity
+
+                oar = Order(
+                    oar_number=oar_num,
+                    customer_id=cust.id,
+                    part_id=part.id,
+                    customer_po=clean_po,
+                    po_qty=po_qty,
+                    max_batch_size=500,
+                    delivery_date=deliv_date or date.today(),
+                    order_type="Standard",
+                    status=OrderStatus.ACCEPT,
+                    source_type="schedule" if "SCH" in clean_po.upper() else "po"
+                )
+                db.add(oar)
+                db.flush()
+                result.created_oars.append(oar.oar_number)
+
+                db.add(AuditLog(
+                    user_name="system:wo-oar-link",
+                    action="OAR_CREATE",
+                    entity="Order",
+                    entity_id=oar.oar_number,
+                    new_value=f"PO: {clean_po}, Qty: {po_qty}",
+                    details=f"via WO-OAR link, WO {row.wo_id}"
+                ))
+
+            # 4. CREATE THE WO (team-assigned ID — never auto-generate it here; this input's WO IDs are authoritative)
+            wo = WorkOrder(
+                wo_number=row.wo_id.strip(),
+                order_id=oar.id,
+                physical_wo_qty=row.wo_quantity,
+                current_stage="F1",
+                projected_final_good=row.wo_quantity,
+                shortfall="No",
+                status=WOStatus.IN_PRODUCTION,
+                casting_process="CENTRIFUGAL"
+            )
+            db.add(wo)
+            db.flush()
+
+            # Initialize 7-stage routes and StageWIP
+            OMSIntegrationService.initialize_wo_stages(db, wo)
+
+            # Audit log
+            db.add(AuditLog(
+                user_name="system:wo-oar-link",
+                action="WO_CREATE",
+                entity="WorkOrder",
+                entity_id=wo.wo_number,
+                new_value=f"Qty: {row.wo_quantity}, OAR: {oar.oar_number}",
+                details=f"Linked to OAR {oar.oar_number} for PO {clean_po}"
+            ))
+
+            db.commit()
+            result.linked.append(wo.wo_number)
+            result.items.append(LinkResultItem(
+                wo_id=wo.wo_number,
+                oar_no=oar.oar_number,
+                status="linked",
+                detail=f"Linked to OAR {oar.oar_number}"
+            ))
+
+        except Exception as e:
+            db.rollback()
+            detail = f"WO {row.wo_id}: unexpected failure: {str(e)}"
+            _record_exception(db, "system_error", detail, row.wo_id)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+            result.exceptions.append(LinkException(type="system_error", detail=detail, wo_id=row.wo_id))
+            result.items.append(LinkResultItem(wo_id=row.wo_id, oar_no=None, status="exception", detail=detail))
+
+    result.linked_count = len(result.linked)
+    result.already_linked_count = len(result.already_linked)
+    result.created_oars_count = len(result.created_oars)
+    result.exceptions_count = len(result.exceptions)
+    return result
+

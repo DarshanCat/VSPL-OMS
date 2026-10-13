@@ -15,6 +15,7 @@ export const CC_HOLD_ROLES = ["admin", "store", "qa"] as const;
 export const CC_HOLD_RELEASE_ROLES = ["admin", "qa"] as const;
 export const CC_SCRAP_ROLES = ["admin", "store"] as const;
 export const CC_ADJUSTMENT_ROLES = ["admin"] as const;
+export const CC_HEAT_RECONCILE_ROLES = ["admin", "qa", "planner", "store"] as const;
 
 export type CCRoleTuple = readonly string[];
 

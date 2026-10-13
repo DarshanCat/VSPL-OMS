@@ -186,16 +186,16 @@ export function CCRoutingFormModal({ mode, isOpen, woNumber, materials, activeRo
               <p className="col-span-2 -mt-1 text-[10px] text-zinc-400">Defaults come from the selected material and can be edited. The backend decides whether the routing is valid.</p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {num("Finished dimension A (mm)", "dimA")}
-              {num("Finished dimension B (mm)", "dimB", true)}
+              {num("Finished dimension A (mm)", "dimA", false, "Cannot exceed the material's stock dimension A")}
+              {num("Finished dimension B (mm)", "dimB", true, "Not cross-checked against the material")}
               {num("Finished axial length (mm)", "axial")}
-              {num("Machining stock A (mm)", "stockA", false, "0 or more")}
-              {num("Machining stock B (mm)", "stockB", false, "0 or more")}
+              {num("Machining stock A (mm)", "stockA", false, "0 or more; added to axial length for the blank")}
+              {num("Machining stock B (mm)", "stockB", false, "0 or more; a second machining allowance")}
               <div />
-              {num("Planned blanks", "blanks")}
-              {num("Planned cuts", "cuts", false, "entered, not derived")}
-              {num("Kerf (mm)", "kerf", false, "0 or more")}
-              {num("End trim, total (mm)", "trim", false, "0 or more")}
+              {num("Planned blanks", "blanks", false, "Entered, not derived: no reliable WO-quantity rule exists yet")}
+              {num("Planned cuts", "cuts", false, "Entered, not derived: not always equal to planned blanks")}
+              {num("Kerf (mm)", "kerf", false, "Whole mm only; never rounded from a fractional value")}
+              {num("End trim, total (mm)", "trim", false, "Total for the whole routing, not per blank")}
             </div>
             <p className="text-[11px] text-zinc-500">Blank length and gross required length are calculated by the backend and shown after the routing is saved.</p>
             {mode === "supersede" && (

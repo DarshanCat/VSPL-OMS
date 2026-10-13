@@ -23,6 +23,9 @@ class WorkOrderListItem(BaseModel):
     oar_number: Optional[str] = None
     customer_code: str
     customer_name: str
+    customer_po: Optional[str] = None
+    source_type: Optional[str] = "po"
+    po_coverage_status: Optional[str] = None
     part_number: str
     part_name: Optional[str] = None
     grade: Optional[str] = None
@@ -80,6 +83,8 @@ class WorkOrderTrackingDetail(BaseModel):
     customer_code: str
     customer_name: str
     customer_po: str
+    source_type: Optional[str] = "po"
+    po_coverage_status: Optional[str] = None
     part_number: str
     part_name: Optional[str] = None
     grade: Optional[str] = None
@@ -142,6 +147,10 @@ class OARListItem(BaseModel):
     customer_code: str
     customer_name: str
     customer_po: str
+    source_type: Optional[str] = "po"
+    oar_po_status: Optional[str] = None
+    po_matched: bool = False
+    po_coverage_status: Optional[str] = "COMMERCIAL_PO_PENDING"
     part_number: str
     oar_qty: int
     allocated_qty: int
@@ -165,6 +174,10 @@ class OARGenealogyResponse(BaseModel):
     customer_code: str
     customer_name: str
     customer_po: str
+    source_type: Optional[str] = "po"
+    oar_po_status: Optional[str] = None
+    po_matched: bool = False
+    po_coverage_status: Optional[str] = "COMMERCIAL_PO_PENDING"
     part_number: str
     oar_qty: int
     num_wos: int

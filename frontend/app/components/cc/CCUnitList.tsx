@@ -11,11 +11,11 @@ import {
 import { ccInputCls, ccLabelCls, ccSecondaryBtnCls } from "@/lib/continuousCastingForm";
 
 interface Filters {
-  inward_id: string; material_id: string; status: "" | CCStockUnitStatus; location: string;
+  inward_id: string; heat_number: string; material_id: string; status: "" | CCStockUnitStatus; location: string;
   on_hold: "" | "true" | "false"; available: "" | "true" | "false"; parent_unit_id: string;
 }
 const NO_FILTERS: Filters = {
-  inward_id: "", material_id: "", status: "", location: "", on_hold: "", available: "", parent_unit_id: "",
+  inward_id: "", heat_number: "", material_id: "", status: "", location: "", on_hold: "", available: "", parent_unit_id: "",
 };
 const triBool = (v: "" | "true" | "false") => (v === "" ? undefined : v === "true");
 
@@ -55,7 +55,10 @@ export function CCUnitList({ onSelect, selectedId, refreshKey = 0, pageSize = 25
     setLoading(true);
     try {
       const page = await ccListStockUnits({
-        inward_id: applied.inward_id, material_id: applied.material_id, location: applied.location,
+        inward_id: applied.inward_id,
+        heat_number: applied.heat_number,
+        material_id: applied.material_id,
+        location: applied.location,
         parent_unit_id: applied.parent_unit_id.trim(),
         status: applied.status === "" ? undefined : applied.status,
         on_hold: triBool(applied.on_hold), available: triBool(applied.available),
@@ -80,6 +83,16 @@ export function CCUnitList({ onSelect, selectedId, refreshKey = 0, pageSize = 25
           className={`font-mono font-semibold enabled:hover:underline disabled:cursor-not-allowed disabled:text-zinc-400 ${u.unit_id === selectedId ? "text-emerald-600" : "text-blue-600 dark:text-blue-400"}`}>
           {u.unit_number}
         </button>
+      ),
+    },
+    {
+      header: "Heat no.",
+      render: (u) => u.heat_number ? (
+        <span className="font-mono text-xs font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+          {u.heat_number}
+        </span>
+      ) : (
+        <span className="text-amber-500 font-mono text-[11px] italic">UNRECONCILED</span>
       ),
     },
     { header: "Inward", render: (u) => <span className="font-mono">{u.inward_number}</span> },
@@ -115,6 +128,10 @@ export function CCUnitList({ onSelect, selectedId, refreshKey = 0, pageSize = 25
     <div className="space-y-2">
       <form onSubmit={(e) => { e.preventDefault(); setOffset(0); setApplied(filters); }}>
         <CCFilterBar onClear={() => { setFilters(NO_FILTERS); setApplied(NO_FILTERS); setOffset(0); }}>
+          <div>
+            <label className={ccLabelCls}>Heat no.</label>
+            <input className={ccInputCls} placeholder="e.g. HT-2026" value={filters.heat_number} onChange={(e) => setFilters({ ...filters, heat_number: e.target.value })} />
+          </div>
           <div>
             <label className={ccLabelCls}>Inward</label>
             <select className={ccInputCls} value={filters.inward_id} onChange={(e) => setFilters({ ...filters, inward_id: e.target.value })}>

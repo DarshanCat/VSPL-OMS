@@ -66,6 +66,24 @@ class POMasterCreate(BaseModel):
     lines: List[POLineCreate] = Field(..., min_length=1)
 
 
+class POLineWorkOrderSummary(BaseModel):
+    """A single Work Order created under an OAR linked to this PO line."""
+    wo_id: str
+    wo_number: str
+    wo_status: str
+    release_status: str  # AWAITING_ENG_RELEASE | AWAITING_MFG_RELEASE | AWAITING_WO_RELEASE | RELEASED
+
+
+class POLineOrderSummary(BaseModel):
+    """A single OAR (Order) linked to this PO line, with its own WO(s). A PO line can have
+    zero, one, or multiple linked OARs -- the caller must not assume a single OAR per line."""
+    oar_id: str
+    oar_number: Optional[str] = None
+    order_status: str
+    po_coverage_status: str  # PO_MATCHED | SCHEDULED_AWAITING_PO | COMMERCIAL_PO_PENDING | UNCONFIRMED
+    work_orders: List["POLineWorkOrderSummary"] = []
+
+
 class POLineOut(BaseModel):
     id: str
     part_number: str
@@ -74,6 +92,10 @@ class POLineOut(BaseModel):
     allocated_qty: int
     available_qty: int
     required_date: Optional[date] = None
+    # PO -> OAR -> WO traceability (Section 3): every OAR raised against this line, and
+    # every WO created under each of those OARs. Empty list means no OAR has been raised
+    # yet -- the caller renders "OAR not created", never an arbitrary/guessed record.
+    orders: List["POLineOrderSummary"] = []
 
 
 class CustomerPartOut(BaseModel):
@@ -105,6 +127,23 @@ class POMasterOut(BaseModel):
     validity_date: Optional[date] = None
     status: str
     lines: List[POLineOut] = []
+
+
+class POLineUpdate(BaseModel):
+    id: Optional[str] = None
+    customer_part_number: Optional[str] = Field(None, max_length=200)
+    part_number: Optional[str] = Field(None, max_length=100)
+    po_qty: int = Field(..., gt=0, le=1_000_000)
+    required_date: Optional[date] = None
+
+
+class POMasterUpdate(BaseModel):
+    po_number: Optional[str] = Field(None, max_length=200)
+    customer_code: Optional[str] = Field(None, max_length=100)
+    po_date: Optional[date] = None
+    validity_date: Optional[date] = None
+    status: Optional[str] = Field(None, max_length=50)
+    lines: Optional[List[POLineUpdate]] = None
 
 
 

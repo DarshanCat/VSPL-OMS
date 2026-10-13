@@ -4,6 +4,7 @@ import { PackageCheck, Plus, X } from "lucide-react";
 import { Modal } from "@/app/components/ui/Modal";
 import { CCActionForm } from "@/app/components/cc/CCActionForm";
 import { CCConfirmModal } from "@/app/components/cc/CCConfirmModal";
+import { CCReconcileHeatModal } from "@/app/components/cc/CCReconcileHeatModal";
 import { CCErrorBanner } from "@/app/components/cc/CCErrorBanner";
 import { CCFilterBar } from "@/app/components/cc/CCFilterBar";
 import { CCLengthCell } from "@/app/components/cc/CCLengthCell";
@@ -16,7 +17,7 @@ import {
   CCInwardDetail, CCInwardQADecisionResult, CCInwardResult, CCInwardStockOut, CCMaterialOut, CCQADecision, CCQAStatus,
   CCStockUnitOut,
 } from "@/lib/continuousCastingApi";
-import { CC_INWARD_ROLES, CC_QA_ROLES } from "@/lib/continuousCastingRoles";
+import { CC_INWARD_ROLES, CC_QA_ROLES, CC_HEAT_RECONCILE_ROLES } from "@/lib/continuousCastingRoles";
 import {
   expandUnitLengths, formatMetres, isBlankGroup, LengthGroupInput, summarizeGroups, validateLengthGroups,
 } from "@/lib/continuousCastingInwardGroups";
@@ -27,8 +28,8 @@ import {
 const PAGE_SIZE = 50;
 const UNIT_PAGE = 500; // the backend maximum page size
 
-interface Filters { inward_number: string; material_id: string; qa_status: "" | CCQAStatus; has_free_stock: "" | "true" | "false" }
-const NO_FILTERS: Filters = { inward_number: "", material_id: "", qa_status: "", has_free_stock: "" };
+interface Filters { inward_number: string; heat_number: string; material_id: string; qa_status: "" | CCQAStatus; has_free_stock: "" | "true" | "false" }
+const NO_FILTERS: Filters = { inward_number: "", heat_number: "", material_id: "", qa_status: "", has_free_stock: "" };
 
 const httpStatus = (err: unknown) => (err as { response?: { status?: number } })?.response?.status;
 
@@ -50,7 +51,9 @@ export default function InwardContent() {
     setLoading(true);
     try {
       const page = await ccListInwards({
-        inward_number: applied.inward_number, material_id: applied.material_id,
+        inward_number: applied.inward_number,
+        heat_number: applied.heat_number,
+        material_id: applied.material_id,
         qa_status: applied.qa_status === "" ? undefined : applied.qa_status,
         has_free_stock: applied.has_free_stock === "" ? undefined : applied.has_free_stock === "true",
         limit: PAGE_SIZE, offset,
@@ -86,6 +89,16 @@ export default function InwardContent() {
           className="font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400">
           {r.inward_number}
         </button>
+      ),
+    },
+    {
+      header: "Heat no.",
+      render: (r) => r.heat_number ? (
+        <span className="font-mono text-xs font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+          {r.heat_number}
+        </span>
+      ) : (
+        <span className="text-amber-500 font-mono text-[11px] italic">UNRECONCILED</span>
       ),
     },
     { header: "Material", render: (r) => <span><span className="font-mono">{r.material_code}</span><br /><span className="text-zinc-400">{r.grade} / {r.section}</span></span> },
@@ -135,6 +148,10 @@ export default function InwardContent() {
           <div>
             <label className={ccLabelCls}>Inward no.</label>
             <input className={ccInputCls} value={filters.inward_number} onChange={(e) => setFilters({ ...filters, inward_number: e.target.value })} />
+          </div>
+          <div>
+            <label className={ccLabelCls}>Heat no.</label>
+            <input className={ccInputCls} placeholder="e.g. HT-2026" value={filters.heat_number} onChange={(e) => setFilters({ ...filters, heat_number: e.target.value })} />
           </div>
           <div>
             <label className={ccLabelCls}>Material</label>
@@ -190,6 +207,7 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
   isOpen: boolean; materials: CCMaterialOut[]; onClose: () => void; onCreated: (res: CCInwardResult) => void;
 }) {
   const [materialId, setMaterialId] = useState("");
+  const [heatNumber, setHeatNumber] = useState("");
   const [groups, setGroups] = useState<LengthGroupInput[]>([{ length: "", count: "" }]);
   const [grn, setGrn] = useState("");
   const [location, setLocation] = useState("");
@@ -206,7 +224,7 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
 
   useEffect(() => {
     if (!isOpen) return;
-    setMaterialId(""); setGroups([{ length: "", count: "" }]); setGrn(""); setLocation("");
+    setMaterialId(""); setHeatNumber(""); setGroups([{ length: "", count: "" }]); setGrn(""); setLocation("");
     setRemarks(""); setDeclPieces(""); setDeclTotal("");
     setError(null); setResult(null);
   }, [isOpen]);
@@ -245,6 +263,7 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
   const submit = async () => {
     if (inFlight.current) return;
     if (!materialId) return setError("Select a material.");
+    if (!heatNumber.trim()) return setError("Heat number is mandatory.");
     const check = validateLengthGroups(groups);
     if (!check.ok) return setError(check.error);
     const pieces = parseOptionalPositiveInt(declPieces);
@@ -258,6 +277,7 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
     try {
       const res = await ccCreateInward({
         material_id: materialId,
+        heat_number: heatNumber.trim(),
         unit_lengths_mm: expandUnitLengths(check.groups), // one entry per physical bar, built only now
         received_piece_count: pieces, received_total_length_mm: totalMm,
         grn_reference: grn.trim() || null, location: location.trim() || null, remarks: remarks.trim() || null,
@@ -282,6 +302,7 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
             </div>
             <dl className="grid grid-cols-2 gap-3">
               <div><dt className="text-zinc-500">Inward number</dt><dd><CCTxnNumber value={result.inward_number} /></dd></div>
+              <div><dt className="text-zinc-500">Heat number</dt><dd><span className="font-mono font-semibold">{result.heat_number ?? "-"}</span></dd></div>
               <div><dt className="text-zinc-500">QA status</dt><dd><CCStatusBadge status={result.qa_status} /></dd></div>
               <div><dt className="text-zinc-500">Physical units</dt><dd className="font-mono">{result.units.length}</dd></div>
               <div><dt className="text-zinc-500">Total received length</dt><dd><CCLengthCell mm={result.received_total_length_mm} /></dd></div>
@@ -291,11 +312,21 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
             </dl>
             <div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
               <table className="w-full">
-                <thead className="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-800/50"><tr><th className="px-2 py-1">Unit</th><th className="px-2 py-1">Ledger txn</th><th className="px-2 py-1 text-right">Length</th></tr></thead>
+                <thead className="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-800/50">
+                  <tr>
+                    <th className="px-2 py-1">Unit</th>
+                    <th className="px-2 py-1">Heat no.</th>
+                    <th className="px-2 py-1">Ledger txn</th>
+                    <th className="px-2 py-1 text-right">Length</th>
+                  </tr>
+                </thead>
                 <tbody>{result.units.map((u) => (
-                  <tr key={u.unit_number}><td className="px-2 py-1"><CCTxnNumber value={u.unit_number} /></td>
+                  <tr key={u.unit_number}>
+                    <td className="px-2 py-1"><CCTxnNumber value={u.unit_number} /></td>
+                    <td className="px-2 py-1 font-mono text-zinc-600 dark:text-zinc-300">{u.heat_number ?? result.heat_number ?? "-"}</td>
                     <td className="px-2 py-1"><CCTxnNumber value={u.ledger_transaction_number} /></td>
-                    <td className="px-2 py-1 text-right"><CCLengthCell mm={u.original_length_mm} /></td></tr>
+                    <td className="px-2 py-1 text-right"><CCLengthCell mm={u.original_length_mm} /></td>
+                  </tr>
                 ))}</tbody>
               </table>
             </div>
@@ -304,24 +335,38 @@ function CreateInwardModal({ isOpen, materials, onClose, onCreated }: {
           </div>
         ) : (
           <CCActionForm onSubmit={submit} busy={busy} error={error} submitLabel="Create inward">
-            <div>
-              <label className={ccLabelCls}>Material *</label>
-              <select className={ccInputCls} value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
-                <option value="">Select active material...</option>
-                {materials.map((m) => (
-                  <option key={m.material_id} value={m.material_id}>
-                    {m.material_code} — {m.grade} — {m.stock_dimension_a_mm}{m.stock_dimension_b_mm ? ` × ${m.stock_dimension_b_mm}` : ""} mm
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={ccLabelCls}>Material *</label>
+                <select className={ccInputCls} value={materialId} onChange={(e) => setMaterialId(e.target.value)}>
+                  <option value="">Select active material...</option>
+                  {materials.map((m) => (
+                    <option key={m.material_id} value={m.material_id}>
+                      {m.material_code} — {m.grade} — {m.stock_dimension_a_mm}{m.stock_dimension_b_mm ? ` × ${m.stock_dimension_b_mm}` : ""} mm
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={ccLabelCls}>Heat number *</label>
+                <input
+                  className={ccInputCls}
+                  value={heatNumber}
+                  onChange={(e) => setHeatNumber(e.target.value)}
+                  placeholder="e.g. HT-2026-089A"
+                  required
+                />
+              </div>
               {material && (
-                <dl className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-800/30 sm:grid-cols-4">
-                  <div><dt className="text-zinc-500">Grade</dt><dd>{material.grade}</dd></div>
-                  <div><dt className="text-zinc-500">Section</dt><dd>{material.section}</dd></div>
-                  <div><dt className="text-zinc-500">Dimension A</dt><dd className="font-mono">{material.stock_dimension_a_mm} mm</dd></div>
-                  <div><dt className="text-zinc-500">Dimension B</dt><dd className="font-mono">{material.stock_dimension_b_mm ? `${material.stock_dimension_b_mm} mm` : "-"}</dd></div>
-                  <p className="col-span-2 text-[11px] text-zinc-400 sm:col-span-4">Dimensions come from the material master and cannot be changed here.</p>
-                </dl>
+                <div className="col-span-1 sm:col-span-2">
+                  <dl className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-800/30 sm:grid-cols-4">
+                    <div><dt className="text-zinc-500">Grade</dt><dd>{material.grade}</dd></div>
+                    <div><dt className="text-zinc-500">Section</dt><dd>{material.section}</dd></div>
+                    <div><dt className="text-zinc-500">Dimension A</dt><dd className="font-mono">{material.stock_dimension_a_mm} mm</dd></div>
+                    <div><dt className="text-zinc-500">Dimension B</dt><dd className="font-mono">{material.stock_dimension_b_mm ? `${material.stock_dimension_b_mm} mm` : "-"}</dd></div>
+                    <p className="col-span-2 text-[11px] text-zinc-400 sm:col-span-4">Dimensions come from the material master and cannot be changed here.</p>
+                  </dl>
+                </div>
               )}
             </div>
 
@@ -396,6 +441,7 @@ function InwardDetailPanel({ inwardId, onClose, onChanged }: {
   const [decision, setDecision] = useState<CCQADecision | "">("");
   const [reason, setReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [qaError, setQaError] = useState<string | null>(null);
   const [qaResult, setQaResult] = useState<CCInwardQADecisionResult | null>(null);
@@ -452,6 +498,14 @@ function InwardDetailPanel({ inwardId, onClose, onChanged }: {
 
   const unitColumns: CCColumn<CCStockUnitOut>[] = [
     { header: "Unit", render: (u) => <CCTxnNumber value={u.unit_number} /> },
+    {
+      header: "Heat no.",
+      render: (u) => u.heat_number ? (
+        <span className="font-mono text-xs">{u.heat_number}</span>
+      ) : (
+        <span className="text-amber-500 font-mono text-[11px] italic">UNRECONCILED</span>
+      ),
+    },
     { header: "Parent", render: (u) => (u.parent_unit_number ? <span className="font-mono">{u.parent_unit_number}</span> : "-") },
     { header: "Original", className: "text-right", render: (u) => <CCLengthCell mm={u.original_length_mm} /> },
     { header: "Remaining", className: "text-right", render: (u) => <CCLengthCell mm={u.remaining_length_mm} /> },
@@ -486,6 +540,27 @@ function InwardDetailPanel({ inwardId, onClose, onChanged }: {
         <>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {kv("Inward number", <CCTxnNumber value={inward.inward_number} />)}
+            {kv(
+              "Heat number",
+              <div className="flex items-center gap-2">
+                {inward.heat_number ? (
+                  <span className="font-mono font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                    {inward.heat_number}
+                  </span>
+                ) : (
+                  <span className="text-amber-500 font-mono italic">UNRECONCILED</span>
+                )}
+                <CCRoleGate allowed={CC_HEAT_RECONCILE_ROLES}>
+                  <button
+                    type="button"
+                    onClick={() => setReconcileOpen(true)}
+                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Reconcile
+                  </button>
+                </CCRoleGate>
+              </div>
+            )}
             {kv("Material", <span className="font-mono">{inward.material_code}</span>)}
             {kv("Grade / section", `${inward.grade} / ${inward.section}`)}
             {kv("Dimensions (mm)", `${inward.stock_dimension_a_mm}${inward.stock_dimension_b_mm ? ` x ${inward.stock_dimension_b_mm}` : ""}`)}
@@ -590,6 +665,21 @@ function InwardDetailPanel({ inwardId, onClose, onChanged }: {
         </p>
         {reason.trim() && <p className="text-zinc-500">Reason: {reason.trim()}</p>}
       </CCConfirmModal>
+
+      {inward && (
+        <CCReconcileHeatModal
+          isOpen={reconcileOpen}
+          onClose={() => setReconcileOpen(false)}
+          onSuccess={() => {
+            void refresh();
+            onChanged();
+          }}
+          targetType="INWARD"
+          targetId={inward.inward_id}
+          targetNumber={inward.inward_number}
+          currentHeatNumber={inward.heat_number}
+        />
+      )}
     </section>
   );
 }
