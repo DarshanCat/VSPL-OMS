@@ -105,7 +105,7 @@ export function ProductionEntryContent() {
 
   // Load available WOs and the active Rejection Type master on mount
   useEffect(() => {
-    getWorkOrders({ limit: 100 })
+    getWorkOrders({ limit: 100, exclude_dispatched: true })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableWOs(data);
@@ -167,6 +167,14 @@ export function ProductionEntryContent() {
         getWorkOrderTracking(cleanWO),
         getWorkOrderRoute(cleanWO).catch(() => null),
       ]);
+
+      if (tracking.status === "dispatched" || tracking.status === "closed" || tracking.current_stage === "Completed") {
+        setWoData(null);
+        setRouteData(null);
+        setStageState(null);
+        setSearchError(`Work Order '${cleanWO}' is completely dispatched. Production logging is closed.`);
+        return;
+      }
 
       setWoData(tracking);
       setRouteData(route);

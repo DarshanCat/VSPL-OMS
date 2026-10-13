@@ -356,6 +356,7 @@ export async function getWorkOrders(params?: {
   casting_process?: string;
   release_filter?: string;
   sort_by?: string;
+  exclude_dispatched?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<WorkOrderListItem[]> {

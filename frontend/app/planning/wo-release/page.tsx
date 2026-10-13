@@ -150,6 +150,7 @@ function WOReleasePageInner() {
           search: queryTerm || undefined,
           release_filter: activeFilter !== "all" ? activeFilter : undefined,
           sort_by: activeSort,
+          exclude_dispatched: true,
           limit: 100,
         });
         const list = Array.isArray(data) ? data : [];
@@ -201,7 +202,7 @@ function WOReleasePageInner() {
     // If a specific WO was passed in the URL, search specifically for it first
     if (urlWo) {
       setSearching(true);
-      getWorkOrders({ search: urlWo.trim(), limit: 50, sort_by: sortBy })
+      getWorkOrders({ search: urlWo.trim(), limit: 50, sort_by: sortBy, exclude_dispatched: true })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           const found = list.find((w) => w.wo_number.toUpperCase() === urlWo.trim().toUpperCase()) || list[0];
@@ -210,7 +211,7 @@ function WOReleasePageInner() {
             applyWO(found);
           } else {
             // Fallback load default list
-            getWorkOrders({ limit: 100, sort_by: sortBy }).then((fallbackData) => {
+            getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true }).then((fallbackData) => {
               const fList = Array.isArray(fallbackData) ? fallbackData : [];
               setWos(fList);
               if (fList.length > 0) applyWO(fList[0]);
@@ -226,7 +227,7 @@ function WOReleasePageInner() {
     } else {
       // General load
       setSearching(true);
-      getWorkOrders({ limit: 100, sort_by: sortBy })
+      getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           setWos(list);
@@ -443,7 +444,11 @@ function WOReleasePageInner() {
                 <Badge variant={getRAGVariant(selectedWODetail.status)} size="sm">
                   {selectedWODetail.status.replace(/_/g, " ").toUpperCase()}
                 </Badge>
-                {selectedWODetail.is_released ? (
+                {selectedWODetail.status === "dispatched" || selectedWODetail.current_stage === "Completed" ? (
+                  <span className="rounded bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5 text-[10px] font-bold text-zinc-700 dark:text-zinc-300 border border-zinc-400">
+                    COMPLETELY DISPATCHED (CLOSED)
+                  </span>
+                ) : selectedWODetail.is_released ? (
                   <span className="rounded bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                     RELEASED {selectedWODetail.release_date ? `(${formatDate(selectedWODetail.release_date)})` : ""}
                   </span>
@@ -1045,10 +1050,17 @@ function WOReleasePageInner() {
             />
           </div>
 
+          {selectedWODetail && (selectedWODetail.status === "dispatched" || selectedWODetail.current_stage === "Completed") && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400 font-semibold flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>Work Order {selectedWO} is completely dispatched. It cannot be re-released or routed.</span>
+            </div>
+          )}
+
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !physicalQty || selectedStages.length === 0 || !selectedWO}
+              disabled={loading || !physicalQty || selectedStages.length === 0 || !selectedWO || selectedWODetail?.status === "dispatched" || selectedWODetail?.current_stage === "Completed"}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 disabled:opacity-50 transition-colors cursor-pointer"
             >
               <Factory className="h-4 w-4" />

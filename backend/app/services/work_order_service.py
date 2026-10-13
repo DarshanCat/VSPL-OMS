@@ -107,6 +107,7 @@ class WorkOrderService:
         casting_process: Optional[str] = None,
         release_filter: Optional[str] = None,
         sort_by: Optional[str] = None,
+        exclude_dispatched: bool = False,
         limit: int = 100,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
@@ -137,6 +138,13 @@ class WorkOrderService:
         if casting_process:
             query = query.filter(WorkOrder.casting_process == casting_process.strip().upper())
 
+        if exclude_dispatched:
+            query = query.filter(
+                WorkOrder.status != WOStatus.DISPATCHED,
+                WorkOrder.status != WOStatus.CLOSED,
+                WorkOrder.current_stage != "Completed"
+            )
+
         # Release filter for production planners
         if release_filter:
             rf = release_filter.strip().lower()
@@ -144,23 +152,30 @@ class WorkOrderService:
                 query = query.filter(
                     WorkOrder.release_date.is_(None),
                     WorkOrder.released_by.is_(None),
-                    ~WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED])
+                    ~WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED]),
+                    WorkOrder.current_stage != "Completed"
                 )
             elif rf == "released":
                 query = query.filter(
                     or_(
                         WorkOrder.release_date.isnot(None),
                         WorkOrder.released_by.isnot(None),
-                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED])
-                    )
+                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.READY])
+                    ),
+                    WorkOrder.status != WOStatus.DISPATCHED,
+                    WorkOrder.status != WOStatus.CLOSED,
+                    WorkOrder.current_stage != "Completed"
                 )
             elif rf == "ready_for_production":
                 query = query.filter(
                     or_(
                         WorkOrder.release_date.isnot(None),
                         WorkOrder.manufacturing_released_at.isnot(None),
-                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.OPEN, WOStatus.PLANNED])
-                    )
+                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.OPEN, WOStatus.PLANNED, WOStatus.READY])
+                    ),
+                    WorkOrder.status != WOStatus.DISPATCHED,
+                    WorkOrder.status != WOStatus.CLOSED,
+                    WorkOrder.current_stage != "Completed"
                 )
 
         # Date-wise sorting for production planning

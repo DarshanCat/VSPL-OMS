@@ -79,7 +79,7 @@ export function MovePartsContent() {
 
   // Fetch quick selectable active WOs from backend on load
   useEffect(() => {
-    getWorkOrders({ limit: 20 })
+    getWorkOrders({ limit: 50, exclude_dispatched: true })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableWOs(data);
@@ -106,6 +106,13 @@ export function MovePartsContent() {
 
     try {
       const data = await getWorkOrderTracking(targetWO);
+      if (data.status === "dispatched" || data.status === "closed" || data.current_stage === "Completed") {
+        setWoData(null);
+        setMlDelayPred(null);
+        setMlRejPred(null);
+        setSearchError(`Work Order '${targetWO}' is completely dispatched. Material movement is closed.`);
+        return;
+      }
       setWoData(data);
       setSearchTerm(data.wo_number);
 

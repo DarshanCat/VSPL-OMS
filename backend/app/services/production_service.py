@@ -156,10 +156,10 @@ class ProductionService:
                 detail="Stage movement cannot cross Work Orders."
             )
 
-        if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED):
+        if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED) or wo.current_stage == "Completed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot move parts for Work Order '{req.wo_number}' with status '{wo.status.value}'."
+                detail=f"Cannot move parts for Work Order '{req.wo_number}'. The work order is completely dispatched."
             )
         ProductionService._enforce_release_gate(wo)
         if req.rejected_quantity > 0:
@@ -492,10 +492,10 @@ class ProductionService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Work Order '{req.wo_number}' not found."
             )
-        if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED):
+        if wo.status in (WOStatus.CLOSED, WOStatus.DISPATCHED) or wo.current_stage == "Completed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot record production for Work Order '{req.wo_number}' with status '{wo.status.value}'."
+                detail=f"Cannot record production for Work Order '{req.wo_number}'. The work order is completely dispatched."
             )
         ProductionService._enforce_release_gate(wo)
         if req.rejected_quantity > 0:
