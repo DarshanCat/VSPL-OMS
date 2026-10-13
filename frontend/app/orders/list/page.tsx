@@ -20,6 +20,21 @@ import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
 import { getOarList, OARListItem, createReplacement, ReplacementResult } from "@/lib/api";
 
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 function POCoverageBadge({
   status,
   customerPo,
@@ -280,6 +295,12 @@ export default function OarWoListPage() {
                           <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
                         </div>
                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">{oar.part_number}</div>
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
+                          <span>OAR Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.oar_date || oar.created_at)}</strong></span>
+                          {oar.po_date && (
+                            <span>• PO Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.po_date)}</strong></span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-zinc-900 dark:text-zinc-100">
                         {oar.oar_qty}
@@ -313,7 +334,7 @@ export default function OarWoListPage() {
 
                     {expanded[oar.oar_number] && (
                       <tr>
-                        <td colSpan={11} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
+                        <td colSpan={12} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
                           <div className="p-4 space-y-4">
                             {/* OAR Genealogy Metric Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -417,6 +438,7 @@ export default function OarWoListPage() {
                                     <thead className="text-zinc-400 uppercase text-[9px] font-bold bg-zinc-50/50 dark:bg-zinc-950/50 border-b border-zinc-100 dark:border-zinc-800">
                                       <tr>
                                         <th className="py-2 px-2.5">WO ID</th>
+                                        <th className="py-2 px-2.5">WO Gen Date</th>
                                         <th className="py-2 px-2.5">Type</th>
                                         <th className="py-2 px-2.5">Source WO</th>
                                         <th className="py-2 px-2.5 text-right">Repl Qty</th>
@@ -437,6 +459,9 @@ export default function OarWoListPage() {
                                         <tr key={wo.wo_number} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
                                           <td className="py-2 px-2.5 font-mono font-bold text-zinc-900 dark:text-zinc-100">
                                             {wo.wo_number}
+                                          </td>
+                                          <td className="py-2 px-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                                            {formatDate(wo.wo_date || wo.created_at)}
                                           </td>
                                           <td className="py-2 px-2.5">
                                             <span
@@ -474,12 +499,26 @@ export default function OarWoListPage() {
                                             {wo.current_stage}
                                           </td>
                                           <td className="py-2 px-2.5">
-                                            <Badge
-                                              variant={wo.release_status === "RELEASED" ? "green" : "amber"}
-                                              size="sm"
-                                            >
-                                              {wo.release_status.replace(/_/g, " ")}
-                                            </Badge>
+                                            {wo.release_status === "RELEASED" ? (
+                                              <div>
+                                                <Badge variant="green" size="sm">
+                                                  RELEASED
+                                                </Badge>
+                                                {wo.release_date && (
+                                                  <div className="text-[9px] text-zinc-400 font-mono mt-0.5 whitespace-nowrap">
+                                                    {formatDate(wo.release_date)}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ) : wo.ready_for_production ? (
+                                              <Badge variant="purple" size="sm">
+                                                READY FOR PROD
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="amber" size="sm">
+                                                NOT RELEASED
+                                              </Badge>
+                                            )}
                                           </td>
                                           <td className="py-2 px-2.5">
                                             <Badge variant={getRAGVariant(wo.wo_status)} size="sm">
@@ -499,7 +538,7 @@ export default function OarWoListPage() {
                                                     : "text-purple-600 hover:text-purple-700 bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800"
                                                 }`}
                                               >
-                                                <span>{wo.release_status === "RELEASED" ? "Route / Release" : "Release"}</span>
+                                                <span>{wo.release_status === "RELEASED" ? "Route / Release" : "Plan & Release"}</span>
                                                 <ArrowRight className="h-2.5 w-2.5" />
                                               </Link>
                                               <Link

@@ -339,6 +339,13 @@ export interface WorkOrderListItem {
   shortfall: string;
   delivery_date?: string | null;
   created_at: string;
+  po_date?: string | null;
+  oar_date?: string | null;
+  wo_date?: string | null;
+  release_date?: string | null;
+  release_status?: string | null;
+  is_released?: boolean;
+  ready_for_production?: boolean;
 }
 
 export async function getWorkOrders(params?: {
@@ -347,6 +354,8 @@ export async function getWorkOrders(params?: {
   customer_code?: string;
   status_filter?: string;
   casting_process?: string;
+  release_filter?: string;
+  sort_by?: string;
   limit?: number;
   offset?: number;
 }): Promise<WorkOrderListItem[]> {
@@ -702,6 +711,11 @@ export interface OARWorkOrderSummary {
   rejected: number;
   movable_wip: number;
   dispatched_qty: number;
+  wo_date?: string | null;
+  created_at?: string | null;
+  release_date?: string | null;
+  is_released?: boolean;
+  ready_for_production?: boolean;
 }
 
 export interface OARListItem {
@@ -729,6 +743,8 @@ export interface OARListItem {
   status: string;
   delivery_date?: string | null;
   created_at: string;
+  po_date?: string | null;
+  oar_date?: string | null;
   work_orders: OARWorkOrderSummary[];
 }
 

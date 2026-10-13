@@ -105,6 +105,8 @@ class WorkOrderService:
         customer_code: Optional[str] = None,
         status_filter: Optional[str] = None,
         casting_process: Optional[str] = None,
+        release_filter: Optional[str] = None,
+        sort_by: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
@@ -135,7 +137,64 @@ class WorkOrderService:
         if casting_process:
             query = query.filter(WorkOrder.casting_process == casting_process.strip().upper())
 
-        wos = query.order_by(WorkOrder.created_at.desc()).offset(offset).limit(limit).all()
+        # Release filter for production planners
+        if release_filter:
+            rf = release_filter.strip().lower()
+            if rf == "unreleased":
+                query = query.filter(
+                    WorkOrder.release_date.is_(None),
+                    WorkOrder.released_by.is_(None),
+                    ~WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED])
+                )
+            elif rf == "released":
+                query = query.filter(
+                    or_(
+                        WorkOrder.release_date.isnot(None),
+                        WorkOrder.released_by.isnot(None),
+                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED])
+                    )
+                )
+            elif rf == "ready_for_production":
+                query = query.filter(
+                    or_(
+                        WorkOrder.release_date.isnot(None),
+                        WorkOrder.manufacturing_released_at.isnot(None),
+                        WorkOrder.status.in_([WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.OPEN, WOStatus.PLANNED])
+                    )
+                )
+
+        # Date-wise sorting for production planning
+        if sort_by == "wo_date_asc":
+            query = query.order_by(WorkOrder.created_at.asc())
+        elif sort_by == "delivery_date_asc":
+            query = query.order_by(Order.delivery_date.asc().nullslast(), WorkOrder.created_at.desc())
+        elif sort_by == "delivery_date_desc":
+            query = query.order_by(Order.delivery_date.desc().nullslast(), WorkOrder.created_at.desc())
+        elif sort_by == "wo_number_asc":
+            query = query.order_by(WorkOrder.wo_number.asc())
+        else:
+            query = query.order_by(WorkOrder.created_at.desc())
+
+        wos = query.offset(offset).limit(limit).all()
+
+        # Batch lookup PO dates from POMaster
+        po_keys = set()
+        for wo in wos:
+            if wo.order and wo.order.customer_id and wo.order.customer_po:
+                po_keys.add((wo.order.customer_id, wo.order.customer_po.strip()))
+
+        po_map = {}
+        if po_keys:
+            from app.models.master_data import POMaster
+            cust_ids = {k[0] for k in po_keys}
+            po_nums = {k[1] for k in po_keys}
+            po_records = db.query(POMaster).filter(
+                POMaster.customer_id.in_(cust_ids),
+                POMaster.po_number.in_(po_nums)
+            ).all()
+            for p in po_records:
+                po_map[(p.customer_id, p.po_number.strip())] = p.po_date or (p.created_at.date() if p.created_at else None)
+
         results = []
 
         for wo in wos:
@@ -162,6 +221,20 @@ class WorkOrderService:
             src_type = order.source_type if (order and getattr(order, "source_type", None)) else ("schedule" if (order and "SCH" in (order.customer_po or "").upper()) else "po")
             cust_po = order.customer_po if order else None
 
+            # Determine PO creation date
+            po_dt = None
+            if order:
+                if order.po_line and getattr(order.po_line, "po", None):
+                    po_dt = order.po_line.po.po_date or (order.po_line.po.created_at.date() if order.po_line.po.created_at else None)
+                elif order.customer_id and order.customer_po:
+                    po_dt = po_map.get((order.customer_id, order.customer_po.strip()))
+
+            oar_dt = order.created_at if order else None
+            wo_dt = wo.created_at or datetime.now()
+            rel_status = compute_wo_release_status(wo)
+            is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
+            ready_prod = bool(is_rel or rel_status in ("RELEASED", "AWAITING_WO_RELEASE") or wo.status in (WOStatus.OPEN, WOStatus.PLANNED))
+
             results.append(WorkOrderListItem(
                 id=str(wo.id),
                 wo_number=wo.wo_number,
@@ -185,7 +258,14 @@ class WorkOrderService:
                 delivery_risk=risk,
                 shortfall=wo.shortfall or "No",
                 delivery_date=order.delivery_date if order else None,
-                created_at=wo.created_at or datetime.now()
+                created_at=wo_dt,
+                po_date=po_dt,
+                oar_date=oar_dt,
+                wo_date=wo_dt,
+                release_date=wo.release_date,
+                release_status=rel_status,
+                is_released=is_rel,
+                ready_for_production=ready_prod
             ))
 
         return results
@@ -522,6 +602,8 @@ class WorkOrderService:
             )
 
             rel_status = compute_wo_release_status(wo)
+            is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
+            ready_prod = bool(is_rel or rel_status in ("RELEASED", "AWAITING_WO_RELEASE") or wo.status in (WOStatus.OPEN, WOStatus.PLANNED))
 
             wo_type = "PATCH" if wo.is_replacement else "ORIGINAL"
             source_wo_num = wo.source_wo.wo_number if wo.source_wo else None
@@ -546,7 +628,12 @@ class WorkOrderService:
                 ok_completed=good_qty,
                 rejected=rejected_qty,
                 movable_wip=movable_wip,
-                dispatched_qty=dispatched_total
+                dispatched_qty=dispatched_total,
+                wo_date=wo.created_at,
+                created_at=wo.created_at,
+                release_date=wo.release_date,
+                is_released=is_rel,
+                ready_for_production=ready_prod
             ))
 
         num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")
@@ -561,6 +648,19 @@ class WorkOrderService:
         src_type = order.source_type if getattr(order, "source_type", None) else ("schedule" if (order and "SCH" in (order.customer_po or "").upper()) else "po")
         po_matched_flag = (po_cov_status == "PO_MATCHED")
         oar_po_st = order.oar_po_status if getattr(order, "oar_po_status", None) else None
+
+        # Determine PO creation date for order
+        po_date = None
+        if order.po_line and getattr(order.po_line, "po", None):
+            po_date = order.po_line.po.po_date or (order.po_line.po.created_at.date() if order.po_line.po.created_at else None)
+        elif order.customer_id and order.customer_po:
+            from app.models.master_data import POMaster
+            po_rec = db.query(POMaster).filter(
+                POMaster.customer_id == order.customer_id,
+                POMaster.po_number == order.customer_po.strip()
+            ).first()
+            if po_rec:
+                po_date = po_rec.po_date or (po_rec.created_at.date() if po_rec.created_at else None)
 
         return OARListItem(
             oar_number=order.oar_number or "—",
@@ -587,6 +687,8 @@ class WorkOrderService:
             status=order.status.value,
             delivery_date=order.delivery_date,
             created_at=order.created_at or datetime.now(),
+            po_date=po_date,
+            oar_date=order.created_at,
             work_orders=wo_summaries
         )
 
@@ -619,6 +721,8 @@ class WorkOrderService:
             status=summary.status,
             delivery_date=summary.delivery_date,
             created_at=summary.created_at,
+            po_date=summary.po_date,
+            oar_date=summary.oar_date,
             work_orders=summary.work_orders
         )
 

@@ -41,6 +41,13 @@ class WorkOrderListItem(BaseModel):
     shortfall: str
     delivery_date: Optional[date] = None
     created_at: datetime
+    po_date: Optional[date] = None
+    oar_date: Optional[datetime] = None
+    wo_date: Optional[datetime] = None
+    release_date: Optional[datetime] = None
+    release_status: Optional[str] = None
+    is_released: bool = False
+    ready_for_production: bool = False
 
 class StageTimelineStep(BaseModel):
     stage: str
@@ -140,6 +147,11 @@ class OARWorkOrderSummary(BaseModel):
     rejected: int = 0
     movable_wip: int = 0
     dispatched_qty: int = 0
+    wo_date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    release_date: Optional[datetime] = None
+    is_released: bool = False
+    ready_for_production: bool = False
 
 class OARListItem(BaseModel):
     oar_number: str
@@ -166,6 +178,8 @@ class OARListItem(BaseModel):
     status: str
     delivery_date: Optional[date] = None
     created_at: datetime
+    po_date: Optional[date] = None
+    oar_date: Optional[datetime] = None
     work_orders: List[OARWorkOrderSummary]
 
 class OARGenealogyResponse(BaseModel):
@@ -191,6 +205,8 @@ class OARGenealogyResponse(BaseModel):
     status: str
     delivery_date: Optional[date] = None
     created_at: datetime
+    po_date: Optional[date] = None
+    oar_date: Optional[datetime] = None
     work_orders: List[OARWorkOrderSummary]
 
 class WorkOrderRouteResponse(BaseModel):

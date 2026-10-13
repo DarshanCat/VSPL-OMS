@@ -17,10 +17,27 @@ import {
   Layers,
   Boxes,
   FileText,
-  ChevronDown
+  ChevronDown,
+  Calendar,
+  Clock
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
+
+function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return dateStr;
+  }
+}
 import {
   getWorkOrders,
   releaseWorkOrder,
@@ -71,6 +88,10 @@ function WOReleasePageInner() {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Planning & Release status filters & sort
+  const [releaseFilter, setReleaseFilter] = useState<"all" | "unreleased" | "ready_for_production" | "released">("all");
+  const [sortBy, setSortBy] = useState<string>("wo_date_desc");
+
   const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
   const [selectedStages, setSelectedStages] = useState<string[]>([
@@ -117,13 +138,18 @@ function WOReleasePageInner() {
   }, []);
 
   const handleSearch = useCallback(
-    async (term: string) => {
+    async (term?: string, filter?: string, sort?: string) => {
       setSearching(true);
       setError("");
       try {
-        const queryTerm = term.trim();
+        const queryTerm = (term !== undefined ? term : searchQuery).trim();
+        const activeFilter = filter !== undefined ? filter : releaseFilter;
+        const activeSort = sort !== undefined ? sort : sortBy;
+
         const data = await getWorkOrders({
           search: queryTerm || undefined,
+          release_filter: activeFilter !== "all" ? activeFilter : undefined,
+          sort_by: activeSort,
           limit: 100,
         });
         const list = Array.isArray(data) ? data : [];
@@ -144,7 +170,7 @@ function WOReleasePageInner() {
         setSearching(false);
       }
     },
-    [applyWO, selectedWO]
+    [applyWO, releaseFilter, searchQuery, selectedWO, sortBy]
   );
 
   const handleInputChange = (val: string) => {
@@ -154,7 +180,7 @@ function WOReleasePageInner() {
       clearTimeout(searchTimeoutRef.current);
     }
     searchTimeoutRef.current = setTimeout(() => {
-      handleSearch(val);
+      handleSearch(val, releaseFilter, sortBy);
     }, 200);
   };
 
@@ -175,7 +201,7 @@ function WOReleasePageInner() {
     // If a specific WO was passed in the URL, search specifically for it first
     if (urlWo) {
       setSearching(true);
-      getWorkOrders({ search: urlWo.trim(), limit: 50 })
+      getWorkOrders({ search: urlWo.trim(), limit: 50, sort_by: sortBy })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           const found = list.find((w) => w.wo_number.toUpperCase() === urlWo.trim().toUpperCase()) || list[0];
@@ -184,7 +210,7 @@ function WOReleasePageInner() {
             applyWO(found);
           } else {
             // Fallback load default list
-            getWorkOrders({ limit: 100 }).then((fallbackData) => {
+            getWorkOrders({ limit: 100, sort_by: sortBy }).then((fallbackData) => {
               const fList = Array.isArray(fallbackData) ? fallbackData : [];
               setWos(fList);
               if (fList.length > 0) applyWO(fList[0]);
@@ -200,12 +226,12 @@ function WOReleasePageInner() {
     } else {
       // General load
       setSearching(true);
-      getWorkOrders({ limit: 100 })
+      getWorkOrders({ limit: 100, sort_by: sortBy })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           setWos(list);
           if (list.length > 0) {
-            const candidate = list.find((w) => w.status === "planned" || w.status === "in_production") || list[0];
+            const candidate = list.find((w) => !w.is_released) || list.find((w) => w.status === "planned" || w.status === "in_production") || list[0];
             applyWO(candidate);
           }
         })
@@ -214,7 +240,7 @@ function WOReleasePageInner() {
           setSearching(false);
         });
     }
-  }, [urlWo, applyWO]);
+  }, [urlWo, applyWO, sortBy]);
 
   const handleWOSelect = (woNum: string) => {
     const found = wos.find((w) => w.wo_number === woNum);
@@ -408,15 +434,28 @@ function WOReleasePageInner() {
 
         {/* Active Work Order Context Card */}
         {selectedWODetail && (
-          <div className="rounded-2xl border border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20 p-4 shadow-sm space-y-2">
+          <div className="rounded-2xl border border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/20 p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/40 dark:border-blue-800/40 pb-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-base font-extrabold text-blue-700 dark:text-blue-300">
                   {selectedWODetail.wo_number}
                 </span>
                 <Badge variant={getRAGVariant(selectedWODetail.status)} size="sm">
                   {selectedWODetail.status.replace(/_/g, " ").toUpperCase()}
                 </Badge>
+                {selectedWODetail.is_released ? (
+                  <span className="rounded bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                    RELEASED {selectedWODetail.release_date ? `(${formatDate(selectedWODetail.release_date)})` : ""}
+                  </span>
+                ) : selectedWODetail.ready_for_production ? (
+                  <span className="rounded bg-purple-100 dark:bg-purple-950/60 px-2 py-0.5 text-[10px] font-bold text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                    READY FOR PRODUCTION
+                  </span>
+                ) : (
+                  <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                    NOT YET RELEASED
+                  </span>
+                )}
                 {selectedWODetail.current_stage && (
                   <span className="rounded bg-blue-100 dark:bg-blue-900/60 px-2 py-0.5 text-[10px] font-bold text-blue-800 dark:text-blue-200 font-mono">
                     Stage: {selectedWODetail.current_stage}
@@ -467,6 +506,46 @@ function WOReleasePageInner() {
                 </span>
                 <span className="text-[10px] text-zinc-400 font-mono">
                   Order: {selectedWODetail.order_qty} pcs
+                </span>
+              </div>
+            </div>
+
+            {/* Production Planning & Genealogy Timeline Dates */}
+            <div className="pt-2 border-t border-blue-200/40 dark:border-blue-800/40 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">1. PO Creation Date</span>
+                <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
+                  {formatDate(selectedWODetail.po_date)}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">2. OAR Gen Date</span>
+                <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
+                  {formatDate(selectedWODetail.oar_date)}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">3. WO Gen Date</span>
+                <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                  {formatDate(selectedWODetail.wo_date || selectedWODetail.created_at)}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">4. Required Delivery</span>
+                <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                  {formatDate(selectedWODetail.delivery_date)}
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">5. Release Status</span>
+                <span className="font-mono font-bold text-xs">
+                  {selectedWODetail.is_released ? (
+                    <span className="text-emerald-600">Released</span>
+                  ) : selectedWODetail.ready_for_production ? (
+                    <span className="text-purple-600">Ready for Prod</span>
+                  ) : (
+                    <span className="text-amber-600">Not Released</span>
+                  )}
                 </span>
               </div>
             </div>
@@ -581,13 +660,94 @@ function WOReleasePageInner() {
             <div>
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                  Select Work Order *
+                  Select Work Order for Release *
                 </label>
                 {searching && (
                   <span className="flex items-center gap-1 text-[10px] text-blue-600 font-medium">
                     <RefreshCw className="h-2.5 w-2.5 animate-spin" /> Searching...
                   </span>
                 )}
+              </div>
+
+              {/* Production Planning Filter Tabs & Sorting */}
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 mb-1.5">
+                <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 p-0.5 rounded-lg text-[10px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReleaseFilter("all");
+                      handleSearch(searchQuery, "all", sortBy);
+                    }}
+                    className={`px-2 py-1 rounded-md transition-colors ${
+                      releaseFilter === "all"
+                        ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 font-bold shadow-xs"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReleaseFilter("unreleased");
+                      handleSearch(searchQuery, "unreleased", sortBy);
+                    }}
+                    className={`px-2 py-1 rounded-md transition-colors ${
+                      releaseFilter === "unreleased"
+                        ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 font-bold shadow-xs"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    Not Yet Released
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReleaseFilter("ready_for_production");
+                      handleSearch(searchQuery, "ready_for_production", sortBy);
+                    }}
+                    className={`px-2 py-1 rounded-md transition-colors ${
+                      releaseFilter === "ready_for_production"
+                        ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 font-bold shadow-xs"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    Ready for Prod
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReleaseFilter("released");
+                      handleSearch(searchQuery, "released", sortBy);
+                    }}
+                    className={`px-2 py-1 rounded-md transition-colors ${
+                      releaseFilter === "released"
+                        ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    Already Released
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[10px]">
+                  <span className="text-zinc-400 font-medium">Plan by:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSortBy(val);
+                      handleSearch(searchQuery, releaseFilter, val);
+                    }}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
+                  >
+                    <option value="wo_date_desc">WO Gen Date (Newest first)</option>
+                    <option value="wo_date_asc">WO Gen Date (Oldest first / FIFO)</option>
+                    <option value="delivery_date_asc">Delivery Date (Earliest first)</option>
+                    <option value="delivery_date_desc">Delivery Date (Latest first)</option>
+                    <option value="wo_number_asc">WO Number (Ascending)</option>
+                  </select>
+                </div>
               </div>
 
               {/* Searchable Combobox for Work Orders */}
@@ -621,7 +781,7 @@ function WOReleasePageInner() {
                         type="button"
                         onClick={() => {
                           setSearchQuery("");
-                          handleSearch("");
+                          handleSearch("", releaseFilter, sortBy);
                           searchInputRef.current?.focus();
                         }}
                         className="p-0.5 rounded text-zinc-400 hover:text-zinc-600"
@@ -643,7 +803,7 @@ function WOReleasePageInner() {
 
                 {/* Dropdown Results List */}
                 {isDropdownOpen && (
-                  <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
+                  <div className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
                     {wos.length === 0 ? (
                       <div className="p-4 text-center text-xs text-zinc-400">
                         {searching ? "Searching work orders..." : `No work orders found matching "${searchQuery}"`}
@@ -658,20 +818,33 @@ function WOReleasePageInner() {
                               setSearchQuery(w.wo_number);
                               setIsDropdownOpen(false);
                             }}
-                            className={`p-3 cursor-pointer transition-colors hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-center justify-between gap-3 text-xs ${
+                            className={`p-3 cursor-pointer transition-colors hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-start justify-between gap-3 text-xs ${
                               selectedWO === w.wo_number ? "bg-blue-50 dark:bg-blue-950/60" : ""
                             }`}
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className={`font-mono font-extrabold ${selectedWO === w.wo_number ? "text-blue-600 dark:text-blue-400" : "text-zinc-900 dark:text-zinc-100"}`}>
                                   {w.wo_number}
                                 </span>
                                 <Badge variant={getRAGVariant(w.status)} size="sm">
                                   {w.status.replace(/_/g, " ").toUpperCase()}
                                 </Badge>
+                                {w.is_released ? (
+                                  <span className="rounded bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                                    RELEASED
+                                  </span>
+                                ) : w.ready_for_production ? (
+                                  <span className="rounded bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 text-[9px] font-bold text-purple-700 dark:text-purple-300">
+                                    READY FOR PROD
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-700 dark:text-amber-300">
+                                    NOT RELEASED
+                                  </span>
+                                )}
                                 {w.current_stage && (
-                                  <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[10px] font-mono text-zinc-600 dark:text-zinc-400">
+                                  <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-600 dark:text-zinc-400">
                                     {w.current_stage}
                                   </span>
                                 )}
@@ -681,8 +854,13 @@ function WOReleasePageInner() {
                                 {w.customer_code ? ` • ${w.customer_code}` : w.customer_name ? ` • ${w.customer_name}` : ""}
                                 {w.customer_po ? ` • PO: ${w.customer_po}` : ""}
                               </div>
+                              <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
+                                <span>WO Gen: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(w.wo_date || w.created_at)}</strong></span>
+                                {w.po_date && <span>• PO: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(w.po_date)}</strong></span>}
+                                {w.delivery_date && <span>• Delivery: <strong className="text-amber-600 dark:text-amber-400">{formatDate(w.delivery_date)}</strong></span>}
+                              </div>
                             </div>
-                            <div className="text-right whitespace-nowrap">
+                            <div className="text-right whitespace-nowrap shrink-0">
                               <span className="font-mono font-bold text-emerald-600">{w.physical_wo_qty} pcs</span>
                               {w.oar_number && <div className="text-[10px] text-zinc-400 font-mono">OAR: {w.oar_number}</div>}
                             </div>

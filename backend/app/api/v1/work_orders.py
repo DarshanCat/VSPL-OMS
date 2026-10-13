@@ -19,6 +19,10 @@ def list_work_orders(
     status_filter: Optional[str] = Query(None, description="Filter by WO status"),
     casting_process: Optional[str] = Query(
         None, description="Filter by casting process / route, e.g. 'CONTINUOUS' for Continuous Casting-eligible WOs"),
+    release_filter: Optional[str] = Query(
+        None, description="Filter by release status: 'all', 'released', 'unreleased', 'ready_for_production'"),
+    sort_by: Optional[str] = Query(
+        None, description="Sort order: 'wo_date_desc', 'wo_date_asc', 'delivery_date_asc', 'delivery_date_desc', 'wo_number_asc'"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -32,6 +36,8 @@ def list_work_orders(
         customer_code=customer_code,
         status_filter=status_filter,
         casting_process=casting_process,
+        release_filter=release_filter,
+        sort_by=sort_by,
         limit=limit,
         offset=offset
     )
