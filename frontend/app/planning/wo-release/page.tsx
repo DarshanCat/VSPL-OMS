@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, Suspense, useCallback } from "react";
+import React, { useState, useEffect, Suspense, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -16,7 +16,8 @@ import {
   RefreshCw,
   Layers,
   Boxes,
-  FileText
+  FileText,
+  ChevronDown
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -62,9 +63,13 @@ function WOReleasePageInner() {
   const [selectedWO, setSelectedWO] = useState<string>(urlWo);
   const [selectedWODetail, setSelectedWODetail] = useState<WorkOrderListItem | null>(null);
 
-  // Search state
+  // Search and combobox state
   const [searchQuery, setSearchQuery] = useState<string>(urlWo);
   const [searching, setSearching] = useState<boolean>(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
@@ -96,6 +101,7 @@ function WOReleasePageInner() {
   const applyWO = useCallback((found: WorkOrderListItem) => {
     setSelectedWO(found.wo_number);
     setSelectedWODetail(found);
+    setSearchQuery(found.wo_number);
     setPhysicalQty(found.physical_wo_qty);
     setChainResult({});
     setChainError("");
@@ -140,6 +146,30 @@ function WOReleasePageInner() {
     },
     [applyWO, selectedWO]
   );
+
+  const handleInputChange = (val: string) => {
+    setSearchQuery(val);
+    setIsDropdownOpen(true);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      handleSearch(val);
+    }, 200);
+  };
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     // If a specific WO was passed in the URL, search specifically for it first
@@ -374,66 +404,7 @@ function WOReleasePageInner() {
           </div>
         )}
 
-        {/* WO Live Search & Lookup Bar */}
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm space-y-2">
-          <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
-            <span>Find &amp; Select Work Order</span>
-            {searching && (
-              <span className="flex items-center gap-1 text-[11px] text-blue-600 font-normal">
-                <RefreshCw className="h-3 w-3 animate-spin" /> Searching...
-              </span>
-            )}
-          </label>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleSearch(searchQuery);
-                  }
-                }}
-                placeholder="Search WO ID (e.g. WO-17608), Part #, Customer, or PO..."
-                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-3 py-2 text-xs font-mono text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => handleSearch(searchQuery)}
-              disabled={searching}
-              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-            >
-              Search
-            </button>
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  handleSearch("");
-                }}
-                className="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                title="Reset search"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="text-[11px] text-zinc-400 flex items-center justify-between">
-            <span>
-              {wos.length} Work Order{wos.length === 1 ? "" : "s"} available
-            </span>
-            {urlWo && (
-              <span className="text-purple-600 font-semibold font-mono">
-                Linked from OAR List: {urlWo}
-              </span>
-            )}
-          </div>
-        </div>
+
 
         {/* Active Work Order Context Card */}
         {selectedWODetail && (
@@ -608,24 +579,132 @@ function WOReleasePageInner() {
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                Target Work Order *
-              </label>
-              <select
-                value={selectedWO}
-                onChange={(e) => handleWOSelect(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
-              >
-                {wos.length === 0 ? (
-                  <option value="">{searching ? "Searching..." : "No Work Orders found"}</option>
-                ) : (
-                  wos.map((w) => (
-                    <option key={w.wo_number} value={w.wo_number}>
-                      {w.wo_number} — {w.part_number} ({w.customer_code || w.customer_name}) [{w.physical_wo_qty} pcs]
-                    </option>
-                  ))
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Select Work Order *
+                </label>
+                {searching && (
+                  <span className="flex items-center gap-1 text-[10px] text-blue-600 font-medium">
+                    <RefreshCw className="h-2.5 w-2.5 animate-spin" /> Searching...
+                  </span>
                 )}
-              </select>
+              </div>
+
+              {/* Searchable Combobox for Work Orders */}
+              <div className="relative mt-1.5" ref={dropdownRef}>
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onFocus={() => setIsDropdownOpen(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (wos.length > 0) {
+                          applyWO(wos[0]);
+                          setSearchQuery(wos[0].wo_number);
+                          setIsDropdownOpen(false);
+                        }
+                      } else if (e.key === "Escape") {
+                        setIsDropdownOpen(false);
+                      }
+                    }}
+                    placeholder="Search WO ID (e.g. 17608), Part #, Customer, PO..."
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-16 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                  <div className="absolute right-2 top-2 flex items-center gap-1">
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery("");
+                          handleSearch("");
+                          searchInputRef.current?.focus();
+                        }}
+                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-600"
+                        title="Clear search"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                      className="p-0.5 rounded text-zinc-400 hover:text-zinc-600"
+                      title="Toggle options list"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dropdown Results List */}
+                {isDropdownOpen && (
+                  <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
+                    {wos.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-zinc-400">
+                        {searching ? "Searching work orders..." : `No work orders found matching "${searchQuery}"`}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {wos.map((w) => (
+                          <div
+                            key={w.wo_number}
+                            onClick={() => {
+                              applyWO(w);
+                              setSearchQuery(w.wo_number);
+                              setIsDropdownOpen(false);
+                            }}
+                            className={`p-3 cursor-pointer transition-colors hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-center justify-between gap-3 text-xs ${
+                              selectedWO === w.wo_number ? "bg-blue-50 dark:bg-blue-950/60" : ""
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`font-mono font-extrabold ${selectedWO === w.wo_number ? "text-blue-600 dark:text-blue-400" : "text-zinc-900 dark:text-zinc-100"}`}>
+                                  {w.wo_number}
+                                </span>
+                                <Badge variant={getRAGVariant(w.status)} size="sm">
+                                  {w.status.replace(/_/g, " ").toUpperCase()}
+                                </Badge>
+                                {w.current_stage && (
+                                  <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[10px] font-mono text-zinc-600 dark:text-zinc-400">
+                                    {w.current_stage}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-zinc-500 truncate mt-0.5">
+                                <span className="font-semibold text-zinc-700 dark:text-zinc-300">{w.part_number}</span>
+                                {w.customer_code ? ` • ${w.customer_code}` : w.customer_name ? ` • ${w.customer_name}` : ""}
+                                {w.customer_po ? ` • PO: ${w.customer_po}` : ""}
+                              </div>
+                            </div>
+                            <div className="text-right whitespace-nowrap">
+                              <span className="font-mono font-bold text-emerald-600">{w.physical_wo_qty} pcs</span>
+                              {w.oar_number && <div className="text-[10px] text-zinc-400 font-mono">OAR: {w.oar_number}</div>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected WO confirmed summary */}
+              {selectedWODetail && (
+                <div className="mt-2 flex items-center justify-between text-xs bg-blue-50/60 dark:bg-blue-950/40 px-3 py-2 rounded-xl border border-blue-200/50 dark:border-blue-900/40">
+                  <div className="flex items-center gap-2 truncate">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="font-mono font-bold text-blue-700 dark:text-blue-300">{selectedWODetail.wo_number}</span>
+                    <span className="text-zinc-400 truncate">({selectedWODetail.part_number} - {selectedWODetail.customer_code || selectedWODetail.customer_name})</span>
+                  </div>
+                  <span className="font-mono font-bold text-emerald-600 shrink-0 ml-2">{selectedWODetail.physical_wo_qty} pcs</span>
+                </div>
+              )}
             </div>
 
             <div>
