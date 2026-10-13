@@ -13,7 +13,7 @@ $REGION = "asia-south1"
 $SERVICE_NAME = "vspl-oms"
 $AR_REPO = "vspl-oms"
 $SERVICE_ACCOUNT = "vspl-oms-runner@$PROJECT_ID.iam.gserviceaccount.com"
-$CLOUDSQL_INSTANCE = "$PROJECT_ID:$REGION:vspl-oms-db"
+$CLOUDSQL_INSTANCE = "${PROJECT_ID}:${REGION}:vspl-oms-db"
 $PRODUCTION_DOMAIN = "https://oms.vijayspheroidals.in"
 
 Write-Host "=================================================================" -ForegroundColor Cyan
