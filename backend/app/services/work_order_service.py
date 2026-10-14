@@ -3,7 +3,7 @@ import uuid
 from typing import List, Optional
 from datetime import datetime, date
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, cast, String
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate
@@ -109,6 +109,9 @@ class WorkOrderService:
         release_filter: Optional[str] = None,
         sort_by: Optional[str] = None,
         exclude_dispatched: bool = False,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        date_type: Optional[str] = "wo_date",
         limit: int = 100,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
@@ -123,7 +126,10 @@ class WorkOrderService:
                     Customer.customer_code.ilike(s),
                     Customer.name.ilike(s),
                     Part.part_number.ilike(s),
-                    Order.customer_po.ilike(s)
+                    Order.customer_po.ilike(s),
+                    cast(WorkOrder.created_at, String).ilike(s),
+                    cast(WorkOrder.release_date, String).ilike(s),
+                    cast(Order.delivery_date, String).ilike(s)
                 )
             )
 
@@ -179,15 +185,54 @@ class WorkOrderService:
                     WorkOrder.current_stage != "Completed"
                 )
 
+        # Date-wise filtering
+        if from_date or to_date:
+            dtype = (date_type or "wo_date").strip().lower()
+            f_dt = None
+            if from_date:
+                try:
+                    f_dt = datetime.strptime(from_date.strip()[:10], "%Y-%m-%d")
+                except Exception:
+                    f_dt = None
+
+            t_dt = None
+            if to_date:
+                try:
+                    t_dt = datetime.strptime(to_date.strip()[:10], "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
+                except Exception:
+                    t_dt = None
+
+            if dtype == "release_date":
+                if f_dt:
+                    query = query.filter(WorkOrder.release_date >= f_dt)
+                if t_dt:
+                    query = query.filter(WorkOrder.release_date <= t_dt)
+            elif dtype == "delivery_date":
+                if f_dt:
+                    query = query.filter(Order.delivery_date >= f_dt.date())
+                if t_dt:
+                    query = query.filter(Order.delivery_date <= t_dt.date())
+            else:  # "wo_date" (creation/generation date)
+                if f_dt:
+                    query = query.filter(WorkOrder.created_at >= f_dt)
+                if t_dt:
+                    query = query.filter(WorkOrder.created_at <= t_dt)
+
         # Date-wise sorting for production planning
         if sort_by == "wo_date_asc":
             query = query.order_by(WorkOrder.created_at.asc())
+        elif sort_by == "release_date_desc":
+            query = query.order_by(WorkOrder.release_date.desc().nullslast(), WorkOrder.created_at.desc())
+        elif sort_by == "release_date_asc":
+            query = query.order_by(WorkOrder.release_date.asc().nullslast(), WorkOrder.created_at.desc())
         elif sort_by == "delivery_date_asc":
             query = query.order_by(Order.delivery_date.asc().nullslast(), WorkOrder.created_at.desc())
         elif sort_by == "delivery_date_desc":
             query = query.order_by(Order.delivery_date.desc().nullslast(), WorkOrder.created_at.desc())
         elif sort_by == "wo_number_asc":
             query = query.order_by(WorkOrder.wo_number.asc())
+        elif sort_by == "wo_number_desc":
+            query = query.order_by(WorkOrder.wo_number.desc())
         else:
             query = query.order_by(WorkOrder.created_at.desc())
 

@@ -205,6 +205,12 @@ const NAV_GROUPS: NavGroup[] = [
         icon: <Factory className="h-4 w-4" />,
       },
       {
+        name: "WO Release Search",
+        href: "/planning/wo-release-search",
+        icon: <Search className="h-4 w-4 text-sky-500" />,
+        badge: "Search",
+      },
+      {
         name: "Conversion Module",
         href: "/planning/conversion",
         icon: <ArrowRightLeft className="h-4 w-4 text-indigo-500" />,

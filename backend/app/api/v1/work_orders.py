@@ -32,9 +32,12 @@ def list_work_orders(
     release_filter: Optional[str] = Query(
         None, description="Filter by release status: 'all', 'released', 'unreleased', 'ready_for_production'"),
     sort_by: Optional[str] = Query(
-        None, description="Sort order: 'wo_date_desc', 'wo_date_asc', 'delivery_date_asc', 'delivery_date_desc', 'wo_number_asc'"),
+        None, description="Sort order: 'wo_date_desc', 'wo_date_asc', 'release_date_desc', 'release_date_asc', 'delivery_date_asc', 'delivery_date_desc', 'wo_number_asc', 'wo_number_desc'"),
     exclude_dispatched: bool = Query(
         False, description="Exclude completely dispatched and closed work orders"),
+    from_date: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
+    date_type: Optional[str] = Query("wo_date", description="Date field to filter: 'wo_date', 'release_date', 'delivery_date'"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -51,6 +54,9 @@ def list_work_orders(
         release_filter=release_filter,
         sort_by=sort_by,
         exclude_dispatched=exclude_dispatched,
+        from_date=from_date,
+        to_date=to_date,
+        date_type=date_type,
         limit=limit,
         offset=offset
     )

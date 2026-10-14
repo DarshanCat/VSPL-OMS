@@ -18,11 +18,14 @@ import {
   Boxes,
   FileText,
   ChevronDown,
+  ChevronRight,
   Calendar,
+  CalendarDays,
   Clock,
   Download,
   FileSpreadsheet,
   Flame,
+  Filter,
   BarChart3
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
@@ -98,6 +101,14 @@ function WOReleasePageInner() {
   const [releaseFilter, setReleaseFilter] = useState<"all" | "unreleased" | "ready_for_production" | "released">("all");
   const [sortBy, setSortBy] = useState<string>("wo_date_desc");
 
+  // Date-wise filtering state
+  const [dateType, setDateType] = useState<"wo_date" | "release_date" | "delivery_date">("wo_date");
+  const [datePreset, setDatePreset] = useState<"all" | "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom">("all");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
+  const [isDateQueueOpen, setIsDateQueueOpen] = useState<boolean>(true);
+  const [dateQueueTab, setDateQueueTab] = useState<"all" | "unreleased" | "released">("all");
+
   // Planner KPI Summary & Heat Number tracking
   const [planningSummary, setPlanningSummary] = useState<PlanningSummary | null>(null);
   const [heatNumber, setHeatNumber] = useState<string>("");
@@ -150,20 +161,33 @@ function WOReleasePageInner() {
   }, []);
 
   const handleSearch = useCallback(
-    async (term?: string, filter?: string, sort?: string) => {
+    async (
+      term?: string,
+      filter?: string,
+      sort?: string,
+      fDate?: string,
+      tDate?: string,
+      dType?: string
+    ) => {
       setSearching(true);
       setError("");
       try {
         const queryTerm = (term !== undefined ? term : searchQuery).trim();
         const activeFilter = filter !== undefined ? filter : releaseFilter;
         const activeSort = sort !== undefined ? sort : sortBy;
+        const activeFromDate = fDate !== undefined ? fDate : fromDate;
+        const activeToDate = tDate !== undefined ? tDate : toDate;
+        const activeDateType = dType !== undefined ? dType : dateType;
 
         const data = await getWorkOrders({
           search: queryTerm || undefined,
           release_filter: activeFilter !== "all" ? activeFilter : undefined,
           sort_by: activeSort,
           exclude_dispatched: true,
-          limit: 100,
+          from_date: activeFromDate || undefined,
+          to_date: activeToDate || undefined,
+          date_type: activeDateType,
+          limit: 150,
         });
         const list = Array.isArray(data) ? data : [];
         setWos(list);
@@ -183,8 +207,108 @@ function WOReleasePageInner() {
         setSearching(false);
       }
     },
-    [applyWO, releaseFilter, searchQuery, selectedWO, sortBy]
+    [applyWO, releaseFilter, searchQuery, selectedWO, sortBy, fromDate, toDate, dateType]
   );
+
+  const applyDatePreset = (preset: "all" | "today" | "yesterday" | "last_7_days" | "last_30_days" | "custom") => {
+    setDatePreset(preset);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    let f = "";
+    let t = "";
+
+    if (preset === "today") {
+      f = fmt(now);
+      t = fmt(now);
+    } else if (preset === "yesterday") {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      f = fmt(y);
+      t = fmt(y);
+    } else if (preset === "last_7_days") {
+      const p = new Date(now);
+      p.setDate(p.getDate() - 6);
+      f = fmt(p);
+      t = fmt(now);
+    } else if (preset === "last_30_days") {
+      const p = new Date(now);
+      p.setDate(p.getDate() - 29);
+      f = fmt(p);
+      t = fmt(now);
+    } else if (preset === "custom") {
+      return;
+    }
+    setFromDate(f);
+    setToDate(t);
+    handleSearch(searchQuery, releaseFilter, sortBy, f, t, dateType);
+  };
+
+  // Group current WOs by relevant date for structured date-wise browsing
+  const groupedWOsByDate = React.useMemo(() => {
+    const groups: {
+      [key: string]: {
+        dateStr: string;
+        label: string;
+        items: WorkOrderListItem[];
+        unreleasedItems: WorkOrderListItem[];
+        releasedItems: WorkOrderListItem[];
+      };
+    } = {};
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const nowStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const yestDate = new Date(now);
+    yestDate.setDate(yestDate.getDate() - 1);
+    const yestStr = `${yestDate.getFullYear()}-${pad(yestDate.getMonth() + 1)}-${pad(yestDate.getDate())}`;
+
+    wos.forEach((wo) => {
+      let rawDate: string | null = null;
+      if (dateType === "release_date") {
+        rawDate = wo.release_date ? String(wo.release_date).substring(0, 10) : null;
+      } else if (dateType === "delivery_date") {
+        rawDate = wo.delivery_date ? String(wo.delivery_date).substring(0, 10) : null;
+      } else {
+        rawDate = (wo.wo_date || wo.created_at) ? String(wo.wo_date || wo.created_at).substring(0, 10) : null;
+      }
+
+      const key = rawDate || "UNDATED";
+      let label = "Undated / Unscheduled";
+      if (rawDate) {
+        if (rawDate === nowStr) {
+          label = `Today • ${formatDate(rawDate)}`;
+        } else if (rawDate === yestStr) {
+          label = `Yesterday • ${formatDate(rawDate)}`;
+        } else {
+          label = formatDate(rawDate);
+        }
+      } else if (dateType === "release_date") {
+        label = "Not Released Yet (Pending)";
+      }
+
+      if (!groups[key]) {
+        groups[key] = {
+          dateStr: key,
+          label,
+          items: [],
+          unreleasedItems: [],
+          releasedItems: [],
+        };
+      }
+      groups[key].items.push(wo);
+      if (wo.is_released) {
+        groups[key].releasedItems.push(wo);
+      } else {
+        groups[key].unreleasedItems.push(wo);
+      }
+    });
+
+    return Object.values(groups);
+  }, [wos, dateType]);
+
+  const totalUnreleasedCount = React.useMemo(() => wos.filter((w) => !w.is_released).length, [wos]);
+  const totalReleasedCount = React.useMemo(() => wos.filter((w) => w.is_released).length, [wos]);
 
   const handleInputChange = (val: string) => {
     setSearchQuery(val);
@@ -193,7 +317,7 @@ function WOReleasePageInner() {
       clearTimeout(searchTimeoutRef.current);
     }
     searchTimeoutRef.current = setTimeout(() => {
-      handleSearch(val, releaseFilter, sortBy);
+      handleSearch(val, releaseFilter, sortBy, fromDate, toDate, dateType);
     }, 200);
   };
 
@@ -214,7 +338,7 @@ function WOReleasePageInner() {
     // If a specific WO was passed in the URL, search specifically for it first
     if (urlWo) {
       setSearching(true);
-      getWorkOrders({ search: urlWo.trim(), limit: 50, sort_by: sortBy, exclude_dispatched: true })
+      getWorkOrders({ search: urlWo.trim(), limit: 50, sort_by: sortBy, exclude_dispatched: true, from_date: fromDate || undefined, to_date: toDate || undefined, date_type: dateType })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           const found = list.find((w) => w.wo_number.toUpperCase() === urlWo.trim().toUpperCase()) || list[0];
@@ -223,7 +347,7 @@ function WOReleasePageInner() {
             applyWO(found);
           } else {
             // Fallback load default list
-            getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true }).then((fallbackData) => {
+            getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true, from_date: fromDate || undefined, to_date: toDate || undefined, date_type: dateType }).then((fallbackData) => {
               const fList = Array.isArray(fallbackData) ? fallbackData : [];
               setWos(fList);
               if (fList.length > 0) applyWO(fList[0]);
@@ -239,7 +363,7 @@ function WOReleasePageInner() {
     } else {
       // General load
       setSearching(true);
-      getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true })
+      getWorkOrders({ limit: 100, sort_by: sortBy, exclude_dispatched: true, from_date: fromDate || undefined, to_date: toDate || undefined, date_type: dateType })
         .then((data) => {
           const list = Array.isArray(data) ? data : [];
           setWos(list);
@@ -275,6 +399,9 @@ function WOReleasePageInner() {
       const data = await getWorkOrders({
         release_filter: filterToUse,
         exclude_dispatched: true,
+        from_date: fromDate || undefined,
+        to_date: toDate || undefined,
+        date_type: dateType,
         limit: 500,
         sort_by: sortBy,
       });
@@ -456,7 +583,7 @@ function WOReleasePageInner() {
 
       setSuccessResult(res);
       fetchPlanningSummary();
-      handleSearch(searchQuery, releaseFilter, sortBy);
+      handleSearch(searchQuery, releaseFilter, sortBy, fromDate, toDate, dateType);
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to release Work Order.");
     } finally {
@@ -485,6 +612,14 @@ function WOReleasePageInner() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href="/planning/wo-release-search"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 px-3 py-2 text-xs font-bold text-sky-800 dark:text-sky-300 shadow-sm hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-colors"
+              title="Open dedicated date-wise WO search and filter module"
+            >
+              <Search className="h-4 w-4 text-sky-600" />
+              <span>Search Module &rarr;</span>
+            </Link>
             <button
               type="button"
               disabled={exportingExcel}
@@ -911,15 +1046,15 @@ function WOReleasePageInner() {
               </div>
 
               {/* Production Planning Filter Tabs & Sorting */}
-              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 mb-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 mb-2">
                 <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 p-0.5 rounded-lg text-[10px] font-semibold">
                   <button
                     type="button"
                     onClick={() => {
                       setReleaseFilter("all");
-                      handleSearch(searchQuery, "all", sortBy);
+                      handleSearch(searchQuery, "all", sortBy, fromDate, toDate, dateType);
                     }}
-                    className={`px-2 py-1 rounded-md transition-colors ${
+                    className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
                       releaseFilter === "all"
                         ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 font-bold shadow-xs"
                         : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -931,9 +1066,9 @@ function WOReleasePageInner() {
                     type="button"
                     onClick={() => {
                       setReleaseFilter("unreleased");
-                      handleSearch(searchQuery, "unreleased", sortBy);
+                      handleSearch(searchQuery, "unreleased", sortBy, fromDate, toDate, dateType);
                     }}
-                    className={`px-2 py-1 rounded-md transition-colors ${
+                    className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
                       releaseFilter === "unreleased"
                         ? "bg-white dark:bg-zinc-900 text-amber-600 dark:text-amber-400 font-bold shadow-xs"
                         : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -945,9 +1080,9 @@ function WOReleasePageInner() {
                     type="button"
                     onClick={() => {
                       setReleaseFilter("ready_for_production");
-                      handleSearch(searchQuery, "ready_for_production", sortBy);
+                      handleSearch(searchQuery, "ready_for_production", sortBy, fromDate, toDate, dateType);
                     }}
-                    className={`px-2 py-1 rounded-md transition-colors ${
+                    className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
                       releaseFilter === "ready_for_production"
                         ? "bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 font-bold shadow-xs"
                         : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -959,9 +1094,9 @@ function WOReleasePageInner() {
                     type="button"
                     onClick={() => {
                       setReleaseFilter("released");
-                      handleSearch(searchQuery, "released", sortBy);
+                      handleSearch(searchQuery, "released", sortBy, fromDate, toDate, dateType);
                     }}
-                    className={`px-2 py-1 rounded-md transition-colors ${
+                    className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
                       releaseFilter === "released"
                         ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 font-bold shadow-xs"
                         : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -979,15 +1114,18 @@ function WOReleasePageInner() {
                       onChange={(e) => {
                         const val = e.target.value;
                         setSortBy(val);
-                        handleSearch(searchQuery, releaseFilter, val);
+                        handleSearch(searchQuery, releaseFilter, val, fromDate, toDate, dateType);
                       }}
                       className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
                     >
                       <option value="wo_date_desc">WO Gen Date (Newest first)</option>
                       <option value="wo_date_asc">WO Gen Date (Oldest first / FIFO)</option>
+                      <option value="release_date_desc">Release Date (Newest first)</option>
+                      <option value="release_date_asc">Release Date (Oldest first)</option>
                       <option value="delivery_date_asc">Delivery Date (Earliest first)</option>
                       <option value="delivery_date_desc">Delivery Date (Latest first)</option>
                       <option value="wo_number_asc">WO Number (Ascending)</option>
+                      <option value="wo_number_desc">WO Number (Descending)</option>
                     </select>
                   </div>
 
@@ -1002,6 +1140,152 @@ function WOReleasePageInner() {
                     <span>{exportingExcel ? "Exporting..." : "Download Excel (.csv)"}</span>
                   </button>
                 </div>
+              </div>
+
+              {/* DATE-WISE SEARCH & FILTER PANEL */}
+              <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-blue-50/40 via-indigo-50/20 to-purple-50/30 dark:from-blue-950/20 dark:via-zinc-900 dark:to-zinc-900 p-3 mb-2 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                    <Calendar className="h-3.5 w-3.5 text-blue-600" />
+                    <span>Date-Wise Search &amp; Filter</span>
+                  </div>
+                  {/* Date field target selector */}
+                  <div className="flex items-center gap-1 bg-white/80 dark:bg-zinc-800/80 p-0.5 rounded-lg border border-zinc-200/80 dark:border-zinc-700 text-[10px]">
+                    <span className="text-zinc-400 font-medium px-1.5">Date By:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateType("wo_date");
+                        handleSearch(searchQuery, releaseFilter, sortBy, fromDate, toDate, "wo_date");
+                      }}
+                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                        dateType === "wo_date"
+                          ? "bg-blue-600 text-white font-bold shadow-xs"
+                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                      }`}
+                    >
+                      WO Gen Date
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateType("release_date");
+                        handleSearch(searchQuery, releaseFilter, sortBy, fromDate, toDate, "release_date");
+                      }}
+                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                        dateType === "release_date"
+                          ? "bg-blue-600 text-white font-bold shadow-xs"
+                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                      }`}
+                    >
+                      Release Date
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateType("delivery_date");
+                        handleSearch(searchQuery, releaseFilter, sortBy, fromDate, toDate, "delivery_date");
+                      }}
+                      className={`px-2 py-0.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                        dateType === "delivery_date"
+                          ? "bg-blue-600 text-white font-bold shadow-xs"
+                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                      }`}
+                    >
+                      Delivery Date
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Date Presets & Custom Pickers */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-zinc-200/50 dark:border-zinc-800/60">
+                  <div className="flex items-center gap-1 flex-wrap text-[10px]">
+                    <span className="text-zinc-400 font-medium mr-1">Quick:</span>
+                    {(
+                      [
+                        { id: "all", label: "All Dates" },
+                        { id: "today", label: "Today" },
+                        { id: "yesterday", label: "Yesterday" },
+                        { id: "last_7_days", label: "Last 7 Days" },
+                        { id: "last_30_days", label: "Last 30 Days" },
+                      ] as const
+                    ).map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => applyDatePreset(p.id)}
+                        className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                          datePreset === p.id && !fromDate && !toDate && p.id === "all"
+                            ? "bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-bold"
+                            : datePreset === p.id && (fromDate || toDate)
+                            ? "bg-blue-600 text-white font-bold shadow-xs"
+                            : "bg-white/80 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-700/60 hover:bg-zinc-100"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[10px]">
+                    <div className="flex items-center gap-1">
+                      <span className="text-zinc-400 font-semibold">From:</span>
+                      <input
+                        type="date"
+                        value={fromDate}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFromDate(val);
+                          setDatePreset("custom");
+                          handleSearch(searchQuery, releaseFilter, sortBy, val, toDate, dateType);
+                        }}
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5 text-[10px] font-mono text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-zinc-400 font-semibold">To:</span>
+                      <input
+                        type="date"
+                        value={toDate}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setToDate(val);
+                          setDatePreset("custom");
+                          handleSearch(searchQuery, releaseFilter, sortBy, fromDate, val, dateType);
+                        }}
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5 text-[10px] font-mono text-zinc-800 dark:text-zinc-200 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    {(fromDate || toDate) && (
+                      <button
+                        type="button"
+                        onClick={() => applyDatePreset("all")}
+                        className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 cursor-pointer"
+                        title="Clear date filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Active filter summary pill */}
+                {(fromDate || toDate) && (
+                  <div className="flex items-center justify-between text-[10px] text-blue-700 dark:text-blue-300 bg-blue-100/60 dark:bg-blue-950/60 px-2 py-1 rounded-lg">
+                    <span>
+                      Active Date Filter: <strong>{fromDate ? formatDate(fromDate) : "Start"}</strong> &rarr;{" "}
+                      <strong>{toDate ? formatDate(toDate) : "End"}</strong> ({dateType === "wo_date" ? "WO Gen Date" : dateType === "release_date" ? "Release Date" : "Delivery Date"}) •{" "}
+                      <strong>{wos.length}</strong> WOs found
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => applyDatePreset("all")}
+                      className="font-bold underline text-blue-600 hover:text-blue-800 cursor-pointer"
+                    >
+                      Reset Date
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Searchable Combobox for Work Orders */}
@@ -1026,7 +1310,7 @@ function WOReleasePageInner() {
                         setIsDropdownOpen(false);
                       }
                     }}
-                    placeholder="Search WO ID (e.g. 17608), Part #, Customer, PO..."
+                    placeholder="Search WO ID (e.g. 17608), Part #, Customer, Date (YYYY-MM-DD)..."
                     className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-16 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                   <div className="absolute right-2 top-2 flex items-center gap-1">
@@ -1035,10 +1319,10 @@ function WOReleasePageInner() {
                         type="button"
                         onClick={() => {
                           setSearchQuery("");
-                          handleSearch("", releaseFilter, sortBy);
+                          handleSearch("", releaseFilter, sortBy, fromDate, toDate, dateType);
                           searchInputRef.current?.focus();
                         }}
-                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-600"
+                        className="p-0.5 rounded text-zinc-400 hover:text-zinc-600 cursor-pointer"
                         title="Clear search"
                       >
                         <X className="h-3 w-3" />
@@ -1047,7 +1331,7 @@ function WOReleasePageInner() {
                     <button
                       type="button"
                       onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                      className="p-0.5 rounded text-zinc-400 hover:text-zinc-600"
+                      className="p-0.5 rounded text-zinc-400 hover:text-zinc-600 cursor-pointer"
                       title="Toggle options list"
                     >
                       <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
@@ -1055,77 +1339,166 @@ function WOReleasePageInner() {
                   </div>
                 </div>
 
-                {/* Dropdown Results List */}
+                {/* Dropdown Results List Grouped Date-Wise with Released vs Unreleased filter */}
                 {isDropdownOpen && (
-                  <div className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
+                  <div className="absolute z-30 mt-1 max-h-80 w-full overflow-y-auto rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl">
+                    {/* Quick filter inside dropdown */}
+                    <div className="sticky top-0 z-20 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xs px-3 py-1.5 border-b border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between gap-1 text-[10px]">
+                      <span className="font-semibold text-zinc-400">Show:</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDateQueueTab("all");
+                          }}
+                          className={`px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer ${
+                            dateQueueTab === "all"
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
+                          }`}
+                        >
+                          All ({wos.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDateQueueTab("unreleased");
+                          }}
+                          className={`px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                            dateQueueTab === "unreleased"
+                              ? "bg-amber-600 text-white shadow-xs"
+                              : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/60 hover:bg-amber-100"
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                          <span>Not Released ({totalUnreleasedCount})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDateQueueTab("released");
+                          }}
+                          className={`px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                            dateQueueTab === "released"
+                              ? "bg-emerald-600 text-white shadow-xs"
+                              : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-900/60 hover:bg-emerald-100"
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          <span>Released ({totalReleasedCount})</span>
+                        </button>
+                      </div>
+                    </div>
+
                     {wos.length === 0 ? (
                       <div className="p-4 text-center text-xs text-zinc-400">
                         {searching ? "Searching work orders..." : `No work orders found matching "${searchQuery}"`}
                       </div>
                     ) : (
-                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {wos.map((w) => (
-                          <div
-                            key={w.wo_number}
-                            onClick={() => {
-                              applyWO(w);
-                              setSearchQuery(w.wo_number);
-                              setIsDropdownOpen(false);
-                            }}
-                            className={`p-3 cursor-pointer transition-colors hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-start justify-between gap-3 text-xs ${
-                              selectedWO === w.wo_number ? "bg-blue-50 dark:bg-blue-950/60" : ""
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`font-mono font-extrabold ${selectedWO === w.wo_number ? "text-blue-600 dark:text-blue-400" : "text-zinc-900 dark:text-zinc-100"}`}>
-                                  {w.wo_number}
+                      <div>
+                        {groupedWOsByDate.map((group) => {
+                          const displayItems =
+                            dateQueueTab === "unreleased"
+                              ? group.unreleasedItems
+                              : dateQueueTab === "released"
+                              ? group.releasedItems
+                              : group.items;
+
+                          if (displayItems.length === 0 && dateQueueTab !== "all") {
+                            return null;
+                          }
+
+                          return (
+                            <div key={group.dateStr} className="border-b border-zinc-100 dark:border-zinc-800 last:border-b-0">
+                              {/* Sticky Date Section Header */}
+                              <div className="sticky top-7 z-10 bg-zinc-100/95 dark:bg-zinc-800/95 backdrop-blur-xs px-3 py-1 flex items-center justify-between text-[10px] font-bold text-zinc-700 dark:text-zinc-300 border-b border-zinc-200/60 dark:border-zinc-700/60 shadow-2xs">
+                                <span className="flex items-center gap-1.5 font-mono">
+                                  <Calendar className="h-3 w-3 text-blue-500 shrink-0" />
+                                  {group.label}
                                 </span>
-                                <Badge variant={getRAGVariant(w.status)} size="sm">
-                                  {w.status.replace(/_/g, " ").toUpperCase()}
-                                </Badge>
-                                {w.is_released ? (
-                                  <span className="rounded bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
-                                    RELEASED
-                                  </span>
-                                ) : w.ready_for_production ? (
-                                  <span className="rounded bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 text-[9px] font-bold text-purple-700 dark:text-purple-300">
-                                    READY FOR PROD
-                                  </span>
-                                ) : (
-                                  <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-700 dark:text-amber-300">
-                                    NOT RELEASED
-                                  </span>
-                                )}
-                                {w.heat_number && (
-                                  <span className="rounded bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.2 text-[9px] font-mono font-bold text-orange-700 dark:text-orange-300 flex items-center gap-0.5">
-                                    <Flame className="h-2.5 w-2.5" />
-                                    {w.heat_number}
-                                  </span>
-                                )}
-                                {w.current_stage && (
-                                  <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-600 dark:text-zinc-400">
-                                    {w.current_stage}
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-1.5 text-[9px]">
+                                  {group.unreleasedItems.length > 0 && (
+                                    <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 font-semibold">
+                                      {group.unreleasedItems.length} Not Released
+                                    </span>
+                                  )}
+                                  {group.releasedItems.length > 0 && (
+                                    <span className="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 font-semibold">
+                                      {group.releasedItems.length} Released
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-[11px] text-zinc-500 truncate mt-0.5">
-                                <span className="font-semibold text-zinc-700 dark:text-zinc-300">{w.part_number}</span>
-                                {w.customer_code ? ` • ${w.customer_code}` : w.customer_name ? ` • ${w.customer_name}` : ""}
-                                {w.customer_po ? ` • PO: ${w.customer_po}` : ""}
-                              </div>
-                              <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
-                                <span>WO Gen: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(w.wo_date || w.created_at)}</strong></span>
-                                {w.po_date && <span>• PO: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(w.po_date)}</strong></span>}
-                                {w.delivery_date && <span>• Delivery: <strong className="text-amber-600 dark:text-amber-400">{formatDate(w.delivery_date)}</strong></span>}
+                              <div className="divide-y divide-zinc-50 dark:divide-zinc-800/50">
+                                {displayItems.map((w) => (
+                                  <div
+                                    key={w.wo_number}
+                                    onClick={() => {
+                                      applyWO(w);
+                                      setSearchQuery(w.wo_number);
+                                      setIsDropdownOpen(false);
+                                    }}
+                                    className={`p-3 cursor-pointer transition-colors hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-start justify-between gap-3 text-xs ${
+                                      selectedWO === w.wo_number ? "bg-blue-50 dark:bg-blue-950/60" : ""
+                                    }`}
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className={`font-mono font-extrabold ${selectedWO === w.wo_number ? "text-blue-600 dark:text-blue-400" : "text-zinc-900 dark:text-zinc-100"}`}>
+                                          {w.wo_number}
+                                        </span>
+                                        <Badge variant={getRAGVariant(w.status)} size="sm">
+                                          {w.status.replace(/_/g, " ").toUpperCase()}
+                                        </Badge>
+                                        {w.is_released ? (
+                                          <span className="rounded bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                                            RELEASED {w.release_date ? `(${formatDate(w.release_date)})` : ""}
+                                          </span>
+                                        ) : w.ready_for_production ? (
+                                          <span className="rounded bg-purple-100 dark:bg-purple-950/60 px-1.5 py-0.2 text-[9px] font-bold text-purple-700 dark:text-purple-300">
+                                            READY FOR PROD
+                                          </span>
+                                        ) : (
+                                          <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-700 dark:text-amber-300">
+                                            NOT RELEASED
+                                          </span>
+                                        )}
+                                        {w.heat_number && (
+                                          <span className="rounded bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.2 text-[9px] font-mono font-bold text-orange-700 dark:text-orange-300 flex items-center gap-0.5">
+                                            <Flame className="h-2.5 w-2.5" />
+                                            {w.heat_number}
+                                          </span>
+                                        )}
+                                        {w.current_stage && (
+                                          <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-600 dark:text-zinc-400">
+                                            {w.current_stage}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-zinc-500 truncate mt-0.5">
+                                        <span className="font-semibold text-zinc-700 dark:text-zinc-300">{w.part_number}</span>
+                                        {w.customer_code ? ` • ${w.customer_code}` : w.customer_name ? ` • ${w.customer_name}` : ""}
+                                        {w.customer_po ? ` • PO: ${w.customer_po}` : ""}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
+                                        <span>WO Gen: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(w.wo_date || w.created_at)}</strong></span>
+                                        {w.release_date && <span>• Released: <strong className="text-emerald-600 dark:text-emerald-400">{formatDate(w.release_date)}</strong></span>}
+                                        {w.delivery_date && <span>• Delivery: <strong className="text-amber-600 dark:text-amber-400">{formatDate(w.delivery_date)}</strong></span>}
+                                      </div>
+                                    </div>
+                                    <div className="text-right whitespace-nowrap shrink-0">
+                                      <span className="font-mono font-bold text-emerald-600">{w.physical_wo_qty} pcs</span>
+                                      {w.oar_number && <div className="text-[10px] text-zinc-400 font-mono">OAR: {w.oar_number}</div>}
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
-                            <div className="text-right whitespace-nowrap shrink-0">
-                              <span className="font-mono font-bold text-emerald-600">{w.physical_wo_qty} pcs</span>
-                              {w.oar_number && <div className="text-[10px] text-zinc-400 font-mono">OAR: {w.oar_number}</div>}
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1151,6 +1524,201 @@ function WOReleasePageInner() {
                   </div>
                 </div>
               )}
+
+              {/* Date-Wise WO Release Queue Browser: Select between Released vs Not Released */}
+              <div className="mt-2.5 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 p-2.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-blue-600 shrink-0" />
+                    <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                      Date-Wise Work Order Selector
+                    </span>
+                    <span className="rounded-full bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.2 text-[9px] font-bold text-blue-700 dark:text-blue-300">
+                      {wos.length} WOs • {groupedWOsByDate.length} Dates
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* View filter: Not Released vs Released vs All */}
+                    <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700/80 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setDateQueueTab("unreleased")}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                          dateQueueTab === "unreleased"
+                            ? "bg-amber-600 text-white shadow-xs"
+                            : "text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+                        }`}
+                        title="Show only Work Orders waiting to be released"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                        <span>Not Released ({totalUnreleasedCount})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDateQueueTab("released")}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                          dateQueueTab === "released"
+                            ? "bg-emerald-600 text-white shadow-xs"
+                            : "text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                        }`}
+                        title="Show only Work Orders already released"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                        <span>Released ({totalReleasedCount})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDateQueueTab("all")}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
+                          dateQueueTab === "all"
+                            ? "bg-blue-600 text-white shadow-xs"
+                            : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900"
+                        }`}
+                      >
+                        All ({wos.length})
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsDateQueueOpen(!isDateQueueOpen)}
+                      className="p-1 rounded text-zinc-400 hover:text-zinc-600 cursor-pointer"
+                      title={isDateQueueOpen ? "Collapse section" : "Expand section"}
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isDateQueueOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {isDateQueueOpen && (
+                  <div className="max-h-80 overflow-y-auto space-y-2.5 border-t border-zinc-200/60 dark:border-zinc-800/80 pt-2 text-xs">
+                    {groupedWOsByDate.length === 0 ? (
+                      <div className="p-4 text-center text-zinc-400 text-xs">No work orders matching date filter.</div>
+                    ) : (
+                      groupedWOsByDate.map((grp) => {
+                        const itemsToShow =
+                          dateQueueTab === "unreleased"
+                            ? grp.unreleasedItems
+                            : dateQueueTab === "released"
+                            ? grp.releasedItems
+                            : grp.items;
+
+                        if (itemsToShow.length === 0 && dateQueueTab !== "all") {
+                          return null;
+                        }
+
+                        return (
+                          <div key={grp.dateStr} className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-2xs">
+                            {/* Date Group Header */}
+                            <div className="bg-zinc-100/80 dark:bg-zinc-800/80 px-3 py-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] font-bold text-zinc-800 dark:text-zinc-200">
+                              <span className="flex items-center gap-1.5 font-mono">
+                                <Calendar className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                                {grp.label}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="rounded bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-semibold px-1.5 py-0.2 text-[9px]">
+                                  {grp.unreleasedItems.length} Not Released
+                                </span>
+                                <span className="rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-semibold px-1.5 py-0.2 text-[9px]">
+                                  {grp.releasedItems.length} Released
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* WOs for this date */}
+                            <div className="divide-y divide-zinc-100 dark:divide-zinc-800 text-[11px]">
+                              {itemsToShow.length === 0 ? (
+                                <div className="p-3 text-center text-[10px] text-zinc-400 italic">
+                                  {dateQueueTab === "unreleased"
+                                    ? "All work orders for this date are already released!"
+                                    : "No work orders released yet for this date."}
+                                </div>
+                              ) : (
+                                itemsToShow.map((w) => (
+                                  <div
+                                    key={w.wo_number}
+                                    className={`p-2.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 transition-colors hover:bg-blue-50/40 dark:hover:bg-blue-950/30 ${
+                                      selectedWO === w.wo_number
+                                        ? "bg-blue-50/80 dark:bg-blue-950/60 ring-1 ring-blue-500/30"
+                                        : ""
+                                    }`}
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className={`font-mono font-black text-xs ${selectedWO === w.wo_number ? "text-blue-700 dark:text-blue-300" : "text-zinc-900 dark:text-zinc-100"}`}>
+                                          {w.wo_number}
+                                        </span>
+                                        {w.is_released ? (
+                                          <span className="rounded-md bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.2 text-[9px] font-bold text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                            RELEASED {w.release_date ? `(${formatDate(w.release_date)})` : ""}
+                                          </span>
+                                        ) : (
+                                          <span className="rounded-md bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.2 text-[9px] font-bold text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                            NOT RELEASED (PENDING)
+                                          </span>
+                                        )}
+                                        {w.heat_number && (
+                                          <span className="rounded bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.2 text-[9px] font-mono font-bold text-orange-700 dark:text-orange-300 flex items-center gap-0.5">
+                                            <Flame className="h-2.5 w-2.5" />
+                                            {w.heat_number}
+                                          </span>
+                                        )}
+                                        {w.current_stage && (
+                                          <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.2 text-[9px] font-mono text-zinc-600 dark:text-zinc-400">
+                                            Stage: {w.current_stage}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-zinc-500 truncate mt-1">
+                                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">{w.part_number}</span>
+                                        {w.part_name ? ` • ${w.part_name}` : ""}
+                                        {w.customer_code ? ` • ${w.customer_code}` : w.customer_name ? ` • ${w.customer_name}` : ""}
+                                        {w.customer_po ? ` • PO: ${w.customer_po}` : ""}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                                      <div className="text-right">
+                                        <div className="font-mono font-bold text-emerald-600 text-xs">{w.physical_wo_qty} pcs</div>
+                                        {w.delivery_date && (
+                                          <div className="text-[9px] text-amber-600 dark:text-amber-400 font-mono">
+                                            Due: {formatDate(w.delivery_date)}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          applyWO(w);
+                                          setSearchQuery(w.wo_number);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1 ${
+                                          selectedWO === w.wo_number
+                                            ? "bg-blue-600 text-white ring-2 ring-blue-600/40"
+                                            : !w.is_released
+                                            ? "bg-amber-600 text-white hover:bg-amber-500"
+                                            : "bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 hover:bg-blue-50 hover:text-blue-600"
+                                        }`}
+                                      >
+                                        <span>
+                                          {selectedWO === w.wo_number
+                                            ? "Selected ✓"
+                                            : !w.is_released
+                                            ? "Select for Release →"
+                                            : "Select / View"}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
