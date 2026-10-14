@@ -598,16 +598,23 @@ export function ProductionEntryContent() {
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-300 dark:border-blue-800">
-                      <span className="text-blue-700 dark:text-blue-400 font-bold">In Process / WIP:</span>
+                      <span className="text-blue-700 dark:text-blue-400 font-bold">Moved to Next Stage:</span>
                       <span className="font-mono font-extrabold text-blue-700 dark:text-blue-400 text-sm">
                         {activeStage.already_moved_qty} pcs
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800">
-                      <span className="text-zinc-500 font-semibold">Not Yet Produced:</span>
-                      <span className="font-mono font-extrabold text-zinc-900 dark:text-zinc-100 text-sm">
-                        {activeStage.not_yet_produced} pcs
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800">
+                      <span className="text-purple-700 dark:text-purple-400 font-bold">In Process / Unprocessed WIP:</span>
+                      <span className="font-mono font-extrabold text-purple-700 dark:text-purple-400 text-sm">
+                        {activeStage.in_process_qty} pcs
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/20 border border-cyan-300 dark:border-cyan-800">
+                      <span className="text-cyan-700 dark:text-cyan-400 font-bold">Remaining Movable (On-Hand):</span>
+                      <span className="font-mono font-extrabold text-cyan-700 dark:text-cyan-400 text-sm">
+                        {activeStage.available_wip} pcs
                       </span>
                     </div>
 
@@ -615,13 +622,6 @@ export function ProductionEntryContent() {
                       <span className="text-amber-700 dark:text-amber-400 font-bold">Yet to Produce:</span>
                       <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">
                         {activeStage.remaining_to_produce} pcs
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/20 border border-cyan-300 dark:border-cyan-800">
-                      <span className="text-cyan-700 dark:text-cyan-400 font-bold">Remaining Movable:</span>
-                      <span className="font-mono font-extrabold text-cyan-700 dark:text-cyan-400 text-sm">
-                        {activeStage.available_wip} pcs
                       </span>
                     </div>
                   </div>
