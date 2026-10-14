@@ -25,7 +25,9 @@ from app.services.oms_integration_service import (
     calculate_stage_targets,
     parse_route,
     match_route_stage,
-    DEFAULT_YIELDS
+    DEFAULT_YIELDS,
+    next_oar_sequence,
+    next_wo_sequence
 )
 from app.services.conversion_mapping_service import ConversionMappingService
 
@@ -126,9 +128,8 @@ class OperationsService:
             oar_po_status = "awaiting_po"
             schedule.po_status = ScheduleStatus.AWAITING_PO
 
-        # 3. Order (OAR)
-        order_count = db.query(Order).count()
-        oar_num = f"OAR-{order_count + 1:04d}"
+        # 3. Order (OAR) - collision-free generation
+        oar_num = next_oar_sequence(db)
 
         order = Order(
             oar_number=oar_num,
@@ -168,10 +169,10 @@ class OperationsService:
                     wo_qty_list.append(take)
 
             default_route = ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
+            allocated_wos = set()
 
             for wo_qty in wo_qty_list:
-                wo_count = db.query(WorkOrder).count()
-                wo_num = f"WO-{1000 + wo_count + 1}"
+                wo_num = next_wo_sequence(db, reserved_set=allocated_wos)
                 
                 wo = WorkOrder(
                     wo_number=wo_num,

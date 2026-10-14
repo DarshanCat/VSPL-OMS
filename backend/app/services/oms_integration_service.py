@@ -525,7 +525,7 @@ def _record_exception(db: Session, exc_type: str, detail: str, wo_id: Optional[s
         pass
 
 
-def next_oar_sequence(db: Session) -> str:
+def next_oar_sequence(db: Session, reserved_set: Optional[set] = None) -> str:
     """Collision-free next OAR sequence generator."""
     pattern = re.compile(r"^OAR-(\d+)$", re.IGNORECASE)
     highest = 0
@@ -537,10 +537,36 @@ def next_oar_sequence(db: Session) -> str:
                     highest = max(highest, int(m.group(1)))
                 except ValueError:
                     pass
-    if highest == 0:
-        count = db.query(Order).count()
-        return f"OAR-{count + 1:04d}"
-    return f"OAR-{highest + 1:04d}"
+    curr_int = highest + 1 if highest > 0 else db.query(Order).count() + 1
+    candidate = f"OAR-{curr_int:04d}"
+    while (reserved_set and candidate in reserved_set) or db.query(Order).filter(Order.oar_number == candidate).first():
+        curr_int += 1
+        candidate = f"OAR-{curr_int:04d}"
+    if reserved_set is not None:
+        reserved_set.add(candidate)
+    return candidate
+
+
+def next_wo_sequence(db: Session, reserved_set: Optional[set] = None) -> str:
+    """Collision-free next WO sequence generator."""
+    pattern = re.compile(r"^WO-(\d+)$", re.IGNORECASE)
+    highest = 1000
+    for (wo_num,) in db.query(WorkOrder.wo_number).filter(WorkOrder.wo_number.isnot(None)).all():
+        if wo_num:
+            m = pattern.match(wo_num.strip())
+            if m:
+                try:
+                    highest = max(highest, int(m.group(1)))
+                except ValueError:
+                    pass
+    curr_int = highest + 1
+    candidate = f"WO-{curr_int}"
+    while (reserved_set and candidate in reserved_set) or db.query(WorkOrder).filter(WorkOrder.wo_number == candidate).first():
+        curr_int += 1
+        candidate = f"WO-{curr_int}"
+    if reserved_set is not None:
+        reserved_set.add(candidate)
+    return candidate
 
 
 def _find_or_create_customer(db: Session, cust_str: str) -> Customer:
