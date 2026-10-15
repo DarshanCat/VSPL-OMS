@@ -22,6 +22,9 @@ import {
   X,
   CheckCircle2,
   Info,
+  Search,
+  Filter,
+  Calendar,
 } from "lucide-react";
 
 interface LineDraft {
@@ -118,6 +121,58 @@ export default function POMasterPage() {
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
   const [updating, setUpdating] = useState(false);
+
+  // Filter and search state for Existing POs
+  const [filterCustomerCode, setFilterCustomerCode] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  // Filtered POs computation
+  const filteredPOs = pos.filter((po) => {
+    if (filterCustomerCode && po.customer_code !== filterCustomerCode) {
+      return false;
+    }
+    if (statusFilter && po.status.toLowerCase() !== statusFilter.toLowerCase()) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchPoNumber = po.po_number?.toLowerCase().includes(q);
+      const matchCustomer =
+        po.customer_code?.toLowerCase().includes(q) ||
+        po.customer_name?.toLowerCase().includes(q);
+      const matchLines = po.lines?.some(
+        (l) =>
+          l.customer_part_number?.toLowerCase().includes(q) ||
+          l.part_number?.toLowerCase().includes(q)
+      );
+      if (!matchPoNumber && !matchCustomer && !matchLines) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // Summary metrics for the filtered PO set (e.g. for a specific customer or overall)
+  const metrics = filteredPOs.reduce(
+    (acc, po) => {
+      acc.totalPOs += 1;
+      acc.totalLines += po.lines.length;
+      for (const line of po.lines) {
+        acc.totalQty += Number(line.po_qty) || 0;
+        acc.totalAllocated += Number(line.allocated_qty) || 0;
+        acc.totalAvailable += Number(line.available_qty) || 0;
+      }
+      return acc;
+    },
+    { totalPOs: 0, totalLines: 0, totalQty: 0, totalAllocated: 0, totalAvailable: 0 }
+  );
+
+  // Group PO counts by customer for the dropdown
+  const customerPOCounts = pos.reduce<Record<string, number>>((acc, po) => {
+    acc[po.customer_code] = (acc[po.customer_code] || 0) + 1;
+    return acc;
+  }, {});
 
   async function loadAll() {
     setLoading(true);
@@ -290,38 +345,59 @@ export default function POMasterPage() {
           )}
           <form onSubmit={handleCreate} className="mt-3 space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <input
-                required
-                placeholder="PO number"
-                value={poNumber}
-                onChange={(e) => setPoNumber(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-              />
-              <select
-                required
-                value={customerCode}
-                onChange={(e) => setCustomerCode(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-              >
-                <option value="" disabled>Select customer</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.customer_code}>{c.customer_code} — {c.name}</option>
-                ))}
-              </select>
-              <input
-                type="date"
-                placeholder="PO date"
-                value={poDate}
-                onChange={(e) => setPoDate(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-              />
-              <input
-                type="date"
-                placeholder="Validity date"
-                value={validityDate}
-                onChange={(e) => setValidityDate(e.target.value)}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-              />
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">
+                  PO Number <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  required
+                  placeholder="e.g. PO-2026-001"
+                  value={poNumber}
+                  onChange={(e) => setPoNumber(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">
+                  Customer <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  required
+                  value={customerCode}
+                  onChange={(e) => setCustomerCode(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                >
+                  <option value="" disabled>Select customer</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.customer_code}>{c.customer_code} — {c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">
+                  PO Date <span className="text-[10px] text-zinc-400 font-normal lowercase">(date PO issued)</span>
+                </label>
+                <input
+                  type="date"
+                  value={poDate}
+                  onChange={(e) => setPoDate(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">
+                  Validity Date <span className="text-[10px] text-zinc-400 font-normal lowercase">(contract end)</span>
+                </label>
+                <input
+                  type="date"
+                  value={validityDate}
+                  onChange={(e) => setValidityDate(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                />
+              </div>
             </div>
 
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
@@ -331,42 +407,64 @@ export default function POMasterPage() {
                   Enter Customer Part Number (internal part will be mapped or auto-generated)
                 </span>
               </div>
+
+              {/* Column Headers for lines on medium+ screens */}
+              <div className="hidden md:grid md:grid-cols-5 gap-2 px-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                <div>Customer Part No *</div>
+                <div>Internal Part No <span className="text-[10px] text-zinc-400 font-normal lowercase">(optional)</span></div>
+                <div>PO Qty *</div>
+                <div>Req. Delivery Date</div>
+                <div>Action</div>
+              </div>
+
               {lines.map((l, idx) => (
                 <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
-                  <input
-                    placeholder="Customer Part No (e.g. RC47NN135000000092)"
-                    value={l.customer_part_number || ""}
-                    onChange={(e) => updateLine(idx, "customer_part_number", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono font-medium"
-                  />
-                  <input
-                    placeholder="Internal Part No (optional)"
-                    value={l.part_number}
-                    onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
-                  />
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    placeholder="PO qty"
-                    value={l.po_qty}
-                    onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-                  />
-                  <input
-                    type="date"
-                    value={l.required_date}
-                    onChange={(e) => updateLine(idx, "required_date", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-                  />
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Customer Part No *</label>
+                    <input
+                      placeholder="e.g. RC47NN135000000092"
+                      value={l.customer_part_number || ""}
+                      onChange={(e) => updateLine(idx, "customer_part_number", e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Internal Part No (Optional)</label>
+                    <input
+                      placeholder="e.g. 54400902"
+                      value={l.part_number}
+                      onChange={(e) => updateLine(idx, "part_number", e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">PO Qty *</label>
+                    <input
+                      required
+                      type="number"
+                      min={1}
+                      placeholder="e.g. 500"
+                      value={l.po_qty}
+                      onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Customer Required Delivery Date</label>
+                    <input
+                      type="date"
+                      value={l.required_date}
+                      onChange={(e) => updateLine(idx, "required_date", e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
                     disabled={lines.length === 1}
-                    className="flex items-center justify-center gap-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 transition-colors"
+                    className="flex items-center justify-center gap-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-2 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 transition-colors"
                   >
-                    <Trash2 className="h-3.5 w-3.5" /> Remove
+                    <Trash2 className="h-3.5 w-3.5 text-rose-500" /> Remove
                   </button>
                 </div>
               ))}
@@ -389,12 +487,148 @@ export default function POMasterPage() {
           </form>
         </div>
 
-        {/* Existing POs List */}
+        {/* Existing POs List with Customer Filter and Search Bar */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="h-4 w-4 text-zinc-500" />
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing POs</h3>
+          <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing POs</h3>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Showing {filteredPOs.length} of {pos.length} total purchase orders
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Reset Filters button if any active */}
+              {(filterCustomerCode || searchQuery || statusFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterCustomerCode("");
+                    setSearchQuery("");
+                    setStatusFilter("");
+                  }}
+                  className="flex items-center gap-1 self-start sm:self-auto rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 transition-colors"
+                >
+                  <X className="h-3 w-3" /> Clear Filters
+                </button>
+              )}
+            </div>
+
+            {/* Filter and Search Controls Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+              {/* Customer Filter Dropdown */}
+              <div className="md:col-span-4">
+                <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <Filter className="h-3 w-3 text-blue-500" /> Filter by Customer
+                </label>
+                <select
+                  value={filterCustomerCode}
+                  onChange={(e) => setFilterCustomerCode(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100"
+                >
+                  <option value="">All Customers ({pos.length} POs)</option>
+                  {customers.map((c) => {
+                    const count = customerPOCounts[c.customer_code] || 0;
+                    return (
+                      <option key={c.id} value={c.customer_code}>
+                        {c.customer_code} — {c.name} ({count} {count === 1 ? "order" : "orders"})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Search Bar */}
+              <div className="md:col-span-5">
+                <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <Search className="h-3 w-3 text-blue-500" /> Search Orders / Parts
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search PO#, Customer, Part#..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent pl-8 pr-8 py-2 text-xs text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400"
+                  />
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-2 top-2 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Filter Dropdown */}
+              <div className="md:col-span-3">
+                <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-1">
+                  PO Status
+                </label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="open">Open</option>
+                  <option value="partially_allocated">Partially Allocated</option>
+                  <option value="closed">Closed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Metrics Strip for Customer / Search Results */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                  {filterCustomerCode ? "Customer POs" : "Total POs"}
+                </p>
+                <p className="text-base font-extrabold text-zinc-900 dark:text-zinc-100 mt-0.5">
+                  {metrics.totalPOs}
+                </p>
+                <p className="text-[10px] text-zinc-400">orders received</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Total Lines</p>
+                <p className="text-base font-extrabold text-blue-600 dark:text-blue-400 mt-0.5">
+                  {metrics.totalLines}
+                </p>
+                <p className="text-[10px] text-zinc-400">part line items</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Ordered Qty</p>
+                <p className="text-base font-extrabold text-zinc-900 dark:text-zinc-100 mt-0.5">
+                  {metrics.totalQty.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-zinc-400">total pcs contracted</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
+                <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Allocated (OAR)</p>
+                <p className="text-base font-extrabold text-amber-600 dark:text-amber-400 mt-0.5">
+                  {metrics.totalAllocated.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-zinc-400">pcs with OAR raised</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5 col-span-2 sm:col-span-1">
+                <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Available / Pending</p>
+                <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  {metrics.totalAvailable.toLocaleString()}
+                </p>
+                <p className="text-[10px] text-zinc-400">pcs awaiting OAR</p>
+              </div>
             </div>
           </div>
           {listError && (
@@ -405,11 +639,28 @@ export default function POMasterPage() {
           )}
           {loading ? (
             <div className="p-4 text-xs text-zinc-500">Loading...</div>
-          ) : pos.length === 0 ? (
-            <div className="p-4 text-xs text-zinc-500">No POs yet.</div>
+          ) : filteredPOs.length === 0 ? (
+            <div className="p-8 text-center text-xs text-zinc-500 space-y-2">
+              <p className="font-semibold text-zinc-700 dark:text-zinc-300">
+                {pos.length === 0 ? "No POs yet." : "No purchase orders match your filter or search criteria."}
+              </p>
+              {pos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterCustomerCode("");
+                    setSearchQuery("");
+                    setStatusFilter("");
+                  }}
+                  className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium text-xs"
+                >
+                  Reset all filters
+                </button>
+              )}
+            </div>
           ) : (
             <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {pos.map((po) => (
+              {filteredPOs.map((po) => (
                 <div key={po.id} className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -591,6 +842,16 @@ export default function POMasterPage() {
                     <span className="text-[10px] text-zinc-400">
                       Line qty cannot be reduced below allocated qty
                     </span>
+                  </div>
+
+                  <div className="hidden md:grid md:grid-cols-12 gap-2 px-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    <div className="col-span-3">Customer Part No</div>
+                    <div className="col-span-2">Internal Part No</div>
+                    <div className="col-span-2 text-right">PO Qty</div>
+                    <div className="col-span-1 text-right">Allocated</div>
+                    <div className="col-span-1 text-right">Available</div>
+                    <div className="col-span-2">Req. Delivery Date</div>
+                    <div className="col-span-1 text-right">Action</div>
                   </div>
 
                   <div className="space-y-2">
