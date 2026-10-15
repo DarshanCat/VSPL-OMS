@@ -189,6 +189,12 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["admin", "planner"],
       },
       {
+        name: "Generate Work Orders",
+        href: "/planning/wo-generation",
+        icon: <Layers className="h-4 w-4 text-emerald-500" />,
+        roles: ["admin", "planner"],
+      },
+      {
         name: "OAR & WO List",
         href: "/orders/list",
         icon: <FileSpreadsheet className="h-4 w-4 text-blue-500" />,

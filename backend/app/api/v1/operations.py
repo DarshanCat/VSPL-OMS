@@ -10,7 +10,9 @@ from app.schemas.operations import (
     ConversionCreate, ConversionResponse,
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
     ReleaseEvidenceCreate,
-    EngineeringReleaseResponse, ManufacturingReleaseResponse
+    EngineeringReleaseResponse, ManufacturingReleaseResponse,
+    WorkOrderCreatePayload, WorkOrderCreateResponse,
+    NextSequencesResponse
 )
 from app.schemas.work_order import OARListItem, OARGenealogyResponse
 from app.services.operations_service import OperationsService
@@ -22,16 +24,33 @@ from app.core.roles import (
 
 router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
 
+@router.get("/next-sequences", response_model=NextSequencesResponse)
+def get_next_sequences(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Retrieve the next suggested, collision-free OAR and WO sequence numbers."""
+    return OperationsService.get_next_sequences(db)
+
 @router.post("/intake", response_model=OrderIntakeResponse)
 def create_order_intake(
     payload: OrderIntakeCreate,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*PLANNING_ROLES))
 ):
-    """Process incoming Order Intake (OAR) and create corresponding Work Orders.
-    Planning-only per the OMS Roles & Responsibilities spec (Production Manager
-    explicitly cannot create/edit an OAR)."""
+    """Step 1: Sales / Planning Order Intake (OAR) creation. Creates an OAR
+    linked to confirmed customer PO or schedule without creating WOs by default."""
     return OperationsService.create_order_intake(db, payload, current_user=user)
+
+@router.post("/work-orders", response_model=WorkOrderCreateResponse)
+def create_work_order(
+    payload: WorkOrderCreatePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Step 2: Planner generates Work Order(s) from a created OAR with custom date,
+    quantity, and process route."""
+    return OperationsService.create_work_order(db, payload, current_user=user)
 
 @router.get("/oars", response_model=List[OARListItem])
 def list_oars(

@@ -506,8 +506,77 @@ export async function createOrderIntake(payload: {
   source_type?: string;
   po_line_id?: string;
   schedule_id?: string;
+  oar_number?: string;
+  create_wos?: boolean;
 }) {
   const { data } = await api.post("/api/v1/operations/intake", payload);
+  return data;
+}
+
+export interface NextSequences {
+  next_oar_number: string;
+  next_wo_number: string;
+}
+
+export async function getNextSequences(): Promise<NextSequences> {
+  const { data } = await api.get("/api/v1/operations/next-sequences");
+  return data;
+}
+
+export interface WorkOrderCreatePayload {
+  oar_number: string;
+  wo_number?: string;
+  physical_wo_qty: number;
+  wo_date?: string;
+  target_date?: string;
+  casting_process?: "CENTRIFUGAL" | "CONTINUOUS" | string;
+  heat_number?: string;
+  route_stages?: string[];
+  remarks?: string;
+}
+
+export interface WorkOrderCreateResult {
+  success: boolean;
+  wo_number: string;
+  order_id: string;
+  oar_number: string;
+  customer_code: string;
+  part_number: string;
+  physical_wo_qty: number;
+  current_stage: string;
+  status: string;
+  release_status: string;
+  created_at: string;
+  message: string;
+}
+
+export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderCreateResult> {
+  const { data } = await api.post("/api/v1/operations/work-orders", payload);
+  return data;
+}
+
+export interface MovableWorkOrderItem {
+  wo_id: string;
+  wo_number: string;
+  oar_number?: string | null;
+  customer_code: string;
+  customer_name: string;
+  part_number: string;
+  part_name?: string | null;
+  from_stage: string;
+  to_stage?: string | null;
+  movable_wip: number;
+  current_stage: string;
+  heat_number?: string | null;
+  delivery_date?: string | null;
+  created_at?: string | null;
+  priority_rank: number;
+}
+
+export async function getMovableWorkOrders(limit?: number): Promise<MovableWorkOrderItem[]> {
+  const { data } = await api.get("/api/v1/work-orders/movable", {
+    params: limit ? { limit } : undefined,
+  });
   return data;
 }
 

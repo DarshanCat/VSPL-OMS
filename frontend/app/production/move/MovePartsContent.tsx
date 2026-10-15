@@ -30,7 +30,9 @@ import {
   getStageState,
   moveParts,
   predictDelay,
-  predictRejection
+  predictRejection,
+  getMovableWorkOrders,
+  MovableWorkOrderItem
 } from "@/lib/api";
 
 const MACHINES = [
@@ -53,6 +55,8 @@ export function MovePartsContent() {
   const [mlRejPred, setMlRejPred] = useState<any>(null);
   const [availableWOs, setAvailableWOs] = useState<any[]>([]);
   const [searchError, setSearchError] = useState("");
+  const [movableWOs, setMovableWOs] = useState<MovableWorkOrderItem[]>([]);
+  const [loadingMovable, setLoadingMovable] = useState(false);
 
   // Form State
   const [quantityToMove, setQuantityToMove] = useState<number | "">("");
@@ -79,8 +83,21 @@ export function MovePartsContent() {
   const inputRemarksRef = useRef<HTMLInputElement>(null);
   const btnSubmitRef = useRef<HTMLButtonElement>(null);
 
-  // Fetch quick selectable active WOs from backend on load
+  const loadMovableWOs = async () => {
+    setLoadingMovable(true);
+    try {
+      const data = await getMovableWorkOrders(25);
+      setMovableWOs(data);
+    } catch {
+      setMovableWOs([]);
+    } finally {
+      setLoadingMovable(false);
+    }
+  };
+
+  // Fetch quick selectable active WOs and movable queue from backend on load
   useEffect(() => {
+    loadMovableWOs();
     getWorkOrders({ limit: 50, exclude_dispatched: true })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -95,6 +112,12 @@ export function MovePartsContent() {
         setSearchError("Backend / API service is currently unavailable. Please verify connection.");
       });
   }, []);
+
+  const handleSelectMovable = (item: MovableWorkOrderItem) => {
+    lookupWO(item.wo_number);
+    setQuantityToMove(item.movable_wip);
+    document.getElementById("move-form-section")?.scrollIntoView({ behavior: "smooth" });
+  };
 
   const lookupWO = async (woNum: string) => {
     if (!woNum || !woNum.trim()) return;
@@ -249,6 +272,7 @@ export function MovePartsContent() {
 
       setShowSuccessModal(true);
       lookupWO(woData.wo_number);
+      loadMovableWOs();
     } catch (err: any) {
       setFormError(err?.response?.data?.detail || "Transfer failed. Please check route and WIP balance.");
     } finally {
@@ -304,6 +328,128 @@ export function MovePartsContent() {
               <span>Scan Barcode / QR</span>
             </button>
           </div>
+        </div>
+
+        {/* Priority Queue: Pending Parts Waiting to Move */}
+        <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-r from-amber-50/60 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 p-5 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                  Priority Dispatch Queue
+                </span>
+                <span className="text-xs text-amber-800 dark:text-amber-300 font-bold">
+                  {movableWOs.length} Work Order{movableWOs.length === 1 ? "" : "s"} Waiting to Move
+                </span>
+              </div>
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mt-1 flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-amber-600" />
+                Pending Parts Waiting to Move to Next Stage
+              </h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Material produced and ready for physical transit. 1-click loads Work Order and populates moving quantity.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={loadMovableWOs}
+              disabled={loadingMovable}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition self-start sm:self-auto cursor-pointer"
+            >
+              <Clock className={`h-3.5 w-3.5 ${loadingMovable ? "animate-spin" : ""}`} />
+              Refresh Queue
+            </button>
+          </div>
+
+          {loadingMovable ? (
+            <p className="text-xs text-zinc-400 py-3 text-center">Checking shop floor movable WIP...</p>
+          ) : movableWOs.length === 0 ? (
+            <div className="py-4 text-center text-xs text-zinc-500 bg-white/70 dark:bg-zinc-900/70 rounded-xl border border-dashed border-amber-200 dark:border-amber-900/40">
+              No produced parts currently waiting to move. Once production is recorded, waiting parts appear here automatically.
+            </div>
+          ) : (
+            <div className="overflow-x-auto max-h-64 overflow-y-auto border border-amber-200/80 dark:border-amber-900/50 rounded-xl bg-white dark:bg-zinc-900">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-amber-100/60 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 uppercase text-[10px] tracking-wider sticky top-0">
+                  <tr>
+                    <th className="p-2.5">Priority</th>
+                    <th className="p-2.5">Work Order</th>
+                    <th className="p-2.5">Customer &amp; Part</th>
+                    <th className="p-2.5">Route Hop</th>
+                    <th className="p-2.5 text-right">Waiting Qty</th>
+                    <th className="p-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                  {movableWOs.map((item, idx) => {
+                    const isSelected = woData?.wo_number === item.wo_number;
+                    return (
+                      <tr
+                        key={`${item.wo_id}-${item.from_stage}-${idx}`}
+                        className={`transition-colors ${
+                          isSelected
+                            ? "bg-amber-50 dark:bg-amber-950/40 border-l-4 border-l-amber-600 font-semibold"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        <td className="p-2.5 font-mono text-[11px] text-zinc-400">
+                          #{idx + 1}
+                        </td>
+                        <td className="p-2.5">
+                          <span className="font-mono font-bold text-blue-600 dark:text-blue-400 block">
+                            {item.wo_number}
+                          </span>
+                          {item.oar_number && (
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              OAR: {item.oar_number}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-2.5">
+                          <span className="font-semibold text-zinc-800 dark:text-zinc-200 block truncate max-w-xs">
+                            {item.customer_name || item.customer_code}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 font-mono block">
+                            {item.part_number} {item.heat_number ? `• Heat: ${item.heat_number}` : ""}
+                          </span>
+                        </td>
+                        <td className="p-2.5">
+                          <div className="flex items-center gap-1.5 font-mono text-xs font-bold">
+                            <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300">
+                              {item.from_stage}
+                            </span>
+                            <ArrowRight className="h-3 w-3 text-zinc-400" />
+                            <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300">
+                              {item.to_stage || "Next Stage"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-2.5 text-right font-mono">
+                          <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 font-extrabold text-xs">
+                            {item.movable_wip} pcs
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectMovable(item)}
+                            className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                              isSelected
+                                ? "bg-amber-600 text-white shadow-sm"
+                                : "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800"
+                            }`}
+                          >
+                            {isSelected ? "Loaded" : "Move Now"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Search / Lookup Bar */}
@@ -366,7 +512,7 @@ export function MovePartsContent() {
 
         {/* Work Order Details & Movement Form */}
         {woData && (
-          <div className="space-y-6">
+          <div id="move-form-section" className="space-y-6">
             {/* Header Strip */}
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800">

@@ -6,11 +6,21 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, WorkOrderRouteResponse,
-    PlanningSummaryResponse
+    PlanningSummaryResponse, MovableWorkOrderItem
 )
 from app.services.work_order_service import WorkOrderService
 
 router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
+
+@router.get("/movable", response_model=List[MovableWorkOrderItem])
+def list_movable_work_orders(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Retrieve all work orders that have produced parts / WIP waiting at a stage
+    to be moved to the next sequential stage, sorted priority-wise."""
+    return WorkOrderService.list_movable_work_orders(db, limit=limit)
 
 @router.get("/planning-summary", response_model=PlanningSummaryResponse)
 def get_planning_summary(

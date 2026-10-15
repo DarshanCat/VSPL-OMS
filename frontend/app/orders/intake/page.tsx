@@ -10,11 +10,13 @@ import {
   ArrowRight,
   Package,
   Clock3,
+  FileSpreadsheet,
+  RefreshCw,
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
   createOrderIntake, getMasterCustomers, getPOMasters, getSchedules, getParts,
-  lookupCustomerPart, PartLookupResponse,
+  lookupCustomerPart, PartLookupResponse, getNextSequences,
   MasterCustomer, POMasterOut, ScheduleOut, AdminPart,
 } from "@/lib/api";
 
@@ -63,6 +65,11 @@ export default function OrderIntakePage() {
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
   const [orderType, setOrderType] = useState("Standard");
 
+  // OAR Number (manual or auto-generated next sequence)
+  const [oarNumber, setOarNumber] = useState("");
+  const [allPendingPOs, setAllPendingPOs] = useState<any[]>([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+
   // Demand source -- PO (confirmed) vs Schedule (forecast, not yet a confirmed PO).
   const [sourceType, setSourceType] = useState<"po" | "schedule">("po");
   const [poMasters, setPoMasters] = useState<POMasterOut[]>([]);
@@ -70,12 +77,49 @@ export default function OrderIntakePage() {
   const [selectedPoLineId, setSelectedPoLineId] = useState("");
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
 
+  const [generateWOsImmediately, setGenerateWOsImmediately] = useState(false);
   const [splitMode, setSplitMode] = useState<"auto" | "manual">("auto");
   const [manualQtys, setManualQtys] = useState<string[]>(["", ""]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
+
+  const loadPendingPOs = async () => {
+    setLoadingPending(true);
+    try {
+      const allPos = await getPOMasters();
+      const pending: any[] = [];
+      allPos.forEach((po) => {
+        po.lines.forEach((l) => {
+          if (l.available_qty > 0) {
+            pending.push({
+              ...l,
+              po_number: po.po_number,
+              po_id: po.id,
+              customer_code: po.customer_code,
+              customer_name: po.customer_name,
+              po_date: po.po_date,
+              validity_date: po.validity_date,
+            });
+          }
+        });
+      });
+      setAllPendingPOs(pending);
+    } catch {
+      setAllPendingPOs([]);
+    } finally {
+      setLoadingPending(false);
+    }
+  };
+
+  const refreshNextSequences = () => {
+    getNextSequences()
+      .then((seq) => {
+        if (!oarNumber) setOarNumber(seq.next_oar_number);
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     getMasterCustomers()
@@ -84,6 +128,8 @@ export default function OrderIntakePage() {
     getParts()
       .then(setMasterParts)
       .catch(() => setMasterParts([]));
+    loadPendingPOs();
+    refreshNextSequences();
   }, []);
 
   useEffect(() => {
@@ -95,6 +141,19 @@ export default function OrderIntakePage() {
       .then((all) => setSchedules(all.filter((s) => s.po_status === "scheduled" || s.po_status === "awaiting_po")))
       .catch(() => setSchedules([]));
   }, [customerCode]);
+
+  const handleSelectPendingPO = (p: any) => {
+    setSourceType("po");
+    setCustomerCode(p.customer_code);
+    setCustomerName(p.customer_name);
+    setCustomerPO(p.po_number);
+    setPartNumber(p.part_number);
+    setCustomerPartNo(p.customer_part_number || "");
+    setPoQty(p.available_qty);
+    setSelectedPoLineId(p.id);
+    if (p.required_date) setDeliveryDate(p.required_date);
+    document.getElementById("oar-entry-form")?.scrollIntoView({ behavior: "smooth" });
+  };
 
   const poLineOptions = poMasters.flatMap((po) =>
     po.lines.map((l) => ({ ...l, po_number: po.po_number, po_id: po.id }))
@@ -230,13 +289,18 @@ export default function OrderIntakePage() {
         max_batch_size: batch,
         delivery_date: deliveryDate,
         order_type: orderType,
-        wo_quantities,
+        wo_quantities: generateWOsImmediately ? wo_quantities : undefined,
         source_type: sourceType,
         po_line_id: sourceType === "po" ? selectedPoLineId || undefined : undefined,
         schedule_id: sourceType === "schedule" ? selectedScheduleId : undefined,
+        oar_number: oarNumber.trim() || undefined,
+        create_wos: generateWOsImmediately,
       });
 
       setSuccessResult(res);
+      setOarNumber("");
+      refreshNextSequences();
+      loadPendingPOs();
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to process Order Intake.");
     } finally {
@@ -256,11 +320,90 @@ export default function OrderIntakePage() {
             <span className="text-xs text-zinc-400">Order Acknowledgement Record</span>
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-            Order Intake & WO Split
+            Order Intake &amp; OAR Generation
           </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Accept customer Purchase Orders, auto-generate OAR records, and split large orders into standard batch Work Orders.
+            Accept confirmed customer Purchase Orders, create Order Acceptance Receipts (OAR), and route to Planning for Work Order generation.
           </p>
+        </div>
+
+        {/* Pending Customer POs Awaiting OAR Generation */}
+        <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/20 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+                Pending Customer Purchase Orders (Awaiting OAR Generation)
+              </h2>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Purchase order lines confirmed by customers that need Sales Order Acceptance Receipt (OAR).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadPendingPOs}
+              disabled={loadingPending}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800 transition"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loadingPending ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
+
+          {loadingPending ? (
+            <p className="text-xs text-zinc-400 py-2">Loading pending purchase orders...</p>
+          ) : allPendingPOs.length === 0 ? (
+            <p className="text-xs text-zinc-500 py-2 italic">
+              No pending PO lines awaiting OAR. All confirmed POs have had OARs generated, or you can manually create an OAR below.
+            </p>
+          ) : (
+            <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 uppercase text-[10px] tracking-wider sticky top-0">
+                  <tr>
+                    <th className="p-2.5">Customer &amp; PO</th>
+                    <th className="p-2.5">Part / Drawing</th>
+                    <th className="p-2.5">Cust Part #</th>
+                    <th className="p-2.5 text-right">Available / Total</th>
+                    <th className="p-2.5">Target Date</th>
+                    <th className="p-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                  {allPendingPOs.map((p, idx) => (
+                    <tr key={`${p.po_id}-${p.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                      <td className="p-2.5">
+                        <span className="font-mono font-bold text-blue-600 block">{p.po_number}</span>
+                        <span className="text-[11px] text-zinc-500">{p.customer_name || p.customer_code}</span>
+                      </td>
+                      <td className="p-2.5">
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{p.part_number}</span>
+                        <span className="text-[10px] text-zinc-400">{p.material_grade || "-"}</span>
+                      </td>
+                      <td className="p-2.5 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+                        {p.customer_part_number || "-"}
+                      </td>
+                      <td className="p-2.5 text-right font-mono">
+                        <strong className="text-emerald-600">{p.available_qty}</strong> / {p.po_qty}
+                      </td>
+                      <td className="p-2.5 text-[11px] text-zinc-500">
+                        {p.required_date || "-"}
+                      </td>
+                      <td className="p-2.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPendingPO(p)}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                        >
+                          Generate OAR
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -272,46 +415,76 @@ export default function OrderIntakePage() {
         {successResult && (
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 space-y-3">
             <div className="flex items-center gap-3">
-              <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+              <CheckCircle2 className="h-6 w-6 text-emerald-500 shrink-0" />
               <div>
                 <h4 className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
                   {successResult.message}
                 </h4>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs | {successResult.wos_created.length} Work Order(s) created
+                  OAR Reference: <strong>{successResult.oar_number}</strong> | Total Quantity: {successResult.total_qty} pcs
+                  {successResult.wos_created && successResult.wos_created.length > 0
+                    ? ` | ${successResult.wos_created.length} Work Order(s) created`
+                    : " | Awaiting Work Order Generation in Planning"}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-xl bg-white dark:bg-zinc-900 p-3.5 border border-zinc-200 dark:border-zinc-800 text-xs">
-              <span className="font-bold text-zinc-900 dark:text-zinc-100 block mb-1">
-                Generated Work Orders (Initialized at Stage F1):
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {successResult.wos_created.map((wo: string, idx: number) => (
-                  <Link
-                    key={wo}
-                    href={`/production/tracking?wo=${wo}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 px-3 py-1 font-mono font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:underline"
-                  >
-                    <span>{wo}</span>
-                    {Array.isArray(successResult.wo_quantities) && successResult.wo_quantities[idx] != null && (
-                      <span className="text-zinc-500 dark:text-zinc-400 font-semibold">
-                        ({successResult.wo_quantities[idx]} pcs)
-                      </span>
-                    )}
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                ))}
+            {successResult.wos_created && successResult.wos_created.length > 0 ? (
+              <div className="rounded-xl bg-white dark:bg-zinc-900 p-3.5 border border-zinc-200 dark:border-zinc-800 text-xs">
+                <span className="font-bold text-zinc-900 dark:text-zinc-100 block mb-1">
+                  Generated Work Orders (Initialized at Stage F1):
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {successResult.wos_created.map((wo: string, idx: number) => (
+                    <Link
+                      key={wo}
+                      href={`/production/tracking?wo=${wo}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 px-3 py-1 font-mono font-bold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 hover:underline"
+                    >
+                      <span>{wo}</span>
+                      {Array.isArray(successResult.wo_quantities) && successResult.wo_quantities[idx] != null && (
+                        <span className="text-zinc-500 dark:text-zinc-400 font-semibold">
+                          ({successResult.wo_quantities[idx]} pcs)
+                        </span>
+                      )}
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl bg-white dark:bg-zinc-900 p-3.5 border border-zinc-200 dark:border-zinc-800 text-xs flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-zinc-900 dark:text-zinc-100 block">
+                    Next Step: Work Order Generation
+                  </span>
+                  <p className="text-zinc-500 text-[11px]">
+                    Sales OAR has been recorded. The Planning team can now generate and schedule the Work Order(s).
+                  </p>
+                </div>
+                <Link
+                  href={`/planning/wo-generation?oar=${encodeURIComponent(successResult.oar_number)}`}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 transition shrink-0"
+                >
+                  <span>Generate Work Order Now</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            )}
 
-            <div className="pt-1">
+            <div className="pt-1 flex items-center gap-4 text-xs font-bold">
               <Link
                 href="/orders/list"
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline"
+                className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 hover:underline"
               >
                 <span>View in OAR &amp; WO List</span>
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+              <Link
+                href="/planning/wo-generation"
+                className="inline-flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                <span>Open Work Order Generation</span>
                 <ArrowRight className="h-3 w-3" />
               </Link>
             </div>
@@ -320,6 +493,7 @@ export default function OrderIntakePage() {
 
         {/* Intake Form */}
         <form
+          id="oar-entry-form"
           onSubmit={handleSubmit}
           className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-5"
         >
@@ -328,6 +502,51 @@ export default function OrderIntakePage() {
               Customer PO Details
             </h3>
             <span className="text-xs text-zinc-400">OAR Entry Form</span>
+          </div>
+
+          {/* OAR Number & Generation mode */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  OAR Reference Number *
+                </label>
+                <button
+                  type="button"
+                  onClick={refreshNextSequences}
+                  className="text-[10px] text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <RefreshCw className="h-2.5 w-2.5" /> Next Auto
+                </button>
+              </div>
+              <input
+                type="text"
+                value={oarNumber}
+                onChange={(e) => setOarNumber(e.target.value)}
+                placeholder="e.g. OAR-8326 or enter custom/dumped ID"
+                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+              />
+              <p className="mt-1 text-[10px] text-zinc-400">
+                Auto-suggested sequence. Custom dumped numbers accepted.
+              </p>
+            </div>
+
+            <div className="flex flex-col justify-center">
+              <label className="flex items-start gap-2 cursor-pointer mt-3">
+                <input
+                  type="checkbox"
+                  checked={generateWOsImmediately}
+                  onChange={(e) => setGenerateWOsImmediately(e.target.checked)}
+                  className="rounded mt-0.5 border-zinc-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs text-zinc-700 dark:text-zinc-300">
+                  <strong className="block font-semibold">Immediate WO Auto-Split (Optional)</strong>
+                  <span className="text-[11px] text-zinc-500">
+                    Leave unchecked for standard flow: Sales creates OAR, Planner generates WOs.
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -583,106 +802,128 @@ export default function OrderIntakePage() {
             </div>
           </div>
 
-          {/* WO Quantity Allocation */}
-          <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Work Order Quantity Split</h4>
-              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setSplitMode("auto")}
-                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
-                    splitMode === "auto"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  Auto Split
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSplitMode("manual")}
-                  className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
-                    splitMode === "manual"
-                      ? "bg-blue-600 text-white"
-                      : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  }`}
-                >
-                  Manual Split
-                </button>
-              </div>
-            </div>
-
-            {splitMode === "auto" ? (
-              Number(poQty) > 0 && Number(batchSize) > 0 && (
-                <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
-                  <span className="text-zinc-600 dark:text-zinc-400">
-                    Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
-                  </span>
-                  <span className="font-mono text-zinc-500">
-                    {poQty} pcs ÷ {batchSize} batch max
-                  </span>
+          {/* WO Quantity Allocation (Only if Immediate WO generation is enabled) */}
+          {generateWOsImmediately ? (
+            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Work Order Quantity Split</h4>
+                <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setSplitMode("auto")}
+                    className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                      splitMode === "auto"
+                        ? "bg-blue-600 text-white"
+                        : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    Auto Split
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSplitMode("manual")}
+                    className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                      splitMode === "manual"
+                        ? "bg-blue-600 text-white"
+                        : "bg-white dark:bg-zinc-900 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                    }`}
+                  >
+                    Manual Split
+                  </button>
                 </div>
-              )
-            ) : (
-              <div className="space-y-2">
-                {manualQtys.map((v, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <span className="w-14 text-[11px] font-mono font-bold text-zinc-400">WO #{idx + 1}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={v}
-                      onChange={(e) => updateManualQty(idx, e.target.value)}
-                      placeholder="Quantity"
-                      className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeManualRow(idx)}
-                      disabled={manualQtys.length <= 1}
-                      className="text-[11px] font-bold text-rose-500 disabled:opacity-30 disabled:cursor-not-allowed px-2"
-                    >
-                      Remove
-                    </button>
+              </div>
+
+              {splitMode === "auto" ? (
+                Number(poQty) > 0 && Number(batchSize) > 0 && (
+                  <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
+                    <span className="text-zinc-600 dark:text-zinc-400">
+                      Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
+                    </span>
+                    <span className="font-mono text-zinc-500">
+                      {poQty} pcs ÷ {batchSize} batch max
+                    </span>
                   </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addManualRow}
-                  className="text-[11px] font-bold text-blue-600 hover:underline"
-                >
-                  + Add another Work Order
-                </button>
+                )
+              ) : (
+                <div className="space-y-2">
+                  {manualQtys.map((v, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="w-14 text-[11px] font-mono font-bold text-zinc-400">WO #{idx + 1}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={v}
+                        onChange={(e) => updateManualQty(idx, e.target.value)}
+                        placeholder="Quantity"
+                        className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeManualRow(idx)}
+                        disabled={manualQtys.length <= 1}
+                        className="text-[11px] font-bold text-rose-500 disabled:opacity-30 disabled:cursor-not-allowed px-2"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addManualRow}
+                    className="text-[11px] font-bold text-blue-600 hover:underline"
+                  >
+                    + Add another Work Order
+                  </button>
 
-                <div
-                  className={`rounded-xl p-3.5 border text-xs flex items-center justify-between ${
-                    manualComplete
-                      ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40"
-                      : "bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40"
-                  }`}
-                >
-                  <span className="text-zinc-600 dark:text-zinc-400">
-                    Allocated: <strong className="font-mono">{manualAllocated}</strong> / {Number(poQty) || 0} pcs
-                    {" · "}
-                    Remaining: <strong className="font-mono">{manualRemaining}</strong>
-                  </span>
-                  <span className={`font-bold ${manualComplete ? "text-emerald-600" : "text-amber-600"}`}>
-                    {manualComplete ? "Allocation Complete" : "Allocation Incomplete"}
-                  </span>
+                  <div
+                    className={`rounded-xl p-3.5 border text-xs flex items-center justify-between ${
+                      manualComplete
+                        ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40"
+                        : "bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40"
+                    }`}
+                  >
+                    <span className="text-zinc-600 dark:text-zinc-400">
+                      Allocated: <strong className="font-mono">{manualAllocated}</strong> / {Number(poQty) || 0} pcs
+                      {" · "}
+                      Remaining: <strong className="font-mono">{manualRemaining}</strong>
+                    </span>
+                    <span className={`font-bold ${manualComplete ? "text-emerald-600" : "text-amber-600"}`}>
+                      {manualComplete ? "Allocation Complete" : "Allocation Incomplete"}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-blue-100 dark:border-blue-900/30 bg-blue-50/40 dark:bg-blue-950/20 p-3.5 text-xs text-blue-700 dark:text-blue-300">
+              <span className="font-bold block mb-0.5">3-Step Process: Step 1 (Sales OAR)</span>
+              <span>
+                Work Orders will NOT be generated now. This creates the official Order Acceptance Receipt (OAR). The Planning department will then generate and schedule the Work Order IDs.
+              </span>
+            </div>
+          )}
 
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !poQty || !batchSize || (splitMode === "manual" && !manualComplete)}
+              disabled={
+                loading ||
+                !poQty ||
+                !batchSize ||
+                (generateWOsImmediately && splitMode === "manual" && !manualComplete)
+              }
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 disabled:opacity-50 transition-colors cursor-pointer"
             >
               <FilePlus className="h-4 w-4" />
-              <span>{loading ? "Creating OAR & Work Orders..." : "Accept Order & Create Work Orders"}</span>
+              <span>
+                {loading
+                  ? generateWOsImmediately
+                    ? "Creating OAR & Work Orders..."
+                    : "Generating Order Acceptance Receipt (OAR)..."
+                  : generateWOsImmediately
+                  ? "Accept Order & Create Work Orders"
+                  : "Generate Order Acceptance Receipt (OAR)"}
+              </span>
             </button>
           </div>
         </form>

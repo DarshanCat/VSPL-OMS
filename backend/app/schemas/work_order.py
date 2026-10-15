@@ -230,3 +230,20 @@ class WorkOrderRouteResponse(BaseModel):
     route_stages: List[str]
     next_stage: Optional[str] = None
     stage_targets: dict
+
+class MovableWorkOrderItem(BaseModel):
+    wo_id: str
+    wo_number: str
+    oar_number: Optional[str] = None
+    customer_code: str
+    customer_name: str
+    part_number: str
+    part_name: Optional[str] = None
+    from_stage: str
+    to_stage: Optional[str] = None
+    movable_wip: int
+    current_stage: str
+    heat_number: Optional[str] = None
+    delivery_date: Optional[date] = None
+    created_at: Optional[datetime] = None
+    priority_rank: int = 1

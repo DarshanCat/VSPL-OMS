@@ -15,7 +15,7 @@ from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
     WorkOrderRouteResponse, TransactionHistoryItem,
     OARListItem, OARWorkOrderSummary, OARGenealogyResponse,
-    PlanningSummaryResponse
+    PlanningSummaryResponse, MovableWorkOrderItem
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -948,3 +948,56 @@ class WorkOrderService:
             total_active_wos=total_active_wos,
             total_dispatched_wos=total_dispatched_wos
         )
+
+    @staticmethod
+    def list_movable_work_orders(db: Session, limit: int = 50) -> List[MovableWorkOrderItem]:
+        """Returns active work orders that currently have produced parts / WIP waiting
+        at an origin stage to be moved to the next stage along the sequential route.
+        Sorted priority-wise by earliest delivery date and largest waiting quantity."""
+        active_wos = (
+            db.query(WorkOrder)
+            .join(Order)
+            .join(Customer)
+            .join(Part)
+            .filter(
+                WorkOrder.status.notin_([WOStatus.DISPATCHED, WOStatus.CLOSED]),
+                WorkOrder.current_stage != "Completed"
+            )
+            .all()
+        )
+        items = []
+        for wo in active_wos:
+            routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+            route_stages = [r.stage for r in routes] if routes else ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+            wip_records = {w.stage: w for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
+
+            for idx2, stg2 in enumerate(route_stages):
+                if idx2 + 1 >= len(route_stages):
+                    break
+                wr = wip_records.get(stg2)
+                av = wr.available_wip if wr else (wo.physical_wo_qty if idx2 == 0 and not wip_records else 0)
+                if av > 0:
+                    dest_stage = route_stages[idx2 + 1]
+                    order = wo.order
+                    items.append(MovableWorkOrderItem(
+                        wo_id=str(wo.id),
+                        wo_number=wo.wo_number,
+                        oar_number=order.oar_number if order else None,
+                        customer_code=order.customer.customer_code if (order and order.customer) else "N/A",
+                        customer_name=order.customer.name if (order and order.customer) else "VSPL Internal",
+                        part_number=order.part.part_number if (order and order.part) else "N/A",
+                        part_name=order.part.description if (order and order.part) else None,
+                        from_stage=stg2,
+                        to_stage=dest_stage,
+                        movable_wip=av,
+                        current_stage=wo.current_stage or stg2,
+                        heat_number=wo.heat_number,
+                        delivery_date=order.delivery_date if order else None,
+                        created_at=wo.created_at,
+                    ))
+                    break
+
+        items.sort(key=lambda x: (x.delivery_date or date(2099, 12, 31), -x.movable_wip))
+        for rank, item in enumerate(items, start=1):
+            item.priority_rank = rank
+        return items[:limit]

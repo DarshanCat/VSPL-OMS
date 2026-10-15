@@ -25,6 +25,10 @@ class OrderIntakeCreate(BaseModel):
             "the existing automatic max_batch_size-driven split (unchanged behavior)."
         ),
     )
+    # Optional manual OAR number (e.g. OAR-8326 or 8326). When omitted, auto-generated.
+    oar_number: Optional[str] = Field(None, max_length=100)
+    # When False (default for Sales workflow), creates only the OAR and leaves WO generation to Planning.
+    create_wos: bool = Field(False, description="When False, creates OAR only. Planner generates WOs in step 2.")
     # Demand-source linkage -- all optional, all default to the pre-existing behavior
     # (a plain PO-sourced OAR) when omitted, so every existing caller is unaffected.
     source_type: Optional[str] = Field("po", description="'po' or 'schedule'.")
@@ -35,12 +39,58 @@ class OrderIntakeResponse(BaseModel):
     success: bool
     oar_number: str
     order_id: str
-    wos_created: List[str]
+    wos_created: List[str] = []
     wo_quantities: List[int] = []
     total_qty: int
     source_type: str = "po"
     oar_po_status: Optional[str] = None
     message: str
+
+class WorkOrderCreatePayload(BaseModel):
+    oar_number: str = Field(..., max_length=100)
+    wo_number: Optional[str] = Field(None, max_length=100, description="Optional manual WO number (e.g. WO-17617 or WO 16772). If omitted, auto-generated.")
+    physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
+    wo_date: Optional[date] = None
+    target_date: Optional[date] = None
+    casting_process: Optional[str] = Field("CENTRIFUGAL", max_length=50)
+    heat_number: Optional[str] = Field(None, max_length=100)
+    route_stages: Optional[List[str]] = Field(None, description="Optional custom stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
+    remarks: Optional[str] = Field(None, max_length=2000)
+
+class WorkOrderCreateResponse(BaseModel):
+    success: bool
+    wo_number: str
+    order_id: str
+    oar_number: str
+    customer_code: str
+    part_number: str
+    physical_wo_qty: int
+    current_stage: str = "F1"
+    status: str
+    release_status: str
+    created_at: datetime
+    message: str
+
+class NextSequencesResponse(BaseModel):
+    next_oar_number: str
+    next_wo_number: str
+
+class MovableWorkOrderItem(BaseModel):
+    wo_id: str
+    wo_number: str
+    oar_number: Optional[str] = None
+    customer_code: str
+    customer_name: str
+    part_number: str
+    part_name: Optional[str] = None
+    from_stage: str
+    to_stage: Optional[str] = None
+    movable_wip: int
+    current_stage: str
+    heat_number: Optional[str] = None
+    delivery_date: Optional[date] = None
+    created_at: Optional[datetime] = None
+    priority_rank: int = 1
 
 class WOReleaseCreate(BaseModel):
     wo_number: str

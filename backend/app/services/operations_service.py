@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, date
 from typing import List, Optional
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part, OrderStatus
 from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus, POStatus
@@ -18,7 +19,9 @@ from app.schemas.operations import (
     ConversionCreate, ConversionResponse,
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
-    ReleaseEvidenceCreate
+    ReleaseEvidenceCreate,
+    WorkOrderCreatePayload, WorkOrderCreateResponse,
+    NextSequencesResponse, MovableWorkOrderItem
 )
 from app.services.oms_integration_service import (
     OMSIntegrationService,
@@ -27,7 +30,9 @@ from app.services.oms_integration_service import (
     match_route_stage,
     DEFAULT_YIELDS,
     next_oar_sequence,
-    next_wo_sequence
+    next_wo_sequence,
+    _normalize_oar_code,
+    _normalize_wo_code
 )
 from app.services.conversion_mapping_service import ConversionMappingService
 
@@ -128,8 +133,23 @@ class OperationsService:
             oar_po_status = "awaiting_po"
             schedule.po_status = ScheduleStatus.AWAITING_PO
 
-        # 3. Order (OAR) - collision-free generation
-        oar_num = next_oar_sequence(db)
+        # 3. Order (OAR) - user manual number or collision-free sequential generation
+        if req.oar_number and req.oar_number.strip():
+            candidate_oar = _normalize_oar_code(req.oar_number.strip())
+            existing = db.query(Order).filter(
+                or_(
+                    Order.oar_number == candidate_oar,
+                    Order.oar_number == req.oar_number.strip()
+                )
+            ).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"OAR Number '{candidate_oar}' already exists in the system."
+                )
+            oar_num = candidate_oar
+        else:
+            oar_num = next_oar_sequence(db)
 
         order = Order(
             oar_number=oar_num,
@@ -151,7 +171,9 @@ class OperationsService:
 
         created_wos = []
         created_wo_qtys: List[int] = []
-        if req.status == OrderStatus.ACCEPT:
+        # In the 3-step workflow, Sales creates OAR only (create_wos=False by default).
+        # Planning Department generates Work Orders separately.
+        if req.create_wos and req.status == OrderStatus.ACCEPT:
             # Determine the exact per-WO quantities to create. An explicit split (from
             # Order Intake's WO allocation step) takes precedence when supplied; it has
             # already been validated (sum == po_quantity, all > 0) above. Otherwise this
@@ -223,12 +245,19 @@ class OperationsService:
             action="ORDER_INTAKE",
             entity="Order",
             entity_id=oar_num,
-            new_value=f"PO: {req.customer_po}, Qty: {req.po_quantity}, WOs: {', '.join(created_wos)}",
+            new_value=f"PO: {req.customer_po}, Qty: {req.po_quantity}, WOs: {', '.join(created_wos) if created_wos else 'Pending Planning'}",
             details=f"Customer: {customer.name}, Part: {part.part_number}, Batch Size: {req.max_batch_size}"
         )
         db.add(audit)
 
         db.commit()
+
+        if created_wos:
+            msg = f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
+        elif source_type == "schedule":
+            msg = f"Order '{oar_num}' created from Schedule '{schedule.schedule_number}' -- awaiting PO. Schedule-based demand — PO not yet released."
+        else:
+            msg = f"OAR '{oar_num}' created successfully. Ready for Planning to generate Work Orders."
 
         return OrderIntakeResponse(
             success=True,
@@ -239,11 +268,162 @@ class OperationsService:
             total_qty=req.po_quantity,
             source_type=source_type,
             oar_po_status=oar_po_status,
-            message=(
-                f"Order '{oar_num}' created with {len(created_wos)} Work Order(s)."
-                if source_type != "schedule"
-                else f"Order '{oar_num}' created from Schedule '{schedule.schedule_number}' -- awaiting PO. Schedule-based demand — PO not yet released."
+            message=msg
+        )
+
+    @staticmethod
+    def create_work_order(
+        db: Session,
+        req: WorkOrderCreatePayload,
+        current_user: Optional[User] = None
+    ) -> WorkOrderCreateResponse:
+        """Step 2 of the workflow: Planning Department generates Work Order(s)
+        from a created OAR with custom date, quantity, and route."""
+        raw_oar = req.oar_number.strip()
+        norm_oar = _normalize_oar_code(raw_oar)
+
+        order = db.query(Order).filter(
+            or_(
+                Order.oar_number == raw_oar,
+                Order.oar_number == norm_oar
             )
+        ).first()
+
+        if not order:
+            try:
+                u = uuid.UUID(raw_oar)
+                order = db.query(Order).filter(Order.id == u).first()
+            except (ValueError, AttributeError):
+                pass
+
+        if not order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"OAR '{req.oar_number}' not found."
+            )
+
+        # Validate unallocated balance
+        allocated_qty = sum(wo.physical_wo_qty for wo in order.work_orders)
+        available_qty = max(order.po_qty - allocated_qty, 0)
+
+        if req.physical_wo_qty > available_qty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Requested WO quantity ({req.physical_wo_qty}) exceeds the available unallocated "
+                    f"OAR quantity ({available_qty}) on OAR {order.oar_number}."
+                )
+            )
+
+        # WO Number generation / validation
+        if req.wo_number and req.wo_number.strip():
+            candidate_wo = _normalize_wo_code(req.wo_number.strip())
+            existing_wo = db.query(WorkOrder).filter(
+                or_(
+                    WorkOrder.wo_number == candidate_wo,
+                    WorkOrder.wo_number == req.wo_number.strip()
+                )
+            ).first()
+            if existing_wo:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Work Order number '{candidate_wo}' already exists in the system."
+                )
+            wo_num = candidate_wo
+        else:
+            wo_num = next_wo_sequence(db)
+
+        # Route determination
+        if req.route_stages and len(req.route_stages) > 0:
+            route_stages = [s.strip().upper() for s in req.route_stages if s.strip()]
+        elif req.casting_process == "CONTINUOUS":
+            route_stages = ["F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+        else:
+            route_stages = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+
+        wo_created_dt = (
+            datetime.combine(req.wo_date, datetime.min.time())
+            if req.wo_date
+            else datetime.now()
+        )
+
+        wo = WorkOrder(
+            wo_number=wo_num,
+            order_id=order.id,
+            physical_wo_qty=req.physical_wo_qty,
+            current_stage=route_stages[0],
+            projected_final_good=req.physical_wo_qty,
+            shortfall="No",
+            status=WOStatus.PLANNED,
+            casting_process=req.casting_process or "CENTRIFUGAL",
+            heat_number=req.heat_number,
+            created_at=wo_created_dt
+        )
+        db.add(wo)
+        db.flush()
+
+        targets = calculate_stage_targets(req.physical_wo_qty, route=route_stages)
+        for seq, stg in enumerate(route_stages, start=1):
+            r = WORoute(
+                work_order_id=wo.id,
+                stage=stg,
+                sequence=seq,
+                stage_target_qty=targets.get(stg, req.physical_wo_qty),
+                cumulative_ent_qty=req.physical_wo_qty if seq == 1 else 0,
+                cumulative_inproc_qty=req.physical_wo_qty if seq == 1 else 0,
+                stage_status="In-Progress" if seq == 1 else "Pending"
+            )
+            db.add(r)
+
+        first_stg = route_stages[0]
+        initial_wip = StageWIP(
+            work_order_id=wo.id,
+            stage=first_stg,
+            ent_qty=req.physical_wo_qty,
+            ok_qty=0,
+            inproc_qty=req.physical_wo_qty,
+            onhand_qty=0,
+            rejected_qty=0,
+            received_qty=req.physical_wo_qty,
+            available_wip=req.physical_wo_qty,
+            moved_out_qty=0
+        )
+        db.add(initial_wip)
+
+        # Audit
+        audit = AuditLog(
+            user_id=current_user.id if current_user else None,
+            user_name=current_user.full_name if current_user else "Planner",
+            action="WO_CREATED",
+            entity="WorkOrder",
+            entity_id=wo_num,
+            new_value=f"OAR: {order.oar_number}, Qty: {req.physical_wo_qty}, Date: {req.wo_date or 'today'}",
+            details=f"Customer: {order.customer.customer_code}, Part: {order.part.part_number}"
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(wo)
+
+        return WorkOrderCreateResponse(
+            success=True,
+            wo_number=wo.wo_number,
+            order_id=str(order.id),
+            oar_number=order.oar_number,
+            customer_code=order.customer.customer_code,
+            part_number=order.part.part_number,
+            physical_wo_qty=wo.physical_wo_qty,
+            current_stage=wo.current_stage,
+            status=wo.status.value,
+            release_status="AWAITING_ENG_RELEASE",
+            created_at=wo.created_at,
+            message=f"Work Order {wo.wo_number} created successfully for OAR {order.oar_number}."
+        )
+
+    @staticmethod
+    def get_next_sequences(db: Session) -> NextSequencesResponse:
+        return NextSequencesResponse(
+            next_oar_number=next_oar_sequence(db),
+            next_wo_number=next_wo_sequence(db)
         )
 
     @staticmethod
