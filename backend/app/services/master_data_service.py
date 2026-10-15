@@ -308,6 +308,31 @@ class POMasterService:
 
     @staticmethod
     def list_pos(db: Session, customer_code: Optional[str] = None) -> List[POMasterOut]:
+        # Auto-link any unlinked legacy orders where customer_po and part_id match open PO lines
+        unlinked = (
+            db.query(Order)
+            .filter(Order.po_line_id.is_(None), Order.customer_po.isnot(None))
+            .all()
+        )
+        if unlinked:
+            for ord in unlinked:
+                cand_line = (
+                    db.query(POLine)
+                    .join(POMaster, POLine.po_id == POMaster.id)
+                    .filter(
+                        POMaster.customer_id == ord.customer_id,
+                        func.lower(POMaster.po_number) == func.lower(ord.customer_po.strip()),
+                        POLine.part_id == ord.part_id,
+                    )
+                    .first()
+                )
+                if cand_line:
+                    ord.po_line_id = cand_line.id
+            try:
+                db.flush()
+            except Exception:
+                pass
+
         query = db.query(POMaster).options(
             selectinload(POMaster.customer),
             selectinload(POMaster.lines).selectinload(POLine.part),

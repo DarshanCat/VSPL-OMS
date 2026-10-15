@@ -252,6 +252,8 @@ def auto_migrate_schema():
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_line_id UUID;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS schedule_id UUID;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS oar_po_status VARCHAR;",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS commitment_date DATE;",
+        "ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_oar_number_key;",
 
         # Audit Logs
         "ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_id UUID;",
@@ -345,6 +347,23 @@ def auto_migrate_schema():
     # PRAGMA table_info, then ALTER without the unsupported clause) instead of letting
     # it silently no-op.
     is_sqlite = engine.dialect.name == "sqlite"
+    if is_sqlite:
+        try:
+            with engine.begin() as conn:
+                sql_row = conn.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'")).fetchone()
+                if sql_row and "UNIQUE (oar_number)" in sql_row[0]:
+                    cols_info = conn.execute(text("PRAGMA table_info(orders)")).fetchall()
+                    col_names = [r[1] for r in cols_info]
+                    col_list = ", ".join(col_names)
+                    old_sql = sql_row[0]
+                    new_sql = old_sql.replace("UNIQUE (oar_number),", "").replace(", UNIQUE (oar_number)", "").replace("UNIQUE (oar_number)", "")
+                    conn.execute(text("ALTER TABLE orders RENAME TO orders_old_oar_uniq;"))
+                    conn.execute(text(new_sql))
+                    conn.execute(text(f"INSERT INTO orders ({col_list}) SELECT {col_list} FROM orders_old_oar_uniq;"))
+                    conn.execute(text("DROP TABLE orders_old_oar_uniq;"))
+        except Exception:
+            pass
+
     add_col_re = re.compile(
         r"ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+) (.+?);\s*$", re.IGNORECASE
     )

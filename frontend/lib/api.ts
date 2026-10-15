@@ -499,8 +499,9 @@ export async function createOrderIntake(payload: {
   grade?: string;
   part_description?: string;
   po_quantity: number;
-  max_batch_size: number;
+  max_batch_size?: number;
   delivery_date?: string;
+  commitment_date?: string;
   order_type?: string;
   wo_quantities?: number[];
   source_type?: string;

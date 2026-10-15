@@ -58,13 +58,14 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
-    oar_number = Column(String, unique=True, nullable=True)
+    oar_number = Column(String, index=True, nullable=True)
     customer_id = Column(GUID, ForeignKey("customers.id"), nullable=False)
     part_id = Column(GUID, ForeignKey("parts.id"), nullable=False)
     customer_po = Column(String, nullable=False)
     po_qty = Column(Integer, nullable=False)
-    max_batch_size = Column(Integer, nullable=False)
+    max_batch_size = Column(Integer, nullable=True, default=1000)
     delivery_date = Column(Date)
+    commitment_date = Column(Date, nullable=True)
     order_type = Column(String)
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

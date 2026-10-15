@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   FilePlus,
@@ -12,6 +12,8 @@ import {
   Clock3,
   FileSpreadsheet,
   RefreshCw,
+  ClipboardList,
+  Calendar,
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
@@ -63,11 +65,13 @@ export default function OrderIntakePage() {
   const [poQty, setPoQty] = useState<number | "">(1000);
   const [batchSize, setBatchSize] = useState<number | "">(500);
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
+  const [commitmentDate, setCommitmentDate] = useState("2026-09-20");
   const [orderType, setOrderType] = useState("Standard");
 
   // OAR Number (manual or auto-generated next sequence)
   const [oarNumber, setOarNumber] = useState("");
   const [allPendingPOs, setAllPendingPOs] = useState<any[]>([]);
+  const [allPendingSchedules, setAllPendingSchedules] = useState<ScheduleOut[]>([]);
   const [loadingPending, setLoadingPending] = useState(false);
 
   // Demand source -- PO (confirmed) vs Schedule (forecast, not yet a confirmed PO).
@@ -85,12 +89,21 @@ export default function OrderIntakePage() {
   const [error, setError] = useState("");
   const [successResult, setSuccessResult] = useState<any>(null);
 
-  const loadPendingPOs = async () => {
+  // Guard flag to prevent useEffect([customerCode]) from wiping out selections when clicking Generate OAR
+  const isSelectingPending = useRef(false);
+
+  const loadPendingDemand = async () => {
     setLoadingPending(true);
     try {
-      const allPos = await getPOMasters();
+      const [allPos, allScheds] = await Promise.all([
+        getPOMasters().catch(() => [] as POMasterOut[]),
+        getSchedules().catch(() => [] as ScheduleOut[]),
+      ]);
+
       const pending: any[] = [];
       allPos.forEach((po) => {
+        // Check if any line on this PO already has an OAR number created
+        const existingOarInPo = po.lines.flatMap((l) => l.orders || []).find((o) => o.oar_number)?.oar_number;
         po.lines.forEach((l) => {
           if (l.available_qty > 0) {
             pending.push({
@@ -101,13 +114,21 @@ export default function OrderIntakePage() {
               customer_name: po.customer_name,
               po_date: po.po_date,
               validity_date: po.validity_date,
+              existing_oar_number: existingOarInPo || null,
             });
           }
         });
       });
       setAllPendingPOs(pending);
+
+      // Filter pending schedules awaiting OAR
+      const pendingScheds = (allScheds || []).filter(
+        (s) => (s.po_status === "scheduled" || s.po_status === "awaiting_po") && !s.linked_oar_number
+      );
+      setAllPendingSchedules(pendingScheds);
     } catch {
       setAllPendingPOs([]);
+      setAllPendingSchedules([]);
     } finally {
       setLoadingPending(false);
     }
@@ -128,12 +149,17 @@ export default function OrderIntakePage() {
     getParts()
       .then(setMasterParts)
       .catch(() => setMasterParts([]));
-    loadPendingPOs();
+    loadPendingDemand();
     refreshNextSequences();
   }, []);
 
   useEffect(() => {
     if (!customerCode) return;
+    if (isSelectingPending.current) {
+      // Don't wipe line / schedule selection when it was intentionally prefilled by user click
+      isSelectingPending.current = false;
+      return;
+    }
     setSelectedPoLineId("");
     setSelectedScheduleId("");
     getPOMasters(customerCode).then(setPoMasters).catch(() => setPoMasters([]));
@@ -143,6 +169,7 @@ export default function OrderIntakePage() {
   }, [customerCode]);
 
   const handleSelectPendingPO = (p: any) => {
+    isSelectingPending.current = true;
     setSourceType("po");
     setCustomerCode(p.customer_code);
     setCustomerName(p.customer_name);
@@ -150,8 +177,71 @@ export default function OrderIntakePage() {
     setPartNumber(p.part_number);
     setCustomerPartNo(p.customer_part_number || "");
     setPoQty(p.available_qty);
+    setBatchSize(p.available_qty);
     setSelectedPoLineId(p.id);
-    if (p.required_date) setDeliveryDate(p.required_date);
+    if (p.required_date) {
+      setDeliveryDate(p.required_date);
+      setCommitmentDate(p.required_date);
+    }
+
+    // For multi-part POs: if an OAR was already created for another part in this PO, reuse that OAR!
+    if (p.existing_oar_number) {
+      setOarNumber(p.existing_oar_number);
+    }
+
+    // Set grade and description from part master
+    const foundPart = partOptions.find((x) => x.num === p.part_number);
+    if (foundPart) {
+      setGrade(foundPart.grade || p.material_grade || "Standard");
+      setPartDesc(foundPart.desc || p.description || "");
+    } else {
+      setGrade(p.material_grade || "Standard");
+      setPartDesc(p.description || "");
+    }
+
+    // Immediately load PO masters for this customer and ensure selected line sticks
+    getPOMasters(p.customer_code)
+      .then((pos) => {
+        setPoMasters(pos);
+        setSelectedPoLineId(p.id);
+      })
+      .catch(() => {});
+
+    document.getElementById("oar-entry-form")?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const handleSelectPendingSchedule = (s: ScheduleOut) => {
+    isSelectingPending.current = true;
+    setSourceType("schedule");
+    setCustomerCode(s.customer_code);
+    setCustomerName(s.customer_name);
+    setCustomerPO(s.customer_schedule_ref || s.schedule_number);
+    setPartNumber(s.part_number);
+    setCustomerPartNo("");
+    setPoQty(s.scheduled_qty);
+    setBatchSize(s.scheduled_qty);
+    setSelectedScheduleId(s.id);
+    if (s.required_date) {
+      setDeliveryDate(s.required_date);
+      setCommitmentDate(s.required_date);
+    }
+
+    const foundPart = partOptions.find((x) => x.num === s.part_number);
+    if (foundPart) {
+      setGrade(foundPart.grade || "Standard");
+      setPartDesc(foundPart.desc || "");
+    } else {
+      setGrade("Standard");
+      setPartDesc("");
+    }
+
+    getSchedules(s.customer_code)
+      .then((scheds) => {
+        setSchedules(scheds.filter((item) => item.po_status === "scheduled" || item.po_status === "awaiting_po"));
+        setSelectedScheduleId(s.id);
+      })
+      .catch(() => {});
+
     document.getElementById("oar-entry-form")?.scrollIntoView({ behavior: "smooth" });
   };
 
@@ -238,10 +328,10 @@ export default function OrderIntakePage() {
     setSuccessResult(null);
 
     const qty = Number(poQty);
-    const batch = Number(batchSize);
+    const batch = Number(batchSize) || qty;
 
-    if (qty <= 0 || batch <= 0) {
-      setError("PO Quantity and Max Batch Size must be greater than 0.");
+    if (qty <= 0) {
+      setError("PO Quantity must be greater than 0.");
       return;
     }
 
@@ -258,7 +348,7 @@ export default function OrderIntakePage() {
     }
 
     let wo_quantities: number[] | undefined = undefined;
-    if (splitMode === "manual") {
+    if (splitMode === "manual" && generateWOsImmediately) {
       const parsed = manualQtys.map((v) => Number(v));
       if (parsed.some((v) => !v || v <= 0)) {
         setError("Every WO quantity must be a whole number greater than 0.");
@@ -286,8 +376,9 @@ export default function OrderIntakePage() {
         grade: grade,
         part_description: partDesc,
         po_quantity: qty,
-        max_batch_size: batch,
-        delivery_date: deliveryDate,
+        max_batch_size: generateWOsImmediately ? batch : qty,
+        delivery_date: deliveryDate || undefined,
+        commitment_date: commitmentDate || undefined,
         order_type: orderType,
         wo_quantities: generateWOsImmediately ? wo_quantities : undefined,
         source_type: sourceType,
@@ -300,7 +391,7 @@ export default function OrderIntakePage() {
       setSuccessResult(res);
       setOarNumber("");
       refreshNextSequences();
-      loadPendingPOs();
+      loadPendingDemand();
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Failed to process Order Intake.");
     } finally {
@@ -327,82 +418,171 @@ export default function OrderIntakePage() {
           </p>
         </div>
 
-        {/* Pending Customer POs Awaiting OAR Generation */}
+        {/* Pending Demand Queue (PO vs Schedule) */}
         <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/30 dark:bg-blue-950/20 p-5 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                 <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-                Pending Customer Purchase Orders (Awaiting OAR Generation)
+                {sourceType === "po"
+                  ? "Pending Customer Purchase Orders (Awaiting OAR Generation)"
+                  : "Pending Customer Schedules (Awaiting OAR Generation)"}
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Purchase order lines confirmed by customers that need Sales Order Acceptance Receipt (OAR).
+                {sourceType === "po"
+                  ? "Purchase order lines confirmed by customers that need Sales Order Acceptance Receipt (OAR)."
+                  : "Customer forecast schedules that need Sales Order Acceptance Receipt (OAR)."}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={loadPendingPOs}
-              disabled={loadingPending}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800 transition"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loadingPending ? "animate-spin" : ""}`} />
-              Refresh
-            </button>
+
+            <div className="flex items-center gap-2">
+              {/* Queue Switcher Tab: PO vs Schedule */}
+              <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-0.5 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setSourceType("po")}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                    sourceType === "po"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  Pending POs ({allPendingPOs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceType("schedule")}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition ${
+                    sourceType === "schedule"
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  }`}
+                >
+                  Pending Schedules ({allPendingSchedules.length})
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadPendingDemand}
+                disabled={loadingPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loadingPending ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           {loadingPending ? (
-            <p className="text-xs text-zinc-400 py-2">Loading pending purchase orders...</p>
-          ) : allPendingPOs.length === 0 ? (
-            <p className="text-xs text-zinc-500 py-2 italic">
-              No pending PO lines awaiting OAR. All confirmed POs have had OARs generated, or you can manually create an OAR below.
+            <p className="text-xs text-zinc-400 py-2">
+              Loading pending {sourceType === "po" ? "purchase orders" : "schedules"}...
             </p>
-          ) : (
-            <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 uppercase text-[10px] tracking-wider sticky top-0">
-                  <tr>
-                    <th className="p-2.5">Customer &amp; PO</th>
-                    <th className="p-2.5">Part / Drawing</th>
-                    <th className="p-2.5">Cust Part #</th>
-                    <th className="p-2.5 text-right">Available / Total</th>
-                    <th className="p-2.5">Target Date</th>
-                    <th className="p-2.5 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                  {allPendingPOs.map((p, idx) => (
-                    <tr key={`${p.po_id}-${p.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                      <td className="p-2.5">
-                        <span className="font-mono font-bold text-blue-600 block">{p.po_number}</span>
-                        <span className="text-[11px] text-zinc-500">{p.customer_name || p.customer_code}</span>
-                      </td>
-                      <td className="p-2.5">
-                        <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{p.part_number}</span>
-                        <span className="text-[10px] text-zinc-400">{p.material_grade || "-"}</span>
-                      </td>
-                      <td className="p-2.5 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
-                        {p.customer_part_number || "-"}
-                      </td>
-                      <td className="p-2.5 text-right font-mono">
-                        <strong className="text-emerald-600">{p.available_qty}</strong> / {p.po_qty}
-                      </td>
-                      <td className="p-2.5 text-[11px] text-zinc-500">
-                        {p.required_date || "-"}
-                      </td>
-                      <td className="p-2.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectPendingPO(p)}
-                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-                        >
-                          Generate OAR
-                        </button>
-                      </td>
+          ) : sourceType === "po" ? (
+            allPendingPOs.length === 0 ? (
+              <p className="text-xs text-zinc-500 py-2 italic">
+                No pending PO lines awaiting OAR. All confirmed POs have had OARs generated, or you can manually create an OAR below.
+              </p>
+            ) : (
+              <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 uppercase text-[10px] tracking-wider sticky top-0">
+                    <tr>
+                      <th className="p-2.5">Customer &amp; PO</th>
+                      <th className="p-2.5">Part / Drawing</th>
+                      <th className="p-2.5">Cust Part #</th>
+                      <th className="p-2.5 text-right">Available / Total</th>
+                      <th className="p-2.5">Target Date</th>
+                      <th className="p-2.5 text-right">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {allPendingPOs.map((p, idx) => (
+                      <tr key={`${p.po_id}-${p.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                        <td className="p-2.5">
+                          <span className="font-mono font-bold text-blue-600 block">{p.po_number}</span>
+                          <span className="text-[11px] text-zinc-500">{p.customer_name || p.customer_code}</span>
+                        </td>
+                        <td className="p-2.5">
+                          <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{p.part_number}</span>
+                          <span className="text-[10px] text-zinc-400">{p.material_grade || "-"}</span>
+                        </td>
+                        <td className="p-2.5 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+                          {p.customer_part_number || "-"}
+                        </td>
+                        <td className="p-2.5 text-right font-mono">
+                          <strong className="text-emerald-600">{p.available_qty}</strong> / {p.po_qty}
+                        </td>
+                        <td className="p-2.5 text-[11px] text-zinc-500">
+                          {p.required_date || "-"}
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPendingPO(p)}
+                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                          >
+                            Generate OAR
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            allPendingSchedules.length === 0 ? (
+              <p className="text-xs text-zinc-500 py-2 italic">
+                No pending schedules awaiting OAR. All customer schedules have had OARs generated, or you can switch to PO above.
+              </p>
+            ) : (
+              <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 uppercase text-[10px] tracking-wider sticky top-0">
+                    <tr>
+                      <th className="p-2.5">Schedule # &amp; Ref</th>
+                      <th className="p-2.5">Customer</th>
+                      <th className="p-2.5">Part / Drawing</th>
+                      <th className="p-2.5 text-right">Scheduled Qty</th>
+                      <th className="p-2.5">Target Date</th>
+                      <th className="p-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {allPendingSchedules.map((s, idx) => (
+                      <tr key={`${s.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                        <td className="p-2.5">
+                          <span className="font-mono font-bold text-blue-600 block">{s.schedule_number}</span>
+                          <span className="text-[11px] text-zinc-500">{s.customer_schedule_ref || "-"}</span>
+                        </td>
+                        <td className="p-2.5 font-semibold text-zinc-800 dark:text-zinc-200">
+                          {s.customer_name} ({s.customer_code})
+                        </td>
+                        <td className="p-2.5">
+                          <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{s.part_number}</span>
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-emerald-600">
+                          {s.scheduled_qty} pcs
+                        </td>
+                        <td className="p-2.5 text-[11px] text-zinc-500">
+                          {s.required_date || "-"}
+                        </td>
+                        <td className="p-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPendingSchedule(s)}
+                            className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                          >
+                            Generate OAR
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
 
@@ -774,19 +954,13 @@ export default function OrderIntakePage() {
                 required
                 min={1}
                 value={poQty}
-                onChange={(e) => setPoQty(e.target.value === "" ? "" : Number(e.target.value))}
-                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Max Batch Size (pcs) *</label>
-              <input
-                type="number"
-                required
-                min={1}
-                value={batchSize}
-                onChange={(e) => setBatchSize(e.target.value === "" ? "" : Number(e.target.value))}
+                onChange={(e) => {
+                  const val = e.target.value === "" ? "" : Number(e.target.value);
+                  setPoQty(val);
+                  if (typeof val === "number" && (!batchSize || batchSize === 500)) {
+                    setBatchSize(val);
+                  }
+                }}
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
               />
             </div>
@@ -799,6 +973,18 @@ export default function OrderIntakePage() {
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
               />
+              <p className="mt-1 text-[10px] text-zinc-400">Date requested by customer</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Commitment Date</label>
+              <input
+                type="date"
+                value={commitmentDate}
+                onChange={(e) => setCommitmentDate(e.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
+              />
+              <p className="mt-1 text-[10px] text-zinc-400">Committed date by Sales to customer</p>
             </div>
           </div>
 
@@ -806,7 +992,10 @@ export default function OrderIntakePage() {
           {generateWOsImmediately ? (
             <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Work Order Quantity Split</h4>
+                <div>
+                  <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-50">Work Order Quantity Split</h4>
+                  <p className="text-[11px] text-zinc-400">Planner batch sizing and splitting options</p>
+                </div>
                 <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
                   <button
                     type="button"
@@ -834,16 +1023,28 @@ export default function OrderIntakePage() {
               </div>
 
               {splitMode === "auto" ? (
-                Number(poQty) > 0 && Number(batchSize) > 0 && (
-                  <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
-                    <span className="text-zinc-600 dark:text-zinc-400">
-                      Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
-                    </span>
-                    <span className="font-mono text-zinc-500">
-                      {poQty} pcs ÷ {batchSize} batch max
-                    </span>
+                <div className="space-y-3">
+                  <div className="w-full sm:w-1/2">
+                    <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Max Batch Size (pcs)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={batchSize}
+                      onChange={(e) => setBatchSize(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                    />
                   </div>
-                )
+                  {Number(poQty) > 0 && Number(batchSize) > 0 && (
+                    <div className="rounded-xl bg-blue-50/50 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs flex items-center justify-between">
+                      <span className="text-zinc-600 dark:text-zinc-400">
+                        Order will be split into: <strong className="text-blue-600">{Math.ceil(Number(poQty) / Number(batchSize))} Work Orders</strong>
+                      </span>
+                      <span className="font-mono text-zinc-500">
+                        {poQty} pcs ÷ {batchSize} batch max
+                      </span>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="space-y-2">
                   {manualQtys.map((v, idx) => (

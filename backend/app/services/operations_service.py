@@ -3,10 +3,10 @@ import uuid
 from datetime import datetime, date
 from typing import List, Optional
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part, OrderStatus
-from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus, POStatus
+from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus, POStatus, POMaster
 from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP
 from app.models.conversion import Conversion
@@ -123,6 +123,26 @@ class OperationsService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"OAR quantity ({req.po_quantity}) exceeds the available unallocated PO quantity ({available}) on this PO line.",
                 )
+        elif source_type == "po" and req.customer_po:
+            # Auto-resolve matching open PO line for this customer, PO number, and part
+            matching_lines = (
+                db.query(POLine)
+                .join(POMaster, POLine.po_id == POMaster.id)
+                .filter(
+                    POMaster.customer_id == customer.id,
+                    func.lower(POMaster.po_number) == func.lower(req.customer_po.strip()),
+                    POLine.part_id == part.id,
+                    POMaster.status.notin_([POStatus.CLOSED, POStatus.CANCELLED]),
+                )
+                .with_for_update()
+                .all()
+            )
+            for cand_line in matching_lines:
+                allocated = sum(o.po_qty for o in cand_line.orders)
+                available = max(cand_line.po_qty - allocated, 0)
+                if available >= req.po_quantity:
+                    po_line = cand_line
+                    break
 
         if source_type == "schedule":
             if not req.schedule_id:
@@ -134,6 +154,8 @@ class OperationsService:
             schedule.po_status = ScheduleStatus.AWAITING_PO
 
         # 3. Order (OAR) - user manual number or collision-free sequential generation
+        # Real-world Customer POs contain multiple parts/line items.
+        # All parts for the SAME Customer PO belong to ONE OAR reference.
         if req.oar_number and req.oar_number.strip():
             candidate_oar = _normalize_oar_code(req.oar_number.strip())
             existing = db.query(Order).filter(
@@ -143,13 +165,41 @@ class OperationsService:
                 )
             ).first()
             if existing:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"OAR Number '{candidate_oar}' already exists in the system."
-                )
-            oar_num = candidate_oar
+                # If this existing OAR belongs to the SAME Customer PO, allow adding this part line to the SAME OAR!
+                if (
+                    existing.customer_id == customer.id
+                    and existing.customer_po.strip().lower() == req.customer_po.strip().lower()
+                ):
+                    oar_num = existing.oar_number
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"OAR Number '{candidate_oar}' already exists for Customer PO '{existing.customer_po}'."
+                    )
+            else:
+                oar_num = candidate_oar
         else:
-            oar_num = next_oar_sequence(db)
+            # Check if an OAR already exists for this Customer PO (for multi-part POs)
+            existing_for_po = (
+                db.query(Order)
+                .filter(
+                    Order.customer_id == customer.id,
+                    func.lower(Order.customer_po) == func.lower(req.customer_po.strip()),
+                    Order.oar_number.isnot(None),
+                )
+                .order_by(Order.created_at.desc())
+                .first()
+            )
+            if existing_for_po and existing_for_po.oar_number:
+                oar_num = existing_for_po.oar_number
+            else:
+                oar_num = next_oar_sequence(db)
+
+        effective_batch_size = (
+            req.max_batch_size
+            if (req.max_batch_size and req.max_batch_size > 0)
+            else req.po_quantity
+        )
 
         order = Order(
             oar_number=oar_num,
@@ -157,8 +207,9 @@ class OperationsService:
             part_id=part.id,
             customer_po=req.customer_po.strip(),
             po_qty=req.po_quantity,
-            max_batch_size=req.max_batch_size,
+            max_batch_size=effective_batch_size,
             delivery_date=req.delivery_date,
+            commitment_date=req.commitment_date,
             order_type=req.order_type or "Standard",
             status=req.status,
             source_type=source_type,
@@ -174,19 +225,15 @@ class OperationsService:
         # In the 3-step workflow, Sales creates OAR only (create_wos=False by default).
         # Planning Department generates Work Orders separately.
         if req.create_wos and req.status == OrderStatus.ACCEPT:
-            # Determine the exact per-WO quantities to create. An explicit split (from
-            # Order Intake's WO allocation step) takes precedence when supplied; it has
-            # already been validated (sum == po_quantity, all > 0) above. Otherwise this
-            # falls back to the original, unchanged max_batch_size-driven auto-split so
-            # every existing caller/behavior is preserved exactly.
+            # Determine the exact per-WO quantities to create.
             if req.wo_quantities:
                 wo_qty_list = list(req.wo_quantities)
             else:
-                num_wos = math.ceil(req.po_quantity / req.max_batch_size)
+                num_wos = math.ceil(req.po_quantity / effective_batch_size)
                 rem_qty = req.po_quantity
                 wo_qty_list = []
                 for _ in range(num_wos):
-                    take = min(req.max_batch_size, rem_qty)
+                    take = min(effective_batch_size, rem_qty)
                     rem_qty -= take
                     wo_qty_list.append(take)
 

@@ -361,7 +361,7 @@ def test_existing_plain_oar_to_wo_workflow_unchanged(client):
         json={
             "customer_code": "CUST-VALVE", "customer_name": "Flowserve Sanmar Ltd",
             "customer_po": f"PO-PLAIN-{uuid.uuid4().hex[:8]}", "part_number": "BRZ-BUSH-100",
-            "po_quantity": 100, "max_batch_size": 100,
+            "po_quantity": 100, "max_batch_size": 100, "create_wos": True,
         },
     )
     assert resp.status_code == 200, resp.text

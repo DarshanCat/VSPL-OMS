@@ -11,8 +11,9 @@ class OrderIntakeCreate(BaseModel):
     grade: Optional[str] = Field("Standard", max_length=100)
     part_description: Optional[str] = Field("", max_length=1000)
     po_quantity: int = Field(..., gt=0, le=1_000_000)
-    max_batch_size: int = Field(..., gt=0, le=1_000_000)
+    max_batch_size: Optional[int] = Field(None, gt=0, le=1_000_000)
     delivery_date: Optional[date] = None
+    commitment_date: Optional[date] = None
     order_type: Optional[str] = Field("Standard", max_length=100)
     status: OrderStatus = OrderStatus.ACCEPT
     remarks: Optional[str] = Field(None, max_length=2000)
