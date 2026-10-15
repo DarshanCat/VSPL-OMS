@@ -184,6 +184,7 @@ class MachineCreate(BaseModel):
 
 class MachineUpdate(BaseModel):
     id: str
+    machine_code: Optional[str] = Field(None, max_length=100)
     machine_name: Optional[str] = Field(None, max_length=300)
     department: Optional[str] = Field(None, max_length=200)
     is_active: Optional[bool] = None
@@ -210,6 +211,7 @@ class ShiftCreate(BaseModel):
 
 class ShiftUpdate(BaseModel):
     id: str
+    shift_code: Optional[str] = Field(None, max_length=100)
     shift_name: Optional[str] = Field(None, max_length=300)
     start_time: Optional[str] = Field(None, max_length=20)
     end_time: Optional[str] = Field(None, max_length=20)

@@ -138,7 +138,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: "Customer Master",
         href: "/masters/customers",
         icon: <Building2 className="h-4 w-4 text-blue-500" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "Part Master",
@@ -149,13 +149,13 @@ const NAV_GROUPS: NavGroup[] = [
         name: "PO Master",
         href: "/masters/pos",
         icon: <FileSpreadsheet className="h-4 w-4 text-emerald-500" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "Schedule Master",
         href: "/masters/schedules",
         icon: <CalendarClock className="h-4 w-4 text-amber-500" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "Machine Master",
@@ -186,13 +186,13 @@ const NAV_GROUPS: NavGroup[] = [
         name: "Order Intake (OAR)",
         href: "/orders/intake",
         icon: <FilePlus className="h-4 w-4" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "Generate Work Orders",
         href: "/planning/wo-generation",
         icon: <Layers className="h-4 w-4 text-emerald-500" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "OAR & WO List",
@@ -203,7 +203,7 @@ const NAV_GROUPS: NavGroup[] = [
         name: "PO Matching",
         href: "/orders/po-matching",
         icon: <GitMerge className="h-4 w-4 text-indigo-500" />,
-        roles: ["admin", "planner"],
+        roles: ["admin", "planner", "sales", "ceo"],
       },
       {
         name: "WO Release & Routing",

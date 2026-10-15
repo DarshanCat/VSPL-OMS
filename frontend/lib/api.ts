@@ -212,8 +212,13 @@ export async function createMasterMachine(payload: { machine_code: string; machi
   return data;
 }
 
-export async function updateMasterMachine(payload: { id: string; machine_name?: string; department?: string; is_active?: boolean }): Promise<MasterMachine> {
+export async function updateMasterMachine(payload: { id: string; machine_code?: string; machine_name?: string; department?: string; is_active?: boolean }): Promise<MasterMachine> {
   const { data } = await api.put("/api/v1/masters/machines", payload);
+  return data;
+}
+
+export async function deleteMasterMachine(id: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/api/v1/masters/machines/${id}`);
   return data;
 }
 
@@ -237,8 +242,13 @@ export async function createShift(payload: { shift_code: string; shift_name: str
   return data;
 }
 
-export async function updateShift(payload: { id: string; shift_name?: string; start_time?: string; end_time?: string; is_active?: boolean }): Promise<MasterShift> {
+export async function updateShift(payload: { id: string; shift_code?: string; shift_name?: string; start_time?: string; end_time?: string; is_active?: boolean }): Promise<MasterShift> {
   const { data } = await api.put("/api/v1/masters/shifts", payload);
+  return data;
+}
+
+export async function deleteShift(id: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/api/v1/masters/shifts/${id}`);
   return data;
 }
 
@@ -263,6 +273,11 @@ export async function createOperator(payload: { user_id?: string; employee_code?
 
 export async function updateOperator(payload: { id: string; employee_code?: string; display_name?: string; is_active?: boolean }): Promise<MasterOperator> {
   const { data } = await api.put("/api/v1/masters/operators", payload);
+  return data;
+}
+
+export async function deleteOperator(id: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/api/v1/masters/operators/${id}`);
   return data;
 }
 

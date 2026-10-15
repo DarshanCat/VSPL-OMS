@@ -142,3 +142,61 @@ def test_operator_rbac_and_duplicate_employee_code_rejected(client, test_db):
 
     resp = client.post("/api/v1/masters/operators", json={"display_name": "Floor Op 2", "employee_code": "EMP-100"}, headers=admin_headers)
     assert resp.status_code == 400
+
+
+def test_machine_shift_operator_delete_and_edit_by_sales_and_ceo(client, test_db):
+    sales_headers, _ = _auth(test_db, "sales.master@vspl.com", UserRole.SALES)
+    ceo_headers, _ = _auth(test_db, "ceo.master@vspl.com", UserRole.CEO)
+
+    # 1. Machine Edit & Delete by Sales and CEO
+    resp_m = client.post("/api/v1/masters/machines", json={
+        "machine_code": "M-TEMP", "machine_name": "Temporary Machine", "department": "CNC"
+    }, headers=sales_headers)
+    assert resp_m.status_code == 200, resp_m.text
+    mach_id = resp_m.json()["id"]
+
+    # CEO edits machine
+    resp_m_edit = client.put("/api/v1/masters/machines", json={
+        "id": mach_id, "machine_name": "Updated Machine Name", "department": "VMC"
+    }, headers=ceo_headers)
+    assert resp_m_edit.status_code == 200
+    assert resp_m_edit.json()["machine_name"] == "Updated Machine Name"
+
+    # Sales deletes machine
+    resp_m_del = client.delete(f"/api/v1/masters/machines/{mach_id}", headers=sales_headers)
+    assert resp_m_del.status_code == 200
+    assert resp_m_del.json()["success"] is True
+
+    # 2. Shift Edit & Delete by Sales and CEO
+    resp_s = client.post("/api/v1/masters/shifts", json={
+        "shift_code": "D", "shift_name": "Shift D", "start_time": "18:00", "end_time": "02:00"
+    }, headers=sales_headers)
+    assert resp_s.status_code == 200
+    shift_id = resp_s.json()["id"]
+
+    resp_s_edit = client.put("/api/v1/masters/shifts", json={
+        "id": shift_id, "shift_name": "Shift D Extended", "end_time": "03:00"
+    }, headers=ceo_headers)
+    assert resp_s_edit.status_code == 200
+    assert resp_s_edit.json()["shift_name"] == "Shift D Extended"
+
+    resp_s_del = client.delete(f"/api/v1/masters/shifts/{shift_id}", headers=ceo_headers)
+    assert resp_s_del.status_code == 200
+    assert resp_s_del.json()["success"] is True
+
+    # 3. Operator Edit & Delete by Sales and CEO
+    resp_o = client.post("/api/v1/masters/operators", json={
+        "display_name": "Test Op", "employee_code": "OP-999"
+    }, headers=ceo_headers)
+    assert resp_o.status_code == 200
+    op_id = resp_o.json()["id"]
+
+    resp_o_edit = client.put("/api/v1/masters/operators", json={
+        "id": op_id, "display_name": "Test Op Updated"
+    }, headers=sales_headers)
+    assert resp_o_edit.status_code == 200
+    assert resp_o_edit.json()["display_name"] == "Test Op Updated"
+
+    resp_o_del = client.delete(f"/api/v1/masters/operators/{op_id}", headers=sales_headers)
+    assert resp_o_del.status_code == 200
+    assert resp_o_del.json()["success"] is True

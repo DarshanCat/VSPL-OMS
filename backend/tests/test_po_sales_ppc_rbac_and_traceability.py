@@ -271,31 +271,31 @@ def test_sales_can_view_and_edit_po(client):
         db.close()
 
 
-def test_sales_cannot_create_oar_or_release_wo(client):
-    """The PO-edit grant must not widen into OAR creation or WO release -- both stay 403."""
+def test_sales_and_ceo_can_create_oar_and_release_wo(client):
+    """Sales, Planner, and CEO share unified planning & OAR/WO release capabilities."""
     db = SessionLocal()
     try:
         sales_headers, sales_user = _sales_headers(db)
         cust_code = _uid("CUST")
+        part_num = _uid("PART")
 
-        # OAR creation (order intake) stays denied for Sales
+        # Sales can create OAR (order intake)
         resp_intake = client.post(
             "/api/v1/operations/intake", headers=sales_headers,
             json={
-                "customer_code": cust_code, "customer_name": "Sales Denied Co",
-                "customer_po": _uid("PO"), "part_number": _uid("PART"),
+                "customer_code": cust_code, "customer_name": "Sales Granted Co",
+                "customer_po": _uid("PO"), "part_number": part_num,
                 "po_quantity": 10, "max_batch_size": 10,
             },
         )
-        assert resp_intake.status_code == 403
+        assert resp_intake.status_code == 200, resp_intake.text
 
-        # WO release stays denied for Sales -- the RBAC check runs before any WO lookup,
-        # so a nonexistent wo_number still proves the 403 boundary itself.
+        # Sales passes RBAC gate for WO release (returns 404 for nonexistent WO, NOT 403)
         resp_release = client.post(
             "/api/v1/operations/wo-release", headers=sales_headers,
             json={"wo_number": "NONEXISTENT-WO", "physical_wo_qty": 10, "route_stages": ["F1", "DISPATCH"]},
         )
-        assert resp_release.status_code == 403
+        assert resp_release.status_code == 404, resp_release.text
 
         db.delete(sales_user); db.commit()
     finally:

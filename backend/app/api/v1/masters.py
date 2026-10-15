@@ -223,6 +223,15 @@ def update_machine(
     return MachineMasterService.update_machine(db, payload, current_user=user)
 
 
+@router.delete("/machines/{machine_id}")
+def delete_machine(
+    machine_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return MachineMasterService.delete_machine(db, machine_id, current_user=user)
+
+
 # --- Shift Master ---
 
 @router.get("/shifts", response_model=List[ShiftOut])
@@ -248,6 +257,15 @@ def update_shift(
     return ShiftMasterService.update_shift(db, payload, current_user=user)
 
 
+@router.delete("/shifts/{shift_id}")
+def delete_shift(
+    shift_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return ShiftMasterService.delete_shift(db, shift_id, current_user=user)
+
+
 # --- Operator Master ---
 
 @router.get("/operators", response_model=List[OperatorOut])
@@ -271,6 +289,15 @@ def update_operator(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return OperatorMasterService.update_operator(db, payload, current_user=user)
+
+
+@router.delete("/operators/{operator_id}")
+def delete_operator(
+    operator_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES)),
+):
+    return OperatorMasterService.delete_operator(db, operator_id, current_user=user)
 
 
 # --- Customer Part Cross-Reference Master ---

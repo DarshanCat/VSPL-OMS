@@ -13,51 +13,36 @@ spec grants (or withholds) that *specific* capability, not because of a broader
 """
 from app.models.user import UserRole
 
-# Master-data administration and planning-only mutations: Customer Master, PO Master,
-# Schedule Master, Order Intake (OAR creation), PO<->Schedule matching, Conversion Part
-# Mapping (master data), and the OMS Engine batch upload/download tools. Per the spec,
-# Production Manager explicitly does NOT get PO/Schedule/OAR creation or master-data
-# administration -- only Admin (Super Admin) and Planner do.
-PLANNING_ROLES = (UserRole.ADMIN, UserRole.PLANNER)
+# Master-data administration and planning mutations: Customer Master, PO Master,
+# Schedule Master, Order Intake (OAR creation), WO generation, PO<->Schedule matching,
+# Conversion Part Mapping (master data), and the OMS Engine batch upload/download tools.
+# Sales and Planner functions are unified, and CEO holds full administrative & operational authority.
+PLANNING_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES, UserRole.CEO)
 
-# PO Master visibility and editing specifically -- NOT the rest of PLANNING_ROLES'
-# remit (Customer/Schedule/OAR creation, PO<->Schedule matching, Conversion Part
-# Mapping, OMS Engine batch tools). Sales needs to see and edit commercial PO data
-# (and its OAR/WO traceability) but must not gain OAR creation, WO creation, or WO
-# release through this grant -- those stay on their own existing, narrower tuples
-# (PLANNING_ROLES, WO_RELEASE_ROLES) untouched by this addition.
-PO_MASTER_VIEW_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES)
-PO_MASTER_EDIT_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES)
+# PO Master visibility and editing
+PO_MASTER_VIEW_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES, UserRole.CEO)
+PO_MASTER_EDIT_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.SALES, UserRole.CEO)
 
-# WO release specifically: Production Manager already held this permission before the
-# Roles & Responsibilities spec was written, and the spec's own carve-out ("Cannot: WO
-# release unless existing explicit permission already grants it") preserves it rather
-# than stripping it -- this is intentionally a superset of PLANNING_ROLES, not a copy
-# of it, so a future change to PLANNING_ROLES doesn't silently also change this.
-WO_RELEASE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER)
+# WO release specifically: Admin, Planner, Production Manager, Sales, CEO
+WO_RELEASE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER, UserRole.SALES, UserRole.CEO)
 
-# The planner-driven Conversion Module (operations.py POST /conversion) -- distinct
-# from Conversion Part Mapping (master data, gated by PLANNING_ROLES above) and from
-# the QA-triggered CONVERT_PART/SAME_PART/CWO disposition action (gated by
-# PLANNING_ROLES via rejection_service.py's own action-conditional branch). The spec
-# doesn't restrict this planner+production floor collaboration, so it's left as the
-# pre-existing three-role set rather than tightened to match PLANNING_ROLES.
-CONVERSION_MODULE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER)
+# The planner-driven Conversion Module (operations.py POST /conversion)
+CONVERSION_MODULE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER, UserRole.SALES, UserRole.CEO)
 
 # Physical shop-floor production entry (recording good/rejected quantity at a stage).
-# Planner is explicitly excluded per spec ("Cannot: production entry").
+# CEO granted rights alongside Admin, PM, and Operators.
 PRODUCTION_ENTRY_ROLES = (
     UserRole.ADMIN, UserRole.PRODUCTION_MANAGER,
     UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
+    UserRole.CEO,
 )
 
-# Physical material movement between stages: Store's core responsibility ("Physical
-# material movement"), Production Manager's "authorized material movement", and the
-# shop-floor operator roles that already perform it as part of production entry.
-# Planner is explicitly excluded ("Cannot: arbitrary material movement").
+# Physical material movement between stages:
+# CEO granted rights alongside Admin, PM, Store, and Operators.
 MATERIAL_MOVEMENT_ROLES = (
     UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE,
     UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
+    UserRole.CEO,
 )
 
 # QA disposition APPROVAL: authorizing SCRAP / DEVIATION_ACCEPT, and closing/updating

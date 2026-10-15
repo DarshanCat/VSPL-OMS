@@ -30,7 +30,13 @@ import {
   getStageState,
   getRejectionTypes,
   recordStageProduction,
-  MasterRejectionType
+  MasterRejectionType,
+  getMasterMachines,
+  getShifts,
+  getOperators,
+  MasterMachine,
+  MasterShift,
+  MasterOperator,
 } from "@/lib/api";
 
 const MACHINES = [
@@ -94,6 +100,9 @@ export function ProductionEntryContent() {
   const [heatNumber, setHeatNumber] = useState("");
   const [remarks, setRemarks] = useState("");
   const [rejectionTypes, setRejectionTypes] = useState<MasterRejectionType[]>([]);
+  const [machinesList, setMachinesList] = useState<MasterMachine[]>([]);
+  const [operatorsList, setOperatorsList] = useState<MasterOperator[]>([]);
+  const [shiftsList, setShiftsList] = useState<MasterShift[]>([]);
 
   // Result / Success Modal
   const [successResult, setSuccessResult] = useState<any>(null);
@@ -110,7 +119,7 @@ export function ProductionEntryContent() {
   const inputRemarksRef = useRef<HTMLInputElement>(null);
   const btnSubmitRef = useRef<HTMLButtonElement>(null);
 
-  // Load available WOs and the active Rejection Type master on mount
+  // Load available WOs and active masters on mount
   useEffect(() => {
     getWorkOrders({ limit: 100, exclude_dispatched: true })
       .then((data) => {
@@ -123,10 +132,62 @@ export function ProductionEntryContent() {
       .catch((err) => {
         console.error("Failed to fetch WOs:", err);
       });
+
     getRejectionTypes()
       .then((types) => setRejectionTypes(types))
       .catch(() => setRejectionTypes([]));
+
+    getOperators()
+      .then((data) => {
+        const active = data.filter((o) => o.is_active);
+        if (active.length > 0) {
+          setOperatorsList(active);
+          setSelectedOperator(active[0].display_name);
+        }
+      })
+      .catch(() => {});
+
+    getMasterMachines()
+      .then((data) => {
+        const active = data.filter((m) => m.is_active);
+        if (active.length > 0) {
+          setMachinesList(active);
+          setSelectedMachine(active[0].machine_code);
+        }
+      })
+      .catch(() => {});
+
+    getShifts()
+      .then((data) => {
+        const active = data.filter((s) => s.is_active);
+        if (active.length > 0) {
+          setShiftsList(active);
+          setShift(active[0].shift_name || active[0].shift_code);
+        }
+      })
+      .catch(() => {});
   }, [queryWO, queryStage]);
+
+  // Master options fall back to the safe baseline only if the database is unpopulated
+  const machineOptions = machinesList.length > 0
+    ? machinesList.map((m) => ({ id: m.machine_code, name: `${m.machine_code} - ${m.machine_name}` }))
+    : MACHINES;
+
+  const operatorOptions = operatorsList.length > 0
+    ? operatorsList.map((o) => ({ id: o.employee_code || o.id, name: o.display_name }))
+    : OPERATORS;
+
+  const shiftOptions = shiftsList.length > 0
+    ? shiftsList.map((s) => ({
+        code: s.shift_code,
+        label: s.start_time && s.end_time ? `${s.shift_name} (${s.start_time} - ${s.end_time})` : s.shift_name,
+        value: s.shift_name || s.shift_code,
+      }))
+    : [
+        { code: "A", label: "Shift A (06:00 - 14:00)", value: "Shift A" },
+        { code: "B", label: "Shift B (14:00 - 22:00)", value: "Shift B" },
+        { code: "C", label: "Shift C (22:00 - 06:00)", value: "Shift C" },
+      ];
 
   // Active Rejection Types drive the dropdown -- never arbitrary free text. Falls
   // back to the legacy static list only when the master has never been configured.
@@ -741,7 +802,7 @@ export function ProductionEntryContent() {
                         onKeyDown={(e) => handleKeyDown(e, "operator", "rejQty")}
                         className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
                       >
-                        {MACHINES.map((m) => (
+                        {machineOptions.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
                           </option>
@@ -760,9 +821,9 @@ export function ProductionEntryContent() {
                         onKeyDown={(e) => handleKeyDown(e, "shift", "machine")}
                         className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
                       >
-                        {OPERATORS.map((op) => (
+                        {operatorOptions.map((op) => (
                           <option key={op.id} value={op.name}>
-                            {op.name} ({op.id})
+                            {op.name} {op.id ? `(${op.id})` : ""}
                           </option>
                         ))}
                       </select>
@@ -779,9 +840,11 @@ export function ProductionEntryContent() {
                         onKeyDown={(e) => handleKeyDown(e, "remarks", "operator")}
                         className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950 px-3.5 py-2.5 text-xs font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
                       >
-                        <option value="Shift A">Shift A (06:00 - 14:00)</option>
-                        <option value="Shift B">Shift B (14:00 - 22:00)</option>
-                        <option value="Shift C">Shift C (22:00 - 06:00)</option>
+                        {shiftOptions.map((s) => (
+                          <option key={s.code} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>

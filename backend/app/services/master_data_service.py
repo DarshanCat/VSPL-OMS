@@ -739,16 +739,31 @@ class MachineMasterService:
         machine = db.query(Machine).filter(Machine.id == req.id).first()
         if not machine:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found.")
+        if req.machine_code is not None:
+            code = req.machine_code.strip().upper()
+            if db.query(Machine).filter(Machine.machine_code == code, Machine.id != machine.id).first():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Machine code '{code}' already exists.")
+            machine.machine_code = code
         if req.machine_name is not None:
             machine.machine_name = req.machine_name.strip()
         if req.department is not None:
-            machine.department = req.department
+            machine.department = req.department.strip() if req.department else None
         if req.is_active is not None:
             machine.is_active = req.is_active
         _audit(db, current_user, "MACHINE_UPDATED", "Machine", str(machine.id))
         db.commit()
         db.refresh(machine)
         return _machine_out(machine)
+
+    @staticmethod
+    def delete_machine(db: Session, machine_id: str, current_user: Optional[User] = None) -> dict:
+        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        if not machine:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found.")
+        _audit(db, current_user, "MACHINE_DELETED", "Machine", str(machine.id), details=machine.machine_code)
+        db.delete(machine)
+        db.commit()
+        return {"success": True, "message": f"Machine '{machine.machine_code}' deleted successfully."}
 
 
 def _shift_out(s: Shift) -> ShiftOut:
@@ -785,6 +800,11 @@ class ShiftMasterService:
         shift = db.query(Shift).filter(Shift.id == req.id).first()
         if not shift:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found.")
+        if req.shift_code is not None:
+            code = req.shift_code.strip()
+            if db.query(Shift).filter(Shift.shift_code == code, Shift.id != shift.id).first():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Shift code '{code}' already exists.")
+            shift.shift_code = code
         if req.shift_name is not None:
             shift.shift_name = req.shift_name.strip()
         if req.start_time is not None:
@@ -797,6 +817,16 @@ class ShiftMasterService:
         db.commit()
         db.refresh(shift)
         return _shift_out(shift)
+
+    @staticmethod
+    def delete_shift(db: Session, shift_id: str, current_user: Optional[User] = None) -> dict:
+        shift = db.query(Shift).filter(Shift.id == shift_id).first()
+        if not shift:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found.")
+        _audit(db, current_user, "SHIFT_DELETED", "Shift", str(shift.id), details=shift.shift_code)
+        db.delete(shift)
+        db.commit()
+        return {"success": True, "message": f"Shift '{shift.shift_code}' deleted successfully."}
 
 
 def _operator_out(o: Operator) -> OperatorOut:
@@ -853,6 +883,16 @@ class OperatorMasterService:
         db.commit()
         db.refresh(operator)
         return _operator_out(operator)
+
+    @staticmethod
+    def delete_operator(db: Session, operator_id: str, current_user: Optional[User] = None) -> dict:
+        operator = db.query(Operator).filter(Operator.id == operator_id).first()
+        if not operator:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operator not found.")
+        _audit(db, current_user, "OPERATOR_DELETED", "Operator", str(operator.id), details=operator.display_name)
+        db.delete(operator)
+        db.commit()
+        return {"success": True, "message": f"Operator '{operator.display_name}' deleted successfully."}
 
 
 class PartMasterService:

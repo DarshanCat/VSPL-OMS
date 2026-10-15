@@ -11,6 +11,9 @@ from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.nc import NCRecord
 from app.models.rejection_type import RejectionType
+from app.models.machine import Machine
+from app.models.shift import Shift
+from app.models.operator import Operator
 from app.services.oms_integration_service import calculate_stage_targets
 
 def _is_production() -> bool:
@@ -51,6 +54,63 @@ def _seed_default_rejection_types(db: Session) -> None:
         ))
     db.flush()
 
+_DEFAULT_MACHINES = [
+    ("M-CC01", "CC Machine 01 (Foundry F1)", "Foundry"),
+    ("M-CC02", "CC Machine 02 (Foundry F1)", "Foundry"),
+    ("M-CNC01", "CNC Lathe 01 (Rough Machining F2)", "Rough Machining"),
+    ("M-CNC02", "CNC Lathe 02 (Rough Machining F2)", "Rough Machining"),
+    ("M-VMC01", "VMC Milling 01 (Finish Machining F3)", "Finish Machining"),
+    ("M-VMC02", "VMC Milling 02 (Finish Machining F3)", "Finish Machining"),
+    ("M-SP01", "Special Process Cell 01 (SP)", "Special Process"),
+    ("M-FI01", "Final Inspection Bench 01 (FI)", "Final Inspection"),
+    ("M-PACK01", "Packing Station 01", "Packing"),
+    ("M-BSR01", "Bonded Store Bay 01", "Stores"),
+]
+
+def _seed_default_machines(db: Session) -> None:
+    if db.query(Machine).first():
+        return
+    for code, name, dept in _DEFAULT_MACHINES:
+        db.add(Machine(
+            machine_code=code, machine_name=name, department=dept, is_active=True,
+            created_by_name="system:seed",
+        ))
+    db.flush()
+
+_DEFAULT_SHIFTS = [
+    ("Shift A", "Shift A (06:00 - 14:00)", "06:00", "14:00"),
+    ("Shift B", "Shift B (14:00 - 22:00)", "14:00", "22:00"),
+    ("Shift C", "Shift C (22:00 - 06:00)", "22:00", "06:00"),
+]
+
+def _seed_default_shifts(db: Session) -> None:
+    if db.query(Shift).first():
+        return
+    for code, name, start, end in _DEFAULT_SHIFTS:
+        db.add(Shift(
+            shift_code=code, shift_name=name, start_time=start, end_time=end, is_active=True,
+            created_by_name="system:seed",
+        ))
+    db.flush()
+
+_DEFAULT_OPERATORS = [
+    ("OP-101", "Ramesh Kumar"),
+    ("OP-102", "Suresh Patil"),
+    ("OP-103", "Anand Sharma"),
+    ("OP-104", "Mahesh Verma"),
+    ("OP-105", "Dinesh Gowda"),
+]
+
+def _seed_default_operators(db: Session) -> None:
+    if db.query(Operator).first():
+        return
+    for code, name in _DEFAULT_OPERATORS:
+        db.add(Operator(
+            employee_code=code, display_name=name, is_active=True,
+            created_by_name="system:seed",
+        ))
+    db.flush()
+
 def _bootstrap_production_admin(db: Session) -> None:
     """In production, no demo user with a known password is ever created. The only
     account this seeds is a single first admin, and only when the deployer explicitly
@@ -79,6 +139,9 @@ def seed_database_if_empty(db: Session):
     # Runs first, in every environment: real master data (see docstring above),
     # not a demo/UAT convenience like everything else in this function.
     _seed_default_rejection_types(db)
+    _seed_default_machines(db)
+    _seed_default_shifts(db)
+    _seed_default_operators(db)
 
     if _is_production():
         # Production never auto-creates demo/seed accounts with known passwords.
