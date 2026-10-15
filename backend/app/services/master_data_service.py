@@ -68,7 +68,7 @@ def _customer_out(c: Customer) -> CustomerOut:
 
 def _find_customer_part_mapping(db: Session, customer_id, customer_part_number: str) -> Optional[CustomerPartMapping]:
     norm = customer_part_number.strip()
-    return (
+    m = (
         db.query(CustomerPartMapping)
         .filter(
             CustomerPartMapping.customer_id == customer_id,
@@ -76,6 +76,41 @@ def _find_customer_part_mapping(db: Session, customer_id, customer_part_number: 
         )
         .first()
     )
+    if m:
+        return m
+
+    # Also check CustomerPartCrossReference
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = (
+            db.query(CustomerPartCrossReference)
+            .filter(
+                CustomerPartCrossReference.customer_id == customer_id,
+                func.upper(CustomerPartCrossReference.customer_part_no) == norm.upper(),
+                CustomerPartCrossReference.is_active == True,
+            )
+            .first()
+        )
+        if xref:
+            part = db.query(Part).filter(Part.id == xref.part_id).first()
+            if part:
+                mapping = db.query(CustomerPartMapping).filter(
+                    CustomerPartMapping.customer_id == customer_id,
+                    CustomerPartMapping.part_id == part.id,
+                ).first()
+                if not mapping:
+                    mapping = CustomerPartMapping(
+                        customer_id=customer_id,
+                        part_id=part.id,
+                        customer_part_number=norm,
+                        status="Active",
+                    )
+                    db.add(mapping)
+                    db.flush()
+                return mapping
+    except Exception:
+        pass
+    return None
 
 
 def resolve_customer_part(
@@ -89,6 +124,7 @@ def resolve_customer_part(
 
     Returns (part, is_new, mapping):
       - an existing mapping is found        -> (existing part, False, existing mapping)
+      - matches existing Part code or desc  -> (existing part, False, created/existing mapping)
       - no mapping, create_if_missing=False  -> (None, True, None) -- "would be new"
       - no mapping, create_if_missing=True   -> generates the next internal Part
         number (next_internal_part_number) and creates it plus its mapping
@@ -102,6 +138,23 @@ def resolve_customer_part(
         part = db.query(Part).filter(Part.id == existing.part_id).first()
         return part, False, existing
 
+    # Check if a Part already exists whose part_number or description matches norm
+    existing_part = db.query(Part).filter(
+        or_(
+            func.upper(Part.part_number) == norm.upper(),
+            func.upper(Part.description) == norm.upper(),
+        )
+    ).first()
+    if existing_part:
+        if create_if_missing:
+            mapping = CustomerPartMapping(
+                customer_id=customer.id, part_id=existing_part.id, customer_part_number=norm, status="Active",
+            )
+            db.add(mapping)
+            db.flush()
+            return existing_part, False, mapping
+        return existing_part, False, None
+
     if not create_if_missing:
         return None, True, None
 
@@ -114,6 +167,18 @@ def resolve_customer_part(
         customer_id=customer.id, part_id=part.id, customer_part_number=norm, status="Active",
     )
     db.add(mapping)
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = CustomerPartCrossReference(
+            customer_id=customer.id,
+            customer_part_no=norm,
+            part_id=part.id,
+            source="PO Creation",
+            is_active=True,
+        )
+        db.add(xref)
+    except Exception:
+        pass
     db.flush()
     return part, True, mapping
 
@@ -283,18 +348,38 @@ class POMasterService:
             db.flush()
 
             for line_req in req.lines:
-                if line_req.customer_part_number:
+                cust_pn = (line_req.customer_part_number or "").strip()
+                pn = (line_req.part_number or "").strip()
+                if cust_pn:
                     part, _is_new, _mapping = resolve_customer_part(
-                        db, customer, line_req.customer_part_number, create_if_missing=True
+                        db, customer, cust_pn, create_if_missing=True
                     )
-                elif line_req.part_number:
-                    part = _get_part(db, line_req.part_number)
+                elif pn:
+                    clean_pn = pn.upper()
+                    existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
+                    if existing_part:
+                        part = existing_part
+                        mapping = _find_customer_part_mapping(db, customer.id, pn)
+                        if mapping:
+                            cust_pn = mapping.customer_part_number
+                    else:
+                        # User entered customer part number in the part_number field
+                        part, _is_new, _mapping = resolve_customer_part(
+                            db, customer, pn, create_if_missing=True
+                        )
+                        cust_pn = pn
                 else:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
                     )
-                db.add(POLine(po_id=po.id, part_id=part.id, po_qty=line_req.po_qty, required_date=line_req.required_date))
+                db.add(POLine(
+                    po_id=po.id,
+                    part_id=part.id,
+                    customer_part_number=cust_pn or None,
+                    po_qty=line_req.po_qty,
+                    required_date=line_req.required_date,
+                ))
 
             _audit(db, current_user, "PO_CREATED", "POMaster", str(po.id), details=f"po_number={req.po_number}, lines={len(req.lines)}")
 
@@ -443,12 +528,25 @@ class POMasterService:
 
                     # Part change check on existing line
                     if line_req.customer_part_number or line_req.part_number:
-                        if line_req.customer_part_number:
+                        cust_pn = (line_req.customer_part_number or "").strip()
+                        pn = (line_req.part_number or "").strip()
+                        if cust_pn:
                             part, _, _ = resolve_customer_part(
-                                db, po.customer, line_req.customer_part_number, create_if_missing=True
+                                db, po.customer, cust_pn, create_if_missing=True
                             )
                         else:
-                            part = _get_part(db, line_req.part_number)
+                            clean_pn = pn.upper()
+                            existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
+                            if existing_part:
+                                part = existing_part
+                                mapping = _find_customer_part_mapping(db, po.customer.id, pn)
+                                if mapping:
+                                    cust_pn = mapping.customer_part_number
+                            else:
+                                part, _, _ = resolve_customer_part(
+                                    db, po.customer, pn, create_if_missing=True
+                                )
+                                cust_pn = pn
 
                         if part.id != line.part_id:
                             if allocated > 0 or len(line.orders) > 0:
@@ -458,6 +556,8 @@ class POMasterService:
                                 )
                             changes.append(f"line[{line.id}] part: {line.part.part_number} -> {part.part_number}")
                             line.part_id = part.id
+                        if cust_pn:
+                            line.customer_part_number = cust_pn
 
                     if line.po_qty != line_req.po_qty:
                         changes.append(f"line[{line.id}] po_qty: {line.po_qty} -> {line_req.po_qty}")
@@ -469,12 +569,25 @@ class POMasterService:
 
                 else:
                     # New line addition
-                    if line_req.customer_part_number:
+                    cust_pn = (line_req.customer_part_number or "").strip()
+                    pn = (line_req.part_number or "").strip()
+                    if cust_pn:
                         part, _, _ = resolve_customer_part(
-                            db, po.customer, line_req.customer_part_number, create_if_missing=True
+                            db, po.customer, cust_pn, create_if_missing=True
                         )
-                    elif line_req.part_number:
-                        part = _get_part(db, line_req.part_number)
+                    elif pn:
+                        clean_pn = pn.upper()
+                        existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
+                        if existing_part:
+                            part = existing_part
+                            mapping = _find_customer_part_mapping(db, po.customer.id, pn)
+                            if mapping:
+                                cust_pn = mapping.customer_part_number
+                        else:
+                            part, _, _ = resolve_customer_part(
+                                db, po.customer, pn, create_if_missing=True
+                            )
+                            cust_pn = pn
                     else:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
@@ -484,6 +597,7 @@ class POMasterService:
                     new_line = POLine(
                         po_id=po.id,
                         part_id=part.id,
+                        customer_part_number=cust_pn or None,
                         po_qty=line_req.po_qty,
                         required_date=line_req.required_date,
                     )

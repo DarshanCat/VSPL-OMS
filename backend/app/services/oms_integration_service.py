@@ -473,11 +473,59 @@ class OMSIntegrationService:
         return link_wo_to_oar(db, rows)
 
 
+def extract_oar_number(oar_str: Optional[str]) -> Optional[int]:
+    """Extract numeric suffix from OAR identifiers like 'OAR-8326', 'OAR 8326', 'OAR8326', '8326'."""
+    if not oar_str:
+        return None
+    s = str(oar_str).strip().upper()
+    m = re.match(r"^(?:OAR[\s\-_]*)?(\d+)$", s)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+    return None
+
+
+def extract_wo_number(wo_str: Optional[str]) -> Optional[int]:
+    """Extract numeric suffix from WO identifiers like 'WO-16772', 'WO 16772', 'WO16772', '16772'."""
+    if not wo_str:
+        return None
+    s = str(wo_str).strip().upper()
+    m = re.match(r"^(?:WO[\s\-_]*)?(\d+)$", s)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+    return None
+
+
 def _normalize_code(val: Optional[str]) -> str:
     if not val:
         return ""
     s = str(val).strip().upper()
     return re.sub(r"\s*-\s*", "-", s)
+
+
+def _normalize_oar_code(val: Optional[str]) -> str:
+    if not val:
+        return ""
+    s = str(val).strip()
+    num = extract_oar_number(s)
+    if num is not None:
+        return f"OAR-{num:04d}" if num < 10000 else f"OAR-{num}"
+    return _normalize_code(s)
+
+
+def _normalize_wo_code(val: Optional[str]) -> str:
+    if not val:
+        return ""
+    s = str(val).strip()
+    num = extract_wo_number(s)
+    if num is not None:
+        return f"WO-{num}"
+    return _normalize_code(s)
 
 
 def _parse_delivery_date(val: Optional[Union[date, datetime, str]]) -> Optional[date]:
@@ -526,44 +574,74 @@ def _record_exception(db: Session, exc_type: str, detail: str, wo_id: Optional[s
 
 
 def next_oar_sequence(db: Session, reserved_set: Optional[set] = None) -> str:
-    """Collision-free next OAR sequence generator."""
-    pattern = re.compile(r"^OAR-(\d+)$", re.IGNORECASE)
+    """Collision-free next OAR sequence generator.
+    Scans all existing OARs (regardless of formatting like OAR-8326, OAR 8326, 8326)
+    and continues from highest + 1.
+    """
     highest = 0
     for (oar_num,) in db.query(Order.oar_number).filter(Order.oar_number.isnot(None)).all():
-        if oar_num:
-            m = pattern.match(oar_num.strip())
-            if m:
-                try:
-                    highest = max(highest, int(m.group(1)))
-                except ValueError:
-                    pass
+        num = extract_oar_number(oar_num)
+        if num is not None:
+            highest = max(highest, num)
+
+    if reserved_set:
+        for item in reserved_set:
+            num = extract_oar_number(item)
+            if num is not None:
+                highest = max(highest, num)
+
     curr_int = highest + 1 if highest > 0 else db.query(Order).count() + 1
-    candidate = f"OAR-{curr_int:04d}"
-    while (reserved_set and candidate in reserved_set) or db.query(Order).filter(Order.oar_number == candidate).first():
+    candidate = f"OAR-{curr_int:04d}" if curr_int < 10000 else f"OAR-{curr_int}"
+    while (
+        (reserved_set and candidate in reserved_set)
+        or db.query(Order).filter(
+            or_(
+                Order.oar_number == candidate,
+                Order.oar_number == f"OAR {curr_int}",
+                Order.oar_number == str(curr_int),
+            )
+        ).first()
+    ):
         curr_int += 1
-        candidate = f"OAR-{curr_int:04d}"
+        candidate = f"OAR-{curr_int:04d}" if curr_int < 10000 else f"OAR-{curr_int}"
+
     if reserved_set is not None:
         reserved_set.add(candidate)
     return candidate
 
 
 def next_wo_sequence(db: Session, reserved_set: Optional[set] = None) -> str:
-    """Collision-free next WO sequence generator."""
-    pattern = re.compile(r"^WO-(\d+)$", re.IGNORECASE)
+    """Collision-free next WO sequence generator.
+    Scans all existing Work Orders (regardless of formatting like WO-16772, WO 16772, 16772)
+    and continues from highest + 1.
+    """
     highest = 1000
     for (wo_num,) in db.query(WorkOrder.wo_number).filter(WorkOrder.wo_number.isnot(None)).all():
-        if wo_num:
-            m = pattern.match(wo_num.strip())
-            if m:
-                try:
-                    highest = max(highest, int(m.group(1)))
-                except ValueError:
-                    pass
+        num = extract_wo_number(wo_num)
+        if num is not None:
+            highest = max(highest, num)
+
+    if reserved_set:
+        for item in reserved_set:
+            num = extract_wo_number(item)
+            if num is not None:
+                highest = max(highest, num)
+
     curr_int = highest + 1
     candidate = f"WO-{curr_int}"
-    while (reserved_set and candidate in reserved_set) or db.query(WorkOrder).filter(WorkOrder.wo_number == candidate).first():
+    while (
+        (reserved_set and candidate in reserved_set)
+        or db.query(WorkOrder).filter(
+            or_(
+                WorkOrder.wo_number == candidate,
+                WorkOrder.wo_number == f"WO {curr_int}",
+                WorkOrder.wo_number == str(curr_int),
+            )
+        ).first()
+    ):
         curr_int += 1
         candidate = f"WO-{curr_int}"
+
     if reserved_set is not None:
         reserved_set.add(candidate)
     return candidate
@@ -609,6 +687,29 @@ def _find_or_create_part(db: Session, part_no_str: str, grade: Optional[str] = N
     for p in db.query(Part).all():
         if re.sub(r"[^a-zA-Z0-9]", "", p.part_number).lower() == norm_input:
             return p
+
+    # Check if part_no_str is a Customer Part Number in CustomerPartMapping or CustomerPartCrossReference
+    from app.models.customer_part_mapping import CustomerPartMapping
+    m = db.query(CustomerPartMapping).filter(
+        func.lower(CustomerPartMapping.customer_part_number) == cleaned.lower()
+    ).first()
+    if m:
+        part = db.query(Part).filter(Part.id == m.part_id).first()
+        if part:
+            return part
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = db.query(CustomerPartCrossReference).filter(
+            func.lower(CustomerPartCrossReference.customer_part_no) == cleaned.lower(),
+            CustomerPartCrossReference.is_active == True,
+        ).first()
+        if xref:
+            part = db.query(Part).filter(Part.id == xref.part_id).first()
+            if part:
+                return part
+    except Exception:
+        pass
+
     part = Part(
         part_number=cleaned,
         grade=grade or "Standard",
@@ -636,12 +737,14 @@ def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
     for row in rows:
         try:
             # 1. SKIP IF ALREADY LINKED
-            # If WorkOrder.query.filter_by(wo_id=row.wo_id).first() exists -> record as "already_linked", continue.
-            norm_wo = _normalize_code(row.wo_id)
+            raw_wo = str(row.wo_id).strip()
+            norm_wo = _normalize_wo_code(raw_wo)
             existing_wo = db.query(WorkOrder).filter(
                 or_(
-                    WorkOrder.wo_number == row.wo_id.strip(),
-                    WorkOrder.wo_number == norm_wo
+                    WorkOrder.wo_number == raw_wo,
+                    WorkOrder.wo_number == norm_wo,
+                    WorkOrder.wo_number == f"WO-{raw_wo}",
+                    WorkOrder.wo_number == f"WO {raw_wo}",
                 )
             ).first()
 
@@ -656,8 +759,6 @@ def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
                 continue
 
             # 2. REQUIRED FIELDS
-            # If any of customer_po_number, part_no, customer, wo_quantity is missing/blank,
-            # or wo_quantity <= 0 -> insert into Exceptions table, continue.
             missing_fields = []
             if not row.customer_po_number or not str(row.customer_po_number).strip():
                 missing_fields.append("customer_po_number")
@@ -684,6 +785,8 @@ def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
             # This is the 'one accepted order = one OAR' rule.
             clean_po = row.customer_po_number.strip()
             clean_part_no = row.part_no.strip()
+            raw_oar = str(row.oar_no).strip() if row.oar_no else ""
+            norm_oar = _normalize_oar_code(raw_oar) if raw_oar else ""
 
             existing_oar = db.query(Order).join(Part).filter(
                 func.lower(func.trim(Order.customer_po)) == clean_po.lower(),
@@ -696,23 +799,26 @@ def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
                     func.lower(func.trim(Order.customer_po)) == clean_po.lower()
                 ).first()
 
+            if not existing_oar and raw_oar:
+                existing_oar = db.query(Order).filter(
+                    Order.customer_id == cust.id,
+                    or_(
+                        Order.oar_number == raw_oar,
+                        Order.oar_number == norm_oar,
+                    )
+                ).first()
+
             oar = None
             if existing_oar:
                 # CASE A — existing_oar found:
-                # If row.oar_no and row.oar_no != existing_oar.oar_no:
-                # insert Exceptions(type="oar_mismatch", detail=f"WO {row.wo_id}: input says {row.oar_no}, DB has {existing_oar.oar_no}")
-                # proceed using existing_oar.oar_no — DB is source of truth
-                if row.oar_no and row.oar_no.strip():
-                    norm_row_oar = _normalize_code(row.oar_no)
-                    norm_db_oar = _normalize_code(existing_oar.oar_number)
-                    if norm_row_oar != norm_db_oar:
+                if raw_oar:
+                    norm_row_oar = _normalize_oar_code(raw_oar)
+                    norm_db_oar = _normalize_oar_code(existing_oar.oar_number)
+                    if norm_row_oar != norm_db_oar and raw_oar != existing_oar.oar_number:
                         detail = f"WO {row.wo_id}: input says {row.oar_no}, DB has {existing_oar.oar_number}"
                         _record_exception(db, "oar_mismatch", detail, row.wo_id)
                         result.exceptions.append(LinkException(type="oar_mismatch", detail=detail, wo_id=row.wo_id))
 
-                # If existing_oar.customer.lower() != row.customer.lower():
-                # insert Exceptions(type="customer_mismatch", detail=f"WO {row.wo_id}: OAR {existing_oar.oar_no}")
-                # continue
                 existing_cust_name = existing_oar.customer.name.strip().lower() if existing_oar.customer else ""
                 existing_cust_code = existing_oar.customer.customer_code.strip().lower() if existing_oar.customer else ""
                 input_cust = row.customer.strip().lower()
@@ -734,13 +840,13 @@ def link_wo_to_oar(db: Session, rows: List[WOOarLinkRow]) -> LinkResult:
                     continue
 
                 oar = existing_oar
-                # do NOT create a new OAR row, do NOT modify oar.po_quantity
             else:
                 # CASE B — no existing_oar (genuinely new order):
-                if row.oar_no and row.oar_no.strip():
-                    cand_oar = _normalize_code(row.oar_no)
-                    if not db.query(Order).filter(Order.oar_number == cand_oar).first():
-                        oar_num = cand_oar
+                if raw_oar:
+                    if not db.query(Order).filter(Order.oar_number == raw_oar).first():
+                        oar_num = raw_oar
+                    elif norm_oar and not db.query(Order).filter(Order.oar_number == norm_oar).first():
+                        oar_num = norm_oar
                     else:
                         oar_num = next_oar_sequence(db)
                 else:

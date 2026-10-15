@@ -575,6 +575,7 @@ export interface POLineOrderSummary {
 export interface POLineOut {
   id: string;
   part_number: string;
+  customer_part_number?: string | null;
   po_qty: number;
   allocated_qty: number;
   available_qty: number;
@@ -600,12 +601,19 @@ export async function getPOMasters(customerCode?: string): Promise<POMasterOut[]
   return data;
 }
 
+export interface POLineCreatePayload {
+  part_number?: string;
+  customer_part_number?: string;
+  po_qty: number;
+  required_date?: string;
+}
+
 export async function createPOMaster(payload: {
   po_number: string;
   customer_code: string;
   po_date?: string;
   validity_date?: string;
-  lines: { part_number: string; po_qty: number; required_date?: string }[];
+  lines: POLineCreatePayload[];
 }): Promise<POMasterOut> {
   const { data } = await api.post("/api/v1/masters/pos", payload);
   return data;

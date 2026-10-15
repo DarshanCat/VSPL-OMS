@@ -26,6 +26,7 @@ import {
 
 interface LineDraft {
   id?: string;
+  customer_part_number?: string;
   part_number: string;
   po_qty: string;
   allocated_qty?: number;
@@ -89,7 +90,7 @@ function POLineTraceability({ orders }: { orders: POLineOrderSummary[] }) {
 }
 
 function emptyLine(): LineDraft {
-  return { part_number: "", po_qty: "", required_date: "" };
+  return { customer_part_number: "", part_number: "", po_qty: "", required_date: "" };
 }
 
 export default function POMasterPage() {
@@ -166,6 +167,7 @@ export default function POMasterPage() {
     setEditLines(
       po.lines.map((l: POLineOut) => ({
         id: l.id,
+        customer_part_number: l.customer_part_number || "",
         part_number: l.part_number,
         po_qty: String(l.po_qty),
         allocated_qty: l.allocated_qty,
@@ -194,9 +196,10 @@ export default function POMasterPage() {
         po_date: poDate || undefined,
         validity_date: validityDate || undefined,
         lines: lines
-          .filter((l) => l.part_number && l.po_qty)
+          .filter((l) => (l.customer_part_number?.trim() || l.part_number?.trim()) && l.po_qty)
           .map((l) => ({
-            part_number: l.part_number,
+            customer_part_number: l.customer_part_number?.trim() || undefined,
+            part_number: l.part_number?.trim() || undefined,
             po_qty: Number(l.po_qty),
             required_date: l.required_date || undefined,
           })),
@@ -221,7 +224,9 @@ export default function POMasterPage() {
     setUpdating(true);
 
     try {
-      const validLines = editLines.filter((l) => l.part_number.trim() && Number(l.po_qty) > 0);
+      const validLines = editLines.filter(
+        (l) => (l.customer_part_number?.trim() || l.part_number.trim()) && Number(l.po_qty) > 0
+      );
       if (validLines.length === 0) {
         throw new Error("PO must have at least one valid line with positive quantity.");
       }
@@ -234,7 +239,8 @@ export default function POMasterPage() {
         status: editStatus,
         lines: validLines.map((l) => ({
           id: l.id || undefined,
-          part_number: l.part_number.trim(),
+          customer_part_number: l.customer_part_number?.trim() || undefined,
+          part_number: l.part_number.trim() || undefined,
           po_qty: Number(l.po_qty),
           required_date: l.required_date || undefined,
         })),
@@ -319,15 +325,25 @@ export default function POMasterPage() {
             </div>
 
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 p-3 space-y-2">
-              <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">PO Lines</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">PO Lines</p>
+                <span className="text-[10px] text-zinc-400">
+                  Enter Customer Part Number (internal part will be mapped or auto-generated)
+                </span>
+              </div>
               {lines.map((l, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
                   <input
-                    required
-                    placeholder="Part number"
+                    placeholder="Customer Part No (e.g. RC47NN135000000092)"
+                    value={l.customer_part_number || ""}
+                    onChange={(e) => updateLine(idx, "customer_part_number", e.target.value)}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono font-medium"
+                  />
+                  <input
+                    placeholder="Internal Part No (optional)"
                     value={l.part_number}
                     onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
                   />
                   <input
                     required
@@ -420,7 +436,8 @@ export default function POMasterPage() {
                   <table className="w-full text-xs mt-3">
                     <thead className="text-zinc-500 dark:text-zinc-400">
                       <tr>
-                        <th className="text-left py-1 font-semibold">Part</th>
+                        <th className="text-left py-1 font-semibold">Customer Part</th>
+                        <th className="text-left py-1 font-semibold">Internal Part</th>
                         <th className="text-right py-1 font-semibold">PO Qty</th>
                         <th className="text-right py-1 font-semibold">Allocated</th>
                         <th className="text-right py-1 font-semibold">Available</th>
@@ -431,7 +448,10 @@ export default function POMasterPage() {
                     <tbody>
                       {po.lines.map((l) => (
                         <tr key={l.id} className="border-t border-zinc-100 dark:border-zinc-800 align-top">
-                          <td className="py-1.5 font-mono">{l.part_number}</td>
+                          <td className="py-1.5 font-mono text-zinc-900 dark:text-zinc-100 font-medium">
+                            {l.customer_part_number || "—"}
+                          </td>
+                          <td className="py-1.5 font-mono text-zinc-500">{l.part_number}</td>
                           <td className="py-1.5 text-right font-medium">{l.po_qty}</td>
                           <td className="py-1.5 text-right font-medium text-amber-600 dark:text-amber-400">{l.allocated_qty}</td>
                           <td
@@ -582,12 +602,23 @@ export default function POMasterPage() {
                           className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center rounded-lg border border-zinc-100 dark:border-zinc-800 p-2 bg-zinc-50/50 dark:bg-zinc-800/30 text-xs"
                         >
                           <div className="md:col-span-3">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Part</label>
+                            <label className="text-[10px] text-zinc-400 block md:hidden">Customer Part</label>
                             <input
                               type="text"
-                              required
                               disabled={Boolean(l.id && isAllocated)}
-                              placeholder="Part number"
+                              placeholder="Customer Part No"
+                              value={l.customer_part_number || ""}
+                              onChange={(e) => updateEditLine(idx, "customer_part_number", e.target.value)}
+                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs font-medium disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="text-[10px] text-zinc-400 block md:hidden">Internal Part</label>
+                            <input
+                              type="text"
+                              disabled={Boolean(l.id && isAllocated)}
+                              placeholder="Internal Part No"
                               value={l.part_number}
                               onChange={(e) => updateEditLine(idx, "part_number", e.target.value)}
                               className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
@@ -607,16 +638,16 @@ export default function POMasterPage() {
                             />
                           </div>
 
-                          <div className="md:col-span-2 text-center md:text-right">
+                          <div className="md:col-span-1 text-center md:text-right">
                             <label className="text-[10px] text-zinc-400 block md:hidden">Allocated</label>
-                            <span className="inline-block rounded px-2 py-1 text-[11px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                            <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
                               {l.allocated_qty || 0} alloc
                             </span>
                           </div>
 
-                          <div className="md:col-span-2 text-center md:text-right">
+                          <div className="md:col-span-1 text-center md:text-right">
                             <label className="text-[10px] text-zinc-400 block md:hidden">Available</label>
-                            <span className="inline-block rounded px-2 py-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+                            <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
                               {l.available_qty !== undefined
                                 ? l.available_qty
                                 : Math.max(0, (Number(l.po_qty) || 0) - (l.allocated_qty || 0))}{" "}

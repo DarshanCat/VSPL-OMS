@@ -330,6 +330,10 @@ def auto_migrate_schema():
         "DROP INDEX IF EXISTS ix_po_master_po_number;",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_po_master_customer_po ON po_master (customer_id, po_number);",
         "CREATE INDEX IF NOT EXISTS ix_po_master_po_number ON po_master (po_number);",
+
+        # PO Lines customer_part_number
+        "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS customer_part_number VARCHAR;",
+        "UPDATE po_lines SET customer_part_number = (SELECT customer_part_number FROM customer_part_mappings WHERE customer_part_mappings.part_id = po_lines.part_id LIMIT 1) WHERE customer_part_number IS NULL;",
     ]
 
 
