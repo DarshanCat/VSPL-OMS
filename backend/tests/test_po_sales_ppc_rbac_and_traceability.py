@@ -320,3 +320,86 @@ def test_planner_ppc_can_still_edit_po(client):
         db.delete(line); db.delete(po); db.delete(part); db.delete(cust); db.commit()
     finally:
         db.close()
+
+
+def test_update_oar_commitment_date(client):
+    """Sales or Planner can edit the commitment date on an existing OAR."""
+    db = SessionLocal()
+    try:
+        sales_headers, sales_user = _sales_headers(db)
+        cust_code = _uid("CUST")
+        part_num = _uid("PART")
+        po_num = _uid("PO")
+
+        resp_intake = client.post(
+            "/api/v1/operations/intake", headers=sales_headers,
+            json={
+                "customer_code": cust_code, "customer_name": "Commitment Test Co",
+                "customer_po": po_num, "part_number": part_num,
+                "po_quantity": 25, "commitment_date": "2026-10-20", "delivery_date": "2026-10-25"
+            },
+        )
+        assert resp_intake.status_code == 200, resp_intake.text
+        oar_num = resp_intake.json()["oar_number"]
+
+        # Now edit the commitment date
+        resp_update = client.patch(
+            f"/api/v1/operations/oars/{oar_num}",
+            headers=sales_headers,
+            json={
+                "commitment_date": "2026-11-10",
+                "delivery_date": "2026-11-15",
+                "status": "accept",
+                "remarks": "Customer requested rescheduled shipment"
+            }
+        )
+        assert resp_update.status_code == 200, resp_update.text
+        data = resp_update.json()
+        assert data["commitment_date"] == "2026-11-10"
+        assert data["delivery_date"] == "2026-11-15"
+
+        # Verify listing returns the updated commitment date
+        resp_list = client.get("/api/v1/operations/oars", headers=sales_headers, params={"search": oar_num})
+        assert resp_list.status_code == 200
+        items = resp_list.json()
+        assert len(items) > 0
+        assert items[0]["commitment_date"] == "2026-11-10"
+
+        db.delete(sales_user); db.commit()
+    finally:
+        db.close()
+
+
+def test_sales_can_cancel_and_delete_po(client):
+    """Sales department can cancel a PO and delete a cancelled/unallocated PO."""
+    db = SessionLocal()
+    try:
+        sales_headers, sales_user = _sales_headers(db)
+        cust = Customer(customer_code=_uid("CUST"), name="Delete Test Cust")
+        part = Part(part_number=_uid("PART"), description="Delete Test Part")
+        db.add_all([cust, part])
+        db.commit()
+        po, line = _make_po(db, cust, part)
+
+        # Sales can mark PO as cancelled
+        resp_cancel = client.put(
+            f"/api/v1/masters/pos/{po.id}",
+            headers=sales_headers,
+            json={"status": "cancelled"}
+        )
+        assert resp_cancel.status_code == 200, resp_cancel.text
+        assert resp_cancel.json()["status"] == "cancelled"
+
+        # Sales can delete the PO
+        resp_del = client.delete(f"/api/v1/masters/pos/{po.id}", headers=sales_headers)
+        assert resp_del.status_code == 200, resp_del.text
+        assert "deleted successfully" in resp_del.json()["message"]
+
+        # Confirm PO is deleted
+        resp_get = client.get(f"/api/v1/masters/pos/{po.id}", headers=sales_headers)
+        assert resp_get.status_code == 404
+
+        db.delete(part); db.delete(cust); db.delete(sales_user); db.commit()
+    finally:
+        db.close()
+

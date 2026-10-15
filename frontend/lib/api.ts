@@ -730,6 +730,11 @@ export async function updatePOMaster(poId: string, payload: POMasterUpdatePayloa
   return data;
 }
 
+export async function deletePOMaster(poId: string): Promise<{ message: string }> {
+  const { data } = await api.delete(`/api/v1/masters/pos/${encodeURIComponent(poId)}`);
+  return data;
+}
+
 export interface ScheduleOut {
   id: string;
   schedule_number: string;
@@ -861,6 +866,7 @@ export interface OARListItem {
   oar_shortfall: number;
   status: string;
   delivery_date?: string | null;
+  commitment_date?: string | null;
   created_at: string;
   po_date?: string | null;
   oar_date?: string | null;
@@ -882,6 +888,19 @@ export async function getOarList(params?: {
 
 export async function getOarGenealogy(oarNumber: string): Promise<OARGenealogyResponse> {
   const { data } = await api.get(`/api/v1/operations/oars/${encodeURIComponent(oarNumber)}/genealogy`);
+  return data;
+}
+
+export async function updateOAR(
+  oarNumber: string,
+  payload: {
+    commitment_date?: string | null;
+    delivery_date?: string | null;
+    status?: string;
+    remarks?: string;
+  }
+): Promise<OARListItem> {
+  const { data } = await api.patch(`/api/v1/operations/oars/${encodeURIComponent(oarNumber)}`, payload);
   return data;
 }
 

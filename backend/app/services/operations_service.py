@@ -21,8 +21,10 @@ from app.schemas.operations import (
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
     ReleaseEvidenceCreate,
     WorkOrderCreatePayload, WorkOrderCreateResponse,
-    NextSequencesResponse, MovableWorkOrderItem
+    NextSequencesResponse, MovableWorkOrderItem,
+    OARUpdate
 )
+from app.schemas.work_order import OARListItem
 from app.services.oms_integration_service import (
     OMSIntegrationService,
     calculate_stage_targets,
@@ -317,6 +319,70 @@ class OperationsService:
             oar_po_status=oar_po_status,
             message=msg
         )
+
+    @staticmethod
+    def update_oar(
+        db: Session,
+        oar_number: str,
+        payload: OARUpdate,
+        current_user: Optional[User] = None
+    ) -> OARListItem:
+        """Update an existing OAR's Commitment Date, Delivery Date, Status, or Remarks."""
+        from app.services.work_order_service import WorkOrderService
+
+        clean_oar = oar_number.strip()
+        orders = db.query(Order).filter(Order.oar_number == clean_oar).all()
+        if not orders:
+            order_by_id = db.query(Order).filter(Order.id == clean_oar).first()
+            if order_by_id:
+                clean_oar = order_by_id.oar_number or clean_oar
+                orders = [order_by_id]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"OAR '{clean_oar}' not found."
+                )
+
+        changes = []
+        old_commit = orders[0].commitment_date
+
+        for order in orders:
+            if payload.commitment_date is not None:
+                order.commitment_date = payload.commitment_date
+            if payload.delivery_date is not None:
+                order.delivery_date = payload.delivery_date
+            if payload.status is not None:
+                new_st = payload.status.strip().lower()
+                try:
+                    order.status = OrderStatus(new_st)
+                except ValueError:
+                    valid_st = ", ".join([s.value for s in OrderStatus])
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid OAR status '{payload.status}'. Valid statuses: {valid_st}."
+                    )
+
+        if payload.commitment_date is not None:
+            changes.append(f"Commitment Date: {old_commit} -> {payload.commitment_date}")
+        if payload.delivery_date is not None:
+            changes.append(f"Delivery Date -> {payload.delivery_date}")
+        if payload.status is not None:
+            changes.append(f"Status -> {payload.status}")
+
+        audit = AuditLog(
+            user_id=current_user.id if current_user else None,
+            user_name=(getattr(current_user, "full_name", None) or getattr(current_user, "email", None) or "System"),
+            action="OAR_UPDATE",
+            entity="Order",
+            entity_id=str(orders[0].id),
+            old_value=str(old_commit),
+            new_value=f"Commitment Date: {payload.commitment_date or old_commit}, Status: {orders[0].status.value}",
+            details=f"OAR {clean_oar} updated. Changes: {', '.join(changes) if changes else 'No date/status changes'}. Remarks: {payload.remarks or 'N/A'}"
+        )
+        db.add(audit)
+        db.commit()
+
+        return WorkOrderService.build_oar_summary(db, orders[0])
 
     @staticmethod
     def create_work_order(

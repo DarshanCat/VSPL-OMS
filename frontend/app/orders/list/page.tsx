@@ -14,11 +14,13 @@ import {
   Boxes,
   RotateCw,
   Plus,
-  X
+  X,
+  Calendar,
+  Edit3
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
-import { getOarList, OARListItem, createReplacement, ReplacementResult } from "@/lib/api";
+import { getOarList, OARListItem, createReplacement, ReplacementResult, updateOAR } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -177,6 +179,55 @@ export default function OarWoListPage() {
     }
   };
 
+  // Edit OAR Commitment Date & Details modal state
+  const [editModalOar, setEditModalOar] = useState<OARListItem | null>(null);
+  const [editCommitmentDate, setEditCommitmentDate] = useState("");
+  const [editDeliveryDate, setEditDeliveryDate] = useState("");
+  const [editStatus, setEditStatus] = useState("accept");
+  const [editRemarks, setEditRemarks] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editSuccess, setEditSuccess] = useState("");
+
+  const handleOpenEditOar = (oar: OARListItem) => {
+    setEditModalOar(oar);
+    setEditCommitmentDate(oar.commitment_date ? String(oar.commitment_date).substring(0, 10) : "");
+    setEditDeliveryDate(oar.delivery_date ? String(oar.delivery_date).substring(0, 10) : "");
+    setEditStatus(oar.status?.toLowerCase() || "accept");
+    setEditRemarks("");
+    setEditError("");
+    setEditSuccess("");
+  };
+
+  const handleUpdateOar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editModalOar) return;
+    setEditSubmitting(true);
+    setEditError("");
+    setEditSuccess("");
+    try {
+      const updated = await updateOAR(editModalOar.oar_number, {
+        commitment_date: editCommitmentDate || null,
+        delivery_date: editDeliveryDate || null,
+        status: editStatus,
+        remarks: editRemarks || undefined,
+      });
+      setEditSuccess(`OAR ${updated.oar_number} updated with Commitment Date: ${formatDate(updated.commitment_date)}`);
+      // Update local state in-place and reload
+      setOars((prev) =>
+        prev.map((o) => (o.oar_number === updated.oar_number ? { ...o, ...updated } : o))
+      );
+      setTimeout(() => {
+        setEditModalOar(null);
+        setEditSuccess("");
+      }, 1200);
+    } catch (err: any) {
+      setEditError(err?.response?.data?.detail || "Failed to update OAR details.");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -267,6 +318,7 @@ export default function OarWoListPage() {
                   <th className="py-2.5 px-3 text-right">Total Produced</th>
                   <th className="py-2.5 px-3 text-right">Total Rejected</th>
                   <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
@@ -297,6 +349,12 @@ export default function OarWoListPage() {
                         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">{oar.part_number}</div>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
                           <span>OAR Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.oar_date || oar.created_at)}</strong></span>
+                          {oar.commitment_date && (
+                            <span className="text-blue-600 dark:text-blue-400 font-bold">• Commit: <strong>{formatDate(oar.commitment_date)}</strong></span>
+                          )}
+                          {oar.delivery_date && (
+                            <span>• Delivery: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.delivery_date)}</strong></span>
+                          )}
                           {oar.po_date && (
                             <span>• PO Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.po_date)}</strong></span>
                           )}
@@ -330,11 +388,25 @@ export default function OarWoListPage() {
                           {oar.status.toUpperCase()}
                         </Badge>
                       </td>
+                      <td className="py-3 px-3 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditOar(oar);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-100 hover:bg-blue-50 hover:text-blue-600 dark:bg-zinc-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400 text-xs font-semibold text-zinc-700 dark:text-zinc-300 border border-zinc-200/80 dark:border-zinc-700/80 transition-colors"
+                          title="Edit OAR Commitment Date & Delivery Details"
+                        >
+                          <Calendar className="h-3.5 w-3.5 text-blue-500" />
+                          <span>Edit Date</span>
+                        </button>
+                      </td>
                     </tr>
 
                     {expanded[oar.oar_number] && (
                       <tr>
-                        <td colSpan={12} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
+                        <td colSpan={13} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
                           <div className="p-4 space-y-4">
                             {/* OAR Genealogy Metric Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -415,17 +487,29 @@ export default function OarWoListPage() {
                                   <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
                                 </div>
 
-                                {oar.oar_shortfall > 0 && (
+                                <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenPatchModal(oar)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                                    title={`Create Patch/Replacement WO for shortfall of ${oar.oar_shortfall} pcs`}
+                                    onClick={() => handleOpenEditOar(oar)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200 dark:border-blue-900/50 transition-colors cursor-pointer"
+                                    title="Edit Commitment Date & Delivery Details"
                                   >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    <span>+ Create Patch WO</span>
+                                    <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                    <span>Edit Commitment Date</span>
                                   </button>
-                                )}
+
+                                  {oar.oar_shortfall > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenPatchModal(oar)}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                                      title={`Create Patch/Replacement WO for shortfall of ${oar.oar_shortfall} pcs`}
+                                    >
+                                      <Plus className="h-3.5 w-3.5" />
+                                      <span>+ Create Patch WO</span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
                               {oar.work_orders.length === 0 ? (
@@ -760,6 +844,166 @@ export default function OarWoListPage() {
                         <>
                           <Plus className="h-3.5 w-3.5" />
                           <span>Create Patch WO</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Edit OAR Commitment Date & Delivery Details Modal */}
+        {editModalOar && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      Edit Commitment Date &amp; Delivery Details
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 font-mono">
+                      OAR: {editModalOar.oar_number} • Customer: {editModalOar.customer_code}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditModalOar(null)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {editSuccess ? (
+                <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>OAR Updated Successfully!</span>
+                  </div>
+                  <p>{editSuccess}</p>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditModalOar(null)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold text-xs cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleUpdateOar} className="space-y-4">
+                  {editError && (
+                    <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-600 dark:text-rose-400">
+                      {editError}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 text-xs border border-zinc-200/60 dark:border-zinc-800">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400">Customer PO</span>
+                      <p className="font-semibold text-zinc-800 dark:text-zinc-200">{editModalOar.customer_po}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400">Part Number</span>
+                      <p className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">{editModalOar.part_number}</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400">Order Quantity</span>
+                      <p className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{editModalOar.oar_qty} pcs</p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400">Current OAR Status</span>
+                      <p className="font-bold text-blue-600 uppercase">{editModalOar.status}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Commitment Date <span className="text-blue-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={editCommitmentDate}
+                        onChange={(e) => setEditCommitmentDate(e.target.value)}
+                        required
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      />
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        Target commitment date promised to the customer. Update here if delivery schedule was revised.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Delivery Date (Customer Required)
+                      </label>
+                      <input
+                        type="date"
+                        value={editDeliveryDate}
+                        onChange={(e) => setEditDeliveryDate(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        OAR Status
+                      </label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      >
+                        <option value="accept">ACCEPT (Active Order)</option>
+                        <option value="hold">HOLD (Temporarily On Hold)</option>
+                        <option value="reject">REJECT (Order Rejected)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Revision Reason / Remarks
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={editRemarks}
+                        onChange={(e) => setEditRemarks(e.target.value)}
+                        placeholder="e.g. Rescheduled due to delayed customer confirmation / machine maintenance..."
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setEditModalOar(null)}
+                      disabled={editSubmitting}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={editSubmitting}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {editSubmitting ? (
+                        <>
+                          <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>Save Changes</span>
                         </>
                       )}
                     </button>

@@ -12,7 +12,7 @@ from app.schemas.operations import (
     ReleaseEvidenceCreate,
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
     WorkOrderCreatePayload, WorkOrderCreateResponse,
-    NextSequencesResponse
+    NextSequencesResponse, OARUpdate
 )
 from app.schemas.work_order import OARListItem, OARGenealogyResponse
 from app.services.operations_service import OperationsService
@@ -88,6 +88,16 @@ def get_oar_genealogy(
             detail=f"OAR '{oar_number}' not found."
         )
     return genealogy
+
+@router.patch("/oars/{oar_number}", response_model=OARListItem)
+def update_oar(
+    oar_number: str,
+    payload: OARUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Update OAR Commitment Date, Delivery Date, Status, or Remarks."""
+    return OperationsService.update_oar(db, oar_number=oar_number, payload=payload, current_user=user)
 
 @router.post("/wo/{wo_number}/engineering-release", response_model=EngineeringReleaseResponse)
 def engineering_release(

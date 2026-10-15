@@ -6,6 +6,7 @@ import {
   getPOMasters,
   createPOMaster,
   updatePOMaster,
+  deletePOMaster,
   MasterCustomer,
   POMasterOut,
   POLineOut,
@@ -25,6 +26,7 @@ import {
   Search,
   Filter,
   Calendar,
+  RotateCw,
 } from "lucide-react";
 
 interface LineDraft {
@@ -121,6 +123,32 @@ export default function POMasterPage() {
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
   const [updating, setUpdating] = useState(false);
+
+  // Delete PO modal state
+  const [deletingPO, setDeletingPO] = useState<POMasterOut | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteSuccess, setDeleteSuccess] = useState("");
+
+  async function handleDeletePO() {
+    if (!deletingPO) return;
+    setDeleteLoading(true);
+    setDeleteError("");
+    setDeleteSuccess("");
+    try {
+      const res = await deletePOMaster(deletingPO.id);
+      setDeleteSuccess(res.message || "Purchase order deleted successfully.");
+      await loadAll();
+      setTimeout(() => {
+        setDeletingPO(null);
+        setDeleteSuccess("");
+      }, 1200);
+    } catch (err: any) {
+      setDeleteError(err?.response?.data?.detail || "Could not delete Purchase Order.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   // Filter and search state for Existing POs
   const [filterCustomerCode, setFilterCustomerCode] = useState("");
@@ -676,13 +704,27 @@ export default function POMasterPage() {
                         <span>Validity: {po.validity_date || "—"}</span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openEditModal(po)}
-                      className="flex items-center gap-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-colors"
-                    >
-                      <Edit3 className="h-3.5 w-3.5 text-blue-500" /> Edit PO
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(po)}
+                        className="flex items-center gap-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-colors"
+                      >
+                        <Edit3 className="h-3.5 w-3.5 text-blue-500" /> Edit PO
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeletingPO(po);
+                          setDeleteError("");
+                          setDeleteSuccess("");
+                        }}
+                        className="flex items-center gap-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/40 transition-colors cursor-pointer"
+                        title="Delete Purchase Order"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Delete PO
+                      </button>
+                    </div>
                   </div>
                   <table className="w-full text-xs mt-3">
                     <thead className="text-zinc-500 dark:text-zinc-400">
@@ -957,23 +999,135 @@ export default function POMasterPage() {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 border-t border-zinc-100 dark:border-zinc-800 pt-3">
+                <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800 pt-3">
                   <button
                     type="button"
-                    onClick={closeEditModal}
-                    className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    onClick={() => {
+                      const poToDelete = editingPO;
+                      closeEditModal();
+                      setDeletingPO(poToDelete);
+                      setDeleteError("");
+                      setDeleteSuccess("");
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors cursor-pointer"
                   >
-                    Cancel
+                    <Trash2 className="h-4 w-4" /> Delete PO
                   </button>
-                  <button
-                    type="submit"
-                    disabled={updating}
-                    className="rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors"
-                  >
-                    {updating ? "Saving..." : "Save Changes"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={closeEditModal}
+                      className="rounded-xl border border-zinc-200 dark:border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updating}
+                      className="rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors"
+                    >
+                      {updating ? "Saving..." : "Save Changes"}
+                    </button>
+                  </div>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Delete PO Confirmation Modal */}
+        {deletingPO && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+                <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                  <Trash2 className="h-5 w-5" />
+                  <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                    Delete Purchase Order
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeletingPO(null)}
+                  disabled={deleteLoading}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {deleteSuccess ? (
+                <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>PO Deleted</span>
+                  </div>
+                  <p>{deleteSuccess}</p>
+                </div>
+              ) : (
+                <div className="space-y-4 text-xs">
+                  {deleteError && (
+                    <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 font-medium">
+                      {deleteError}
+                    </div>
+                  )}
+
+                  <p className="text-zinc-600 dark:text-zinc-300">
+                    Are you sure you want to delete Purchase Order <strong className="font-mono text-zinc-900 dark:text-zinc-100">{deletingPO.po_number}</strong>?
+                  </p>
+
+                  <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 p-3 space-y-1.5 text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Customer:</span>
+                      <span className="font-semibold text-zinc-800 dark:text-zinc-200">{deletingPO.customer_code} — {deletingPO.customer_name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Status:</span>
+                      <span className="font-bold uppercase text-blue-600">{deletingPO.status}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-400">Total Lines:</span>
+                      <span className="font-mono font-semibold">{deletingPO.lines.length} lines</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                      This will permanently remove the PO and its line items. (If work orders under this PO are already released or in shop floor production, deletion will be safely rejected).
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setDeletingPO(null)}
+                      disabled={deleteLoading}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeletePO}
+                      disabled={deleteLoading}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {deleteLoading ? (
+                        <>
+                          <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Deleting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Delete PO</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

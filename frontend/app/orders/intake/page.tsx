@@ -403,19 +403,29 @@ export default function OrderIntakePage() {
     <AppShell>
       <div className="max-w-3xl mx-auto space-y-6">
         {/* Header */}
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-              Sales & Order Entry
-            </span>
-            <span className="text-xs text-zinc-400">Order Acknowledgement Record</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                Sales & Order Entry
+              </span>
+              <span className="text-xs text-zinc-400">Order Acknowledgement Record</span>
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
+              Order Intake &amp; OAR Generation
+            </h1>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Accept confirmed customer Purchase Orders, create Order Acceptance Receipts (OAR), and route to Planning for Work Order generation.
+            </p>
           </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-            Order Intake &amp; OAR Generation
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Accept confirmed customer Purchase Orders, create Order Acceptance Receipts (OAR), and route to Planning for Work Order generation.
-          </p>
+          <Link
+            href="/orders/list"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-xs transition shrink-0"
+            title="View all created OARs and edit Commitment Dates"
+          >
+            <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+            <span>View &amp; Edit OARs</span>
+          </Link>
         </div>
 
         {/* Pending Demand Queue (PO vs Schedule) */}

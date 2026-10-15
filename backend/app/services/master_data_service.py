@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
-from app.models.order import Customer, Part, Order, next_internal_part_number
+from app.models.order import Customer, Part, Order, OrderStatus, next_internal_part_number
 from app.models.master_data import POMaster, POLine, ScheduleMaster, POStatus, ScheduleStatus
 from app.models.customer_part_mapping import CustomerPartMapping
 from app.models.machine import Machine
@@ -503,12 +503,33 @@ class POMasterService:
                     detail=f"Invalid PO status '{req.status}'. Valid statuses are: {valid_statuses}.",
                 )
             if new_status == POStatus.CANCELLED:
-                total_allocated = sum(sum(o.po_qty for o in line.orders) for line in po.lines)
-                if total_allocated > 0:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Cannot cancel PO because it has {total_allocated} allocated quantity across linked orders (OARs).",
-                    )
+                from app.models.work_order import WorkOrder
+                from app.models.production import ProductionUpdate
+                from app.models.production_movement import ProductionMovement
+                from app.models.dispatch import Dispatch
+
+                line_ids = [l.id for l in po.lines]
+                linked_orders = db.query(Order).filter(
+                    (Order.po_line_id.in_(line_ids)) |
+                    ((Order.customer_id == po.customer_id) & (Order.customer_po == po.po_number))
+                ).all()
+
+                for ord_item in linked_orders:
+                    wos = db.query(WorkOrder).filter(WorkOrder.order_id == ord_item.id).all()
+                    for wo in wos:
+                        has_prod = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+                        has_move = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None
+                        has_disp = db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).first() is not None
+                        if wo.released_by or has_prod or has_move or has_disp:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=(
+                                    f"Cannot cancel PO '{po.po_number}' because Work Order '{wo.wo_number}' "
+                                    f"is already released to the shop floor or has active production/dispatch."
+                                ),
+                            )
+                for ord_item in linked_orders:
+                    ord_item.status = OrderStatus.HOLD
             if po.status != new_status:
                 changes.append(f"status: {po.status.value} -> {new_status.value}")
                 po.status = new_status
@@ -658,6 +679,83 @@ class POMasterService:
 
         db.refresh(po)
         return POMasterService._po_out(po)
+
+    @staticmethod
+    def delete_po(db: Session, po_id: str, current_user: Optional[User] = None) -> dict:
+        """Delete a Purchase Order and clean up linked draft orders/WOs.
+        Safely blocks if any linked Work Order has active shop floor activity or has been released."""
+        po = db.query(POMaster).filter(POMaster.id == po_id).with_for_update().first()
+        if not po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchase Order not found.")
+
+        po_lines = db.query(POLine).filter(POLine.po_id == po.id).all()
+        line_ids = [l.id for l in po_lines]
+
+        from app.models.work_order import WorkOrder, WORoute
+        from app.models.production import ProductionUpdate
+        from app.models.production_movement import ProductionMovement, StageWIP
+        from app.models.dispatch import Dispatch
+        from app.models.nc import NCRecord
+        from app.models.conversion import Conversion
+
+        # Find any linked orders
+        orders = db.query(Order).filter(
+            (Order.po_line_id.in_(line_ids)) |
+            ((Order.customer_id == po.customer_id) & (Order.customer_po == po.po_number))
+        ).all()
+
+        for order in orders:
+            # Check conversion dependencies
+            conv = db.query(Conversion).filter(Conversion.destination_order_id == order.id).first()
+            if conv:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot delete PO '{po.po_number}' because linked Order '{order.oar_number}' has associated conversion records."
+                )
+
+            wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).all()
+            for wo in wos:
+                has_production = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+                has_movement = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None
+                has_dispatch = db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).first() is not None
+                has_nc = db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).first() is not None
+
+                if wo.released_by or has_production or has_movement or has_dispatch or has_nc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Cannot delete PO '{po.po_number}' because Work Order '{wo.wo_number}' "
+                            f"is already released to the shop floor or has recorded production/dispatch activity. "
+                            f"Please cancel or close the Work Order first."
+                        ),
+                    )
+
+                # Delete routes, stage wips, and the work order
+                db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete(synchronize_session=False)
+                db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete(synchronize_session=False)
+                db.delete(wo)
+
+            if order.source_type == "schedule" and order.schedule_id:
+                order.po_line_id = None
+                order.customer_po = "AWAITING_PO"
+                order.oar_po_status = "AWAITING_PO"
+            else:
+                db.delete(order)
+
+        for line in po_lines:
+            db.delete(line)
+
+        po_number = po.po_number
+        cust_code = po.customer.customer_code if po.customer else "N/A"
+        db.delete(po)
+
+        _audit(
+            db, current_user, "DELETE", "POMaster", str(po.id),
+            f"Deleted PO '{po_number}' (Customer: {cust_code})"
+        )
+        db.commit()
+
+        return {"message": f"Purchase Order '{po_number}' deleted successfully."}
 
 
 class ScheduleMasterService:

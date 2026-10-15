@@ -99,6 +99,16 @@ def update_po(
     return POMasterService.update_po(db, po_id=po_id, req=payload, current_user=user)
 
 
+@router.delete("/pos/{po_id}")
+def delete_po(
+    po_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    """Delete a Purchase Order (allowed for Sales, Planner, Admin, CEO)."""
+    return POMasterService.delete_po(db, po_id=po_id, current_user=user)
+
+
 # --- Customer Part Mapping (read-only lookups for the PO UI) ---
 
 @router.get("/customer-parts", response_model=List[CustomerPartOut])

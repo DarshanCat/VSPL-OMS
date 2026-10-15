@@ -47,6 +47,12 @@ class OrderIntakeResponse(BaseModel):
     oar_po_status: Optional[str] = None
     message: str
 
+class OARUpdate(BaseModel):
+    commitment_date: Optional[date] = None
+    delivery_date: Optional[date] = None
+    status: Optional[str] = Field(None, description="'accept', 'hold', or 'reject'")
+    remarks: Optional[str] = Field(None, max_length=2000)
+
 class WorkOrderCreatePayload(BaseModel):
     oar_number: str = Field(..., max_length=100)
     wo_number: Optional[str] = Field(None, max_length=100, description="Optional manual WO number (e.g. WO-17617 or WO 16772). If omitted, auto-generated.")

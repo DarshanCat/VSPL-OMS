@@ -190,6 +190,7 @@ class OARListItem(BaseModel):
     oar_shortfall: int = 0
     status: str
     delivery_date: Optional[date] = None
+    commitment_date: Optional[date] = None
     created_at: datetime
     po_date: Optional[date] = None
     oar_date: Optional[datetime] = None
@@ -207,6 +208,8 @@ class OARGenealogyResponse(BaseModel):
     po_coverage_status: Optional[str] = "COMMERCIAL_PO_PENDING"
     part_number: str
     oar_qty: int
+    delivery_date: Optional[date] = None
+    commitment_date: Optional[date] = None
     num_wos: int
     num_original_wos: int
     num_patch_wos: int
