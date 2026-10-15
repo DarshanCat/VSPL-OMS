@@ -50,6 +50,8 @@ class WorkOrderCreatePayload(BaseModel):
     oar_number: str = Field(..., max_length=100)
     wo_number: Optional[str] = Field(None, max_length=100, description="Optional manual WO number (e.g. WO-17617 or WO 16772). If omitted, auto-generated.")
     physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
+    wo_quantities: Optional[List[int]] = Field(None, description="Optional split quantities into multiple Work Orders")
+    allow_overrun: bool = Field(False, description="Allow generating Work Order(s) even if quantity exceeds remaining OAR balance")
     wo_date: Optional[date] = None
     target_date: Optional[date] = None
     casting_process: Optional[str] = Field("CENTRIFUGAL", max_length=50)
@@ -60,6 +62,8 @@ class WorkOrderCreatePayload(BaseModel):
 class WorkOrderCreateResponse(BaseModel):
     success: bool
     wo_number: str
+    wos_created: List[str] = []
+    wo_quantities: List[int] = []
     order_id: str
     oar_number: str
     customer_code: str

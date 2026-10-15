@@ -8,20 +8,17 @@ import {
   CheckCircle2,
   AlertTriangle,
   ArrowRight,
-  Route,
   Clock,
-  Calendar,
   RefreshCw,
   Plus,
   FileSpreadsheet,
   Check,
   Send,
   Boxes,
-  Flame,
-  Factory
+  Split,
+  ChevronRight
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
 import {
   getOarList,
   OARListItem,
@@ -79,6 +76,7 @@ function WOGenerationContent() {
   // Filters
   const [searchOar, setSearchOar] = useState(urlOar);
   const [filterPendingOnly, setFilterPendingOnly] = useState(true);
+  const [woTableTab, setWoTableTab] = useState<"all" | "unreleased">("all");
 
   // Form states
   const [selectedOar, setSelectedOar] = useState<OARListItem | null>(null);
@@ -90,6 +88,12 @@ function WOGenerationContent() {
   const [heatNumber, setHeatNumber] = useState("");
   const [routeStages, setRouteStages] = useState<string[]>(DEFAULT_STAGES);
   const [remarks, setRemarks] = useState("Planned by Production Planning department.");
+
+  // Divide Quantity State
+  const [splitMode, setSplitMode] = useState<"single" | "auto" | "manual">("single");
+  const [batchSize, setBatchSize] = useState<number | "">(10);
+  const [manualQtys, setManualQtys] = useState<string[]>(["", ""]);
+  const [allowOverrun, setAllowOverrun] = useState(false);
 
   // Submit states
   const [submitting, setSubmitting] = useState(false);
@@ -147,7 +151,14 @@ function WOGenerationContent() {
   const handleSelectOar = (oar: OARListItem) => {
     setSelectedOar(oar);
     setSearchOar(oar.oar_number);
-    setWoQty(oar.remaining_qty > 0 ? oar.remaining_qty : oar.oar_qty);
+    const initialQty = oar.remaining_qty > 0 ? oar.remaining_qty : oar.oar_qty;
+    setWoQty(initialQty);
+    setManualQtys([String(Math.ceil(initialQty / 2)), String(Math.floor(initialQty / 2))]);
+    if (oar.remaining_qty <= 0) {
+      setAllowOverrun(true);
+    } else {
+      setAllowOverrun(false);
+    }
     if (oar.delivery_date) {
       setTargetDate(oar.delivery_date.slice(0, 10));
     }
@@ -166,15 +177,79 @@ function WOGenerationContent() {
     }
   };
 
+  // Manual split helpers
+  const updateManualQty = (idx: number, val: string) => {
+    const updated = [...manualQtys];
+    updated[idx] = val;
+    setManualQtys(updated);
+  };
+
+  const addManualRow = () => {
+    setManualQtys([...manualQtys, ""]);
+  };
+
+  const removeManualRow = (idx: number) => {
+    if (manualQtys.length <= 1) return;
+    setManualQtys(manualQtys.filter((_, i) => i !== idx));
+  };
+
+  // Calculations for auto & manual split
+  const parsedManualQtys = manualQtys.map((v) => Number(v) || 0);
+  const manualAllocated = parsedManualQtys.reduce((sum, v) => sum + v, 0);
+  const totalBaseQty = Number(woQty) || 0;
+  const manualRemaining = totalBaseQty - manualAllocated;
+  const manualComplete = parsedManualQtys.length > 0 && parsedManualQtys.every((v) => v > 0) && manualRemaining === 0;
+
+  // Auto split calculation
+  const autoSplitBatches: number[] = [];
+  if (splitMode === "auto" && totalBaseQty > 0 && Number(batchSize) > 0) {
+    let rem = totalBaseQty;
+    const bSize = Number(batchSize);
+    while (rem > 0) {
+      const take = Math.min(rem, bSize);
+      autoSplitBatches.push(take);
+      rem -= take;
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOar) {
       setError("Please select a parent OAR first.");
       return;
     }
-    const qty = Number(woQty);
-    if (!qty || qty <= 0) {
-      setError("Please enter a valid positive Work Order quantity.");
+
+    let quantitiesToSubmit: number[] | undefined = undefined;
+    let totalQtyToSubmit = 0;
+
+    if (splitMode === "single") {
+      const q = Number(woQty);
+      if (!q || q <= 0) {
+        setError("Please enter a valid positive Work Order quantity.");
+        return;
+      }
+      totalQtyToSubmit = q;
+    } else if (splitMode === "auto") {
+      if (!autoSplitBatches || autoSplitBatches.length === 0) {
+        setError("Please enter a valid total quantity and batch size.");
+        return;
+      }
+      quantitiesToSubmit = autoSplitBatches;
+      totalQtyToSubmit = autoSplitBatches.reduce((sum, v) => sum + v, 0);
+    } else if (splitMode === "manual") {
+      if (!manualComplete) {
+        setError(`Manual split is incomplete: Allocated (${manualAllocated}) must equal target quantity (${totalBaseQty}).`);
+        return;
+      }
+      quantitiesToSubmit = parsedManualQtys;
+      totalQtyToSubmit = manualAllocated;
+    }
+
+    // Check remaining unless allowOverrun is checked
+    if (!allowOverrun && selectedOar.remaining_qty < totalQtyToSubmit) {
+      setError(
+        `Requested quantity (${totalQtyToSubmit} pcs) exceeds the remaining unallocated OAR balance (${selectedOar.remaining_qty} pcs). Check "Allow Overrun / Additional Batch" below if creating extra or rework WOs.`
+      );
       return;
     }
 
@@ -184,7 +259,9 @@ function WOGenerationContent() {
       const payload: WorkOrderCreatePayload = {
         oar_number: selectedOar.oar_number,
         wo_number: woNumber.trim() || undefined,
-        physical_wo_qty: qty,
+        physical_wo_qty: totalQtyToSubmit,
+        wo_quantities: quantitiesToSubmit,
+        allow_overrun: allowOverrun,
         wo_date: woDate || undefined,
         target_date: targetDate || undefined,
         casting_process: castingProcess,
@@ -203,13 +280,13 @@ function WOGenerationContent() {
         prev
           ? {
               ...prev,
-              allocated_qty: prev.allocated_qty + qty,
-              remaining_qty: Math.max(0, prev.remaining_qty - qty),
+              allocated_qty: prev.allocated_qty + totalQtyToSubmit,
+              remaining_qty: Math.max(0, prev.remaining_qty - totalQtyToSubmit),
             }
           : null
       );
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to create Work Order.");
+      setError(err?.response?.data?.detail || "Failed to generate Work Order(s).");
     } finally {
       setSubmitting(false);
     }
@@ -229,6 +306,11 @@ function WOGenerationContent() {
     );
   });
 
+  const displayedWOs = recentWOs.filter((wo) => {
+    if (woTableTab === "unreleased") return !wo.is_released;
+    return true;
+  });
+
   return (
     <AppShell>
       <div className="max-w-7xl mx-auto space-y-6">
@@ -239,13 +321,13 @@ function WOGenerationContent() {
               <span className="rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
                 Planning Department
               </span>
-              <span className="text-xs text-zinc-400">Step 2 of 3 (PO → OAR → WO → Release)</span>
+              <span className="text-xs text-zinc-400">Step 1: WO ID Generation → Step 2: WO ID Release</span>
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-              Work Order Generation
+              Work Order ID Generation &amp; Quantity Split
             </h1>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Select created Sales OARs, generate and schedule Work Order IDs with custom/auto sequences and dates, and route them to Release.
+              Select created Sales OARs, divide quantities across sequential Work Order IDs, and proceed to Step 2 (WO ID Release).
             </p>
           </div>
 
@@ -254,13 +336,13 @@ function WOGenerationContent() {
               href="/orders/intake"
               className="px-3 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
             >
-              Step 1: Sales OAR Intake
+              Sales OAR Intake
             </Link>
             <Link
               href="/planning/wo-release"
               className="px-3.5 py-2 text-xs font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-1.5 shadow-sm"
             >
-              <span>Step 3: WO Release</span>
+              <span>Step 2: WO ID Release</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
@@ -275,7 +357,7 @@ function WOGenerationContent() {
                 Created OARs (Sales Order Acceptance Receipts)
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Only confirmed OARs created by Sales appear here for Planner Work Order generation.
+                Confirmed OARs created by Sales. Select an OAR below to divide quantity and generate Work Order IDs.
               </p>
             </div>
 
@@ -400,13 +482,13 @@ function WOGenerationContent() {
                           <button
                             type="button"
                             onClick={() => handleSelectOar(o)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${
+                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
                               isSelected
                                 ? "bg-emerald-700 text-white"
                                 : "bg-emerald-600 text-white hover:bg-emerald-700"
                             }`}
                           >
-                            {isSelected ? "Selected" : "Generate WO"}
+                            {isSelected ? "Selected" : "Select & Divide Qty"}
                           </button>
                         </td>
                       </tr>
@@ -423,17 +505,23 @@ function WOGenerationContent() {
           id="wo-generator-card"
           className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-5"
         >
-          <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800">
             <div>
-              <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-50">
-                Generate Work Order ID
+              <div className="flex items-center gap-2">
+                <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                  Step 1: WO ID Generation
+                </span>
+                <span className="text-xs text-zinc-400">→ Step 2: WO ID Release</span>
+              </div>
+              <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-50 mt-1">
+                Generate Work Order IDs
               </h3>
               <p className="text-xs text-zinc-400">
-                Create a scheduled Work Order from selected OAR with target dates and route.
+                Divide the quantity into one or multiple Work Orders, assign IDs, and proceed to Step 2 (Release).
               </p>
             </div>
             {selectedOar && (
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold font-mono">
+              <span className="px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold font-mono self-start sm:self-auto">
                 Parent: {selectedOar.oar_number}
               </span>
             )}
@@ -445,54 +533,76 @@ function WOGenerationContent() {
             </div>
           )}
 
+          {/* Success Banner: Step 1 Complete -> Go to Step 2 Release */}
           {successResult && (
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 space-y-3">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="h-6 w-6 text-emerald-500 shrink-0" />
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="h-6 w-6 text-emerald-500 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
-                    Work Order {successResult.wo_number} Generated Successfully!
+                  <h4 className="text-base font-bold text-emerald-800 dark:text-emerald-300">
+                    Step 1 Complete: {successResult.wos_created?.length || 1} Work Order ID(s) Generated!
                   </h4>
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                    Linked to Parent OAR: <strong>{successResult.oar_number}</strong> | Part: {successResult.part_number} | Quantity: {successResult.physical_wo_qty} pcs
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    Parent OAR: <strong>{successResult.oar_number}</strong> | Part: {successResult.part_number} | Total Qty: {successResult.physical_wo_qty} pcs | Status: <strong>AWAITING RELEASE (UNRELEASED)</strong>
                   </p>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-white dark:bg-zinc-900 p-3.5 border border-zinc-200 dark:border-zinc-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* List of Generated WO IDs */}
+              <div className="rounded-xl bg-white dark:bg-zinc-900 p-4 border border-zinc-200 dark:border-zinc-800 space-y-2">
+                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block">
+                  Generated Work Orders (Created &amp; Unreleased):
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {(successResult.wos_created || [successResult.wo_number]).map((wo, idx) => (
+                    <div
+                      key={wo}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-950/60 px-3 py-1.5 font-mono text-xs font-bold text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                    >
+                      <span>{wo}</span>
+                      {successResult.wo_quantities && successResult.wo_quantities[idx] && (
+                        <span className="text-zinc-500 font-semibold">
+                          ({successResult.wo_quantities[idx]} pcs)
+                        </span>
+                      )}
+                      <Link
+                        href={`/planning/wo-release?wo=${encodeURIComponent(wo)}`}
+                        className="ml-1 px-2 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold hover:bg-blue-700 transition"
+                      >
+                        Release Now
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Step 2 CTA */}
+              <div className="rounded-xl bg-blue-50/70 dark:bg-blue-950/40 p-4 border border-blue-200 dark:border-blue-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <span className="font-bold text-zinc-900 dark:text-zinc-100 block">
-                    Next Step in 3-Step Process: Work Order Release
+                  <span className="font-bold text-blue-900 dark:text-blue-200 text-xs block">
+                    Step 2 in Sequence: Release Work Order IDs
                   </span>
-                  <p className="text-zinc-500 text-[11px]">
-                    Release this Work Order to authorise production floor dispatch and route tracking.
+                  <p className="text-blue-700 dark:text-blue-300 text-[11px] mt-0.5">
+                    Work Order IDs are generated but held in unreleased status. Click below to proceed to WO ID Release.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/planning/wo-release?wo=${encodeURIComponent(successResult.wo_number)}`}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 transition"
-                  >
-                    <span>Release WO #{successResult.wo_number}</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
-                  <Link
-                    href={`/production/tracking?wo=${encodeURIComponent(successResult.wo_number)}`}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
-                  >
-                    <span>Track Floor</span>
-                  </Link>
-                </div>
+                <Link
+                  href={`/planning/wo-release?wo=${encodeURIComponent(successResult.wo_number)}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white font-bold text-xs hover:bg-blue-700 transition shadow-sm shrink-0"
+                >
+                  <span>Proceed to Step 2: Release WO #{successResult.wo_number}</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
               </div>
             </div>
           )}
 
           {!selectedOar ? (
             <div className="py-8 text-center text-xs text-zinc-400 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800">
-              Please click <strong>"Generate WO"</strong> on an OAR from the table above to start.
+              Please click <strong>"Select &amp; Divide Qty"</strong> on an OAR from the table above to start.
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {/* Parent OAR Summary Card */}
               <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div>
@@ -520,17 +630,38 @@ function WOGenerationContent() {
                 </div>
               </div>
 
-              {/* WO ID, Date & Target Date */}
+              {/* Overrun / 0-Remaining Warning Banner */}
+              {selectedOar.remaining_qty <= 0 && (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/70 dark:bg-amber-950/30 p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-medium">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                    <span>
+                      This OAR is already fully planned (0 pcs remaining). Enable overrun to generate an additional/re-work batch.
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0 font-bold text-amber-900 dark:text-amber-200">
+                    <input
+                      type="checkbox"
+                      checked={allowOverrun}
+                      onChange={(e) => setAllowOverrun(e.target.checked)}
+                      className="rounded border-amber-400 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Allow Overrun / Extra Batch</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Work Order Starting ID, Date & Target Date */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                      Work Order ID *
+                      Work Order ID (Starting ID) *
                     </label>
                     <button
                       type="button"
                       onClick={loadNextWoSequence}
-                      className="text-[10px] text-blue-600 hover:underline flex items-center gap-1"
+                      className="text-[10px] text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <RefreshCw className="h-2.5 w-2.5" /> Next Auto
                     </button>
@@ -540,28 +671,11 @@ function WOGenerationContent() {
                     required
                     value={woNumber}
                     onChange={(e) => setWoNumber(e.target.value)}
-                    placeholder="e.g. WO-17617 or custom/dumped ID"
+                    placeholder="e.g. WO-17618 or custom/dumped ID"
                     className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
                   />
                   <p className="mt-1 text-[10px] text-zinc-400">
                     Auto-sequenced or enter custom/dumped WO ID.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    Physical WO Quantity (pcs) *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    value={woQty}
-                    onChange={(e) => setWoQty(e.target.value === "" ? "" : Number(e.target.value))}
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-400">
-                    Max suggested: {selectedOar.remaining_qty} pcs
                   </p>
                 </div>
 
@@ -577,23 +691,6 @@ function WOGenerationContent() {
                     className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
                   />
                 </div>
-              </div>
-
-              {/* Process, Target Date, Heat No */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    Casting Process
-                  </label>
-                  <select
-                    value={castingProcess}
-                    onChange={(e) => setCastingProcess(e.target.value as any)}
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                  >
-                    <option value="CENTRIFUGAL">CENTRIFUGAL</option>
-                    <option value="CONTINUOUS">CONTINUOUS</option>
-                  </select>
-                </div>
 
                 <div>
                   <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
@@ -605,6 +702,228 @@ function WOGenerationContent() {
                     onChange={(e) => setTargetDate(e.target.value)}
                     className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* DIVIDE QUANTITY CONTROLS */}
+              <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                      <Split className="h-3.5 w-3.5 text-blue-600" />
+                      Divide Quantity Across Work Orders
+                    </h4>
+                    <p className="text-[11px] text-zinc-500">
+                      Choose how to divide the quantity: single Work Order, auto-split by batch size, or custom manual split.
+                    </p>
+                  </div>
+
+                  {/* Mode Selector */}
+                  <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSplitMode("single")}
+                      className={`px-3 py-1.5 font-bold transition cursor-pointer ${
+                        splitMode === "single"
+                          ? "bg-blue-600 text-white"
+                          : "bg-white dark:bg-zinc-900 text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Single WO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSplitMode("auto")}
+                      className={`px-3 py-1.5 font-bold transition cursor-pointer ${
+                        splitMode === "auto"
+                          ? "bg-blue-600 text-white"
+                          : "bg-white dark:bg-zinc-900 text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Auto Batch Split
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSplitMode("manual")}
+                      className={`px-3 py-1.5 font-bold transition cursor-pointer ${
+                        splitMode === "manual"
+                          ? "bg-blue-600 text-white"
+                          : "bg-white dark:bg-zinc-900 text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      Manual Split
+                    </button>
+                  </div>
+                </div>
+
+                {/* Single WO Mode */}
+                {splitMode === "single" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div>
+                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                        Physical WO Quantity (pcs) *
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        value={woQty}
+                        onChange={(e) => setWoQty(e.target.value === "" ? "" : Number(e.target.value))}
+                        className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                      />
+                      <p className="mt-1 text-[10px] text-zinc-400">
+                        Available in OAR: {selectedOar.remaining_qty} pcs
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col justify-center">
+                      <label className="flex items-center gap-2 cursor-pointer mt-2 text-xs text-zinc-700 dark:text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={allowOverrun}
+                          onChange={(e) => setAllowOverrun(e.target.checked)}
+                          className="rounded border-zinc-300 text-blue-600"
+                        />
+                        <span>
+                          <strong>Allow Overrun / Additional Batch</strong> (Permits quantity above remaining OAR balance)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Auto Split Mode */}
+                {splitMode === "auto" && (
+                  <div className="space-y-3 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Total Quantity to Divide (pcs) *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={1}
+                          value={woQty}
+                          onChange={(e) => setWoQty(e.target.value === "" ? "" : Number(e.target.value))}
+                          className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Max Batch Size per Work Order (pcs) *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={1}
+                          value={batchSize}
+                          onChange={(e) => setBatchSize(e.target.value === "" ? "" : Number(e.target.value))}
+                          className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {autoSplitBatches.length > 0 && (
+                      <div className="rounded-xl bg-blue-50/60 dark:bg-blue-950/30 p-3.5 border border-blue-200 dark:border-blue-900/40 text-xs space-y-2">
+                        <div className="flex items-center justify-between font-semibold text-blue-900 dark:text-blue-300">
+                          <span>
+                            Quantity will be divided into: <strong>{autoSplitBatches.length} Work Orders</strong>
+                          </span>
+                          <span className="font-mono">
+                            {totalBaseQty} pcs total
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {autoSplitBatches.map((bQty, bIdx) => (
+                            <span
+                              key={bIdx}
+                              className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 font-mono text-[11px] font-bold text-blue-700 dark:text-blue-300"
+                            >
+                              WO #{bIdx + 1}: {bQty} pcs
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Manual Split Mode */}
+                {splitMode === "manual" && (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-zinc-500">
+                        Target Total: <strong className="text-zinc-800 dark:text-zinc-200 font-mono">{totalBaseQty} pcs</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={addManualRow}
+                        className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                      >
+                        + Add Work Order Row
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {manualQtys.map((v, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="w-16 text-[11px] font-mono font-bold text-zinc-400">WO #{idx + 1}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={v}
+                            onChange={(e) => updateManualQty(idx, e.target.value)}
+                            placeholder="Quantity (pcs)"
+                            className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeManualRow(idx)}
+                            disabled={manualQtys.length <= 1}
+                            className="text-[11px] font-bold text-rose-500 disabled:opacity-30 disabled:cursor-not-allowed px-2 cursor-pointer"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div
+                      className={`rounded-xl p-3 border text-xs flex items-center justify-between ${
+                        manualComplete
+                          ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40"
+                          : "bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40"
+                      }`}
+                    >
+                      <span className="text-zinc-600 dark:text-zinc-400">
+                        Allocated: <strong className="font-mono">{manualAllocated}</strong> / {totalBaseQty} pcs
+                        {" · "}
+                        Remaining: <strong className="font-mono">{manualRemaining}</strong>
+                      </span>
+                      <span className={`font-bold ${manualComplete ? "text-emerald-600" : "text-amber-600"}`}>
+                        {manualComplete ? "Allocation Complete" : "Allocation Incomplete"}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Process, Target Date, Heat No */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Casting Process
+                  </label>
+                  <select
+                    value={castingProcess}
+                    onChange={(e) => setCastingProcess(e.target.value as any)}
+                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                  >
+                    <option value="CENTRIFUGAL">CENTRIFUGAL (Foundry Melt)</option>
+                    <option value="CONTINUOUS">CONTINUOUS (Continuous Casting)</option>
+                  </select>
                 </div>
 
                 <div>
@@ -634,7 +953,7 @@ function WOGenerationContent() {
                         key={stg}
                         type="button"
                         onClick={() => handleToggleStage(stg)}
-                        className={`px-3 py-1 text-xs font-bold rounded-lg border transition ${
+                        className={`px-3 py-1 text-xs font-bold rounded-lg border transition cursor-pointer ${
                           active
                             ? "bg-blue-600 border-blue-600 text-white"
                             : "bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-400"
@@ -647,7 +966,7 @@ function WOGenerationContent() {
                 </div>
               </div>
 
-              {/* Remarks & Submit */}
+              {/* Remarks */}
               <div>
                 <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                   Planning Remarks
@@ -660,54 +979,105 @@ function WOGenerationContent() {
                 />
               </div>
 
-              <div className="pt-2 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedOar(null)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || !woNumber || !woQty}
-                  className="px-6 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition flex items-center gap-2 shadow-sm"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{submitting ? "Generating Work Order..." : "Generate Work Order"}</span>
-                </button>
+              {/* Action Buttons: Step 1 Submit -> Proceed to Step 2 */}
+              <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-xs text-zinc-400">
+                  Step 1 will generate the Work Order IDs in unreleased status. You will then release them in Step 2.
+                </span>
+
+                <div className="flex items-center gap-3 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedOar(null)}
+                    className="px-4 py-2.5 text-xs font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      submitting ||
+                      !woNumber ||
+                      (splitMode === "single" && (!woQty || Number(woQty) <= 0)) ||
+                      (splitMode === "auto" && autoSplitBatches.length === 0) ||
+                      (splitMode === "manual" && !manualComplete)
+                    }
+                    className="px-6 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition flex items-center gap-2 shadow-sm cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>
+                      {submitting
+                        ? "Generating Work Order IDs..."
+                        : splitMode === "auto"
+                        ? `Step 1: Generate ${autoSplitBatches.length} Work Order IDs`
+                        : splitMode === "manual"
+                        ? `Step 1: Generate ${parsedManualQtys.length} Work Order IDs`
+                        : "Step 1: Generate Work Order ID"}
+                    </span>
+                  </button>
+                </div>
               </div>
             </form>
           )}
         </div>
 
-        {/* Section 3: Created Work Orders & Parent OAR Genealogy */}
+        {/* Section 3: Created Work Orders & Release Handoff */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                 <Layers className="h-4 w-4 text-blue-600" />
-                Created Work Orders &amp; Parent OAR Linkage
+                Work Orders Queue &amp; Release Status (Step 2 Handoff)
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Shows all created Work Orders with their parent OAR numbers and release status.
+                Generated Work Orders linked to parent OARs. Unreleased Work Orders must be released in Step 2 before floor execution.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={loadRecentWOs}
-              disabled={loadingWOs}
-              className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title="Refresh Work Orders"
-            >
-              <RefreshCw className={`h-4 w-4 ${loadingWOs ? "animate-spin" : ""}`} />
-            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setWoTableTab("all")}
+                  className={`px-3 py-1.5 font-bold transition cursor-pointer ${
+                    woTableTab === "all"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                  }`}
+                >
+                  All ({recentWOs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWoTableTab("unreleased")}
+                  className={`px-3 py-1.5 font-bold transition cursor-pointer ${
+                    woTableTab === "unreleased"
+                      ? "bg-amber-600 text-white"
+                      : "bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                  }`}
+                >
+                  Awaiting Release ({recentWOs.filter((w) => !w.is_released).length})
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={loadRecentWOs}
+                disabled={loadingWOs}
+                className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                title="Refresh Work Orders"
+              >
+                <RefreshCw className={`h-4 w-4 ${loadingWOs ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
 
           {loadingWOs ? (
             <p className="text-xs text-zinc-400 py-4 text-center">Loading Work Orders...</p>
-          ) : recentWOs.length === 0 ? (
-            <p className="text-xs text-zinc-400 py-4 text-center">No Work Orders created yet.</p>
+          ) : displayedWOs.length === 0 ? (
+            <p className="text-xs text-zinc-400 py-4 text-center">
+              {woTableTab === "unreleased" ? "No Work Orders awaiting release." : "No Work Orders created yet."}
+            </p>
           ) : (
             <div className="overflow-x-auto max-h-80 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl">
               <table className="w-full text-left text-xs">
@@ -719,12 +1089,12 @@ function WOGenerationContent() {
                     <th className="p-3">Part Number</th>
                     <th className="p-3 text-right">WO Qty</th>
                     <th className="p-3">Current Stage</th>
-                    <th className="p-3">Release Status</th>
-                    <th className="p-3 text-right">Actions</th>
+                    <th className="p-3">Step 2: Release Status</th>
+                    <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                  {recentWOs.map((wo) => (
+                  {displayedWOs.map((wo) => (
                     <tr key={wo.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                       <td className="p-3">
                         <span className="font-mono font-bold text-blue-600 block">
@@ -740,7 +1110,7 @@ function WOGenerationContent() {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200 block truncate max-w-xs">
                           {wo.customer_name}
                         </span>
                         <span className="text-[10px] text-zinc-400 font-mono">
@@ -760,31 +1130,33 @@ function WOGenerationContent() {
                       </td>
                       <td className="p-3">
                         {wo.is_released ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-semibold text-[11px]">
-                            <Check className="h-3 w-3" /> Released
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold text-[11px]">
+                            <Check className="h-3 w-3" /> Step 2: Released
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-semibold text-[11px]">
-                            <Clock className="h-3 w-3" /> Awaiting Release
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
+                            <Clock className="h-3 w-3" /> Step 1: Generated (Unreleased)
                           </span>
                         )}
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {!wo.is_released && (
+                          {!wo.is_released ? (
                             <Link
                               href={`/planning/wo-release?wo=${encodeURIComponent(wo.wo_number)}`}
-                              className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+                              className="px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-1 shadow-sm"
                             >
-                              Release WO
+                              <span>Step 2: Release WO</span>
+                              <ArrowRight className="h-3 w-3" />
+                            </Link>
+                          ) : (
+                            <Link
+                              href={`/production/tracking?wo=${encodeURIComponent(wo.wo_number)}`}
+                              className="px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                            >
+                              Track Floor
                             </Link>
                           )}
-                          <Link
-                            href={`/production/tracking?wo=${encodeURIComponent(wo.wo_number)}`}
-                            className="px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
-                          >
-                            Track
-                          </Link>
                         </div>
                       </td>
                     </tr>

@@ -302,36 +302,32 @@ class OperationsService:
                 detail=f"OAR '{req.oar_number}' not found."
             )
 
+        # Determine quantities to create: single WO or divided / split quantities
+        if req.wo_quantities is not None and len(req.wo_quantities) > 0:
+            if any(q <= 0 for q in req.wo_quantities):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Every split Work Order quantity must be greater than zero."
+                )
+            quantities = req.wo_quantities
+        else:
+            quantities = [req.physical_wo_qty]
+
+        total_requested = sum(quantities)
+
         # Validate unallocated balance
         allocated_qty = sum(wo.physical_wo_qty for wo in order.work_orders)
         available_qty = max(order.po_qty - allocated_qty, 0)
 
-        if req.physical_wo_qty > available_qty:
+        if total_requested > available_qty and not req.allow_overrun:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Requested WO quantity ({req.physical_wo_qty}) exceeds the available unallocated "
-                    f"OAR quantity ({available_qty}) on OAR {order.oar_number}."
+                    f"Requested WO quantity ({total_requested}) exceeds the available unallocated "
+                    f"OAR quantity ({available_qty}) on OAR {order.oar_number}. "
+                    f"Enable 'Allow Overrun / Additional Batch' if you wish to generate additional quantity."
                 )
             )
-
-        # WO Number generation / validation
-        if req.wo_number and req.wo_number.strip():
-            candidate_wo = _normalize_wo_code(req.wo_number.strip())
-            existing_wo = db.query(WorkOrder).filter(
-                or_(
-                    WorkOrder.wo_number == candidate_wo,
-                    WorkOrder.wo_number == req.wo_number.strip()
-                )
-            ).first()
-            if existing_wo:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Work Order number '{candidate_wo}' already exists in the system."
-                )
-            wo_num = candidate_wo
-        else:
-            wo_num = next_wo_sequence(db)
 
         # Route determination
         if req.route_stages and len(req.route_stages) > 0:
@@ -347,76 +343,109 @@ class OperationsService:
             else datetime.now()
         )
 
-        wo = WorkOrder(
-            wo_number=wo_num,
-            order_id=order.id,
-            physical_wo_qty=req.physical_wo_qty,
-            current_stage=route_stages[0],
-            projected_final_good=req.physical_wo_qty,
-            shortfall="No",
-            status=WOStatus.PLANNED,
-            casting_process=req.casting_process or "CENTRIFUGAL",
-            heat_number=req.heat_number,
-            created_at=wo_created_dt
-        )
-        db.add(wo)
-        db.flush()
+        created_wos: List[str] = []
+        created_qtys: List[int] = []
 
-        targets = calculate_stage_targets(req.physical_wo_qty, route=route_stages)
-        for seq, stg in enumerate(route_stages, start=1):
-            r = WORoute(
-                work_order_id=wo.id,
-                stage=stg,
-                sequence=seq,
-                stage_target_qty=targets.get(stg, req.physical_wo_qty),
-                cumulative_ent_qty=req.physical_wo_qty if seq == 1 else 0,
-                cumulative_inproc_qty=req.physical_wo_qty if seq == 1 else 0,
-                stage_status="In-Progress" if seq == 1 else "Pending"
+        start_manual_num = None
+        if req.wo_number and req.wo_number.strip():
+            candidate = _normalize_wo_code(req.wo_number.strip())
+            exists = db.query(WorkOrder).filter(
+                or_(WorkOrder.wo_number == candidate, WorkOrder.wo_number == req.wo_number.strip())
+            ).first()
+            if exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Work Order number '{candidate}' already exists in the system."
+                )
+            start_manual_num = candidate
+
+        import re
+        for idx, q in enumerate(quantities):
+            if idx == 0 and start_manual_num:
+                wo_num = start_manual_num
+            else:
+                wo_num = next_wo_sequence(db)
+                while db.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first() or wo_num in created_wos:
+                    m = re.match(r"^(WO[- ]?)(\d+)$", wo_num)
+                    if m:
+                        pref, num_str = m.group(1), m.group(2)
+                        wo_num = f"{pref}{int(num_str) + 1}"
+                    else:
+                        wo_num = f"{wo_num}-{idx}"
+
+            wo = WorkOrder(
+                wo_number=wo_num,
+                order_id=order.id,
+                physical_wo_qty=q,
+                current_stage=route_stages[0],
+                projected_final_good=q,
+                shortfall="No",
+                status=WOStatus.PLANNED,
+                casting_process=req.casting_process or "CENTRIFUGAL",
+                heat_number=req.heat_number,
+                created_at=wo_created_dt
             )
-            db.add(r)
+            db.add(wo)
+            db.flush()
 
-        first_stg = route_stages[0]
-        initial_wip = StageWIP(
-            work_order_id=wo.id,
-            stage=first_stg,
-            ent_qty=req.physical_wo_qty,
-            ok_qty=0,
-            inproc_qty=req.physical_wo_qty,
-            onhand_qty=0,
-            rejected_qty=0,
-            received_qty=req.physical_wo_qty,
-            available_wip=req.physical_wo_qty,
-            moved_out_qty=0
-        )
-        db.add(initial_wip)
+            targets = calculate_stage_targets(q, route=route_stages)
+            for seq, stg in enumerate(route_stages, start=1):
+                r = WORoute(
+                    work_order_id=wo.id,
+                    stage=stg,
+                    sequence=seq,
+                    stage_target_qty=targets.get(stg, q),
+                    cumulative_ent_qty=q if seq == 1 else 0,
+                    cumulative_inproc_qty=q if seq == 1 else 0,
+                    stage_status="In-Progress" if seq == 1 else "Pending"
+                )
+                db.add(r)
 
-        # Audit
-        audit = AuditLog(
-            user_id=current_user.id if current_user else None,
-            user_name=current_user.full_name if current_user else "Planner",
-            action="WO_CREATED",
-            entity="WorkOrder",
-            entity_id=wo_num,
-            new_value=f"OAR: {order.oar_number}, Qty: {req.physical_wo_qty}, Date: {req.wo_date or 'today'}",
-            details=f"Customer: {order.customer.customer_code}, Part: {order.part.part_number}"
-        )
-        db.add(audit)
+            first_stg = route_stages[0]
+            initial_wip = StageWIP(
+                work_order_id=wo.id,
+                stage=first_stg,
+                ent_qty=q,
+                ok_qty=0,
+                inproc_qty=q,
+                onhand_qty=0,
+                rejected_qty=0,
+                received_qty=q,
+                available_wip=q,
+                moved_out_qty=0
+            )
+            db.add(initial_wip)
+
+            audit = AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "Planner",
+                action="WO_CREATED",
+                entity="WorkOrder",
+                entity_id=wo_num,
+                new_value=f"OAR: {order.oar_number}, Qty: {q}, Date: {req.wo_date or 'today'}",
+                details=f"Customer: {order.customer.customer_code}, Part: {order.part.part_number}"
+            )
+            db.add(audit)
+            created_wos.append(wo_num)
+            created_qtys.append(q)
+
         db.commit()
-        db.refresh(wo)
 
         return WorkOrderCreateResponse(
             success=True,
-            wo_number=wo.wo_number,
+            wo_number=created_wos[0],
+            wos_created=created_wos,
+            wo_quantities=created_qtys,
             order_id=str(order.id),
             oar_number=order.oar_number,
             customer_code=order.customer.customer_code,
             part_number=order.part.part_number,
-            physical_wo_qty=wo.physical_wo_qty,
-            current_stage=wo.current_stage,
-            status=wo.status.value,
+            physical_wo_qty=total_requested,
+            current_stage=route_stages[0],
+            status=WOStatus.PLANNED.value,
             release_status="AWAITING_ENG_RELEASE",
-            created_at=wo.created_at,
-            message=f"Work Order {wo.wo_number} created successfully for OAR {order.oar_number}."
+            created_at=wo_created_dt,
+            message=f"{len(created_wos)} Work Order(s) generated successfully: {', '.join(created_wos)} for OAR {order.oar_number}."
         )
 
     @staticmethod

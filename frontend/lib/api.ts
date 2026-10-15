@@ -527,6 +527,8 @@ export interface WorkOrderCreatePayload {
   oar_number: string;
   wo_number?: string;
   physical_wo_qty: number;
+  wo_quantities?: number[];
+  allow_overrun?: boolean;
   wo_date?: string;
   target_date?: string;
   casting_process?: "CENTRIFUGAL" | "CONTINUOUS" | string;
@@ -538,6 +540,8 @@ export interface WorkOrderCreatePayload {
 export interface WorkOrderCreateResult {
   success: boolean;
   wo_number: string;
+  wos_created: string[];
+  wo_quantities: number[];
   order_id: string;
   oar_number: string;
   customer_code: string;

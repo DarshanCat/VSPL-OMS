@@ -162,3 +162,47 @@ def test_movable_work_orders_queue(db_session):
     assert movable[0].from_stage == "F1"
     assert movable[0].to_stage == "F2"
     assert movable[0].movable_wip == 10
+
+def test_planner_divides_quantity_into_multiple_wos_and_allows_overrun(db_session):
+    cust = Customer(customer_code="ACCU", name="Accutech CNC", is_active=True)
+    part = Part(part_number="SMX4", description="Bronze Bushing SMX4")
+    db_session.add_all([cust, part])
+    db_session.flush()
+
+    order = Order(
+        oar_number="OAR-0229",
+        customer_id=cust.id,
+        part_id=part.id,
+        customer_po="PO-12500",
+        po_qty=20,
+        max_batch_size=20,
+        status=OrderStatus.ACCEPT,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    # Planner divides quantity into 2 Work Orders: 10 pcs and 10 pcs
+    payload = WorkOrderCreatePayload(
+        oar_number="OAR-0229",
+        wo_number="WO-17618",
+        physical_wo_qty=20,
+        wo_quantities=[10, 10],
+        wo_date=date(2026, 10, 15),
+    )
+    res = OperationsService.create_work_order(db_session, payload)
+    assert res.success is True
+    assert len(res.wos_created) == 2
+    assert res.wos_created[0] == "WO-17618"
+    assert res.wo_quantities == [10, 10]
+    assert res.physical_wo_qty == 20
+
+    # Test allow_overrun when remaining is 0
+    overrun_payload = WorkOrderCreatePayload(
+        oar_number="OAR-0229",
+        physical_wo_qty=25,
+        allow_overrun=True,
+    )
+    res_overrun = OperationsService.create_work_order(db_session, overrun_payload)
+    assert res_overrun.success is True
+    assert res_overrun.physical_wo_qty == 25
+
