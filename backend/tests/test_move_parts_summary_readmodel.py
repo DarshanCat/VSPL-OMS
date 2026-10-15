@@ -40,7 +40,7 @@ def _fresh_wo(db, po_qty=100):
     res = OperationsService.create_order_intake(db, OrderIntakeCreate(
         customer_code=f"CUST-{uuid.uuid4().hex[:6]}", customer_name="Summary Test Co",
         customer_po=f"PO-{uuid.uuid4().hex[:8]}", part_number=f"PART-{uuid.uuid4().hex[:6]}",
-        po_quantity=po_qty, max_batch_size=po_qty
+        po_quantity=po_qty, max_batch_size=po_qty, create_wos=True
     ))
     return res.wos_created[0]
 

@@ -370,10 +370,9 @@ class WorkOrderService:
         movements = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).order_by(ProductionMovement.created_at.asc()).all()
 
         # Movement-eligible stage: the earliest stage (by route sequence) that still has
-        # available_wip > 0 and has a next stage to move into. This can legitimately be
-        # behind `cur_stage` -- e.g. F1 still has 10 available while F2 has already begun
-        # receiving material, which advances cur_stage to F2 for reporting purposes but
-        # must not hide F1's still-movable quantity from the Move Parts screen.
+        # onhand_qty > 0 (completed good parts awaiting transfer) and has a next stage to move into.
+        # Note: parts MUST be produced (via Production Entry) before they can be moved downstream.
+        # Unproduced material (inproc_qty) requires production entry first!
         movable_from_stage = None
         movable_to_stage = None
         movable_wip_qty = 0
@@ -382,10 +381,10 @@ class WorkOrderService:
                 if idx2 + 1 >= len(route_stages):
                     break
                 wr = wip_records.get(stg2)
-                av = wr.available_wip if wr else (wo.physical_wo_qty if idx2 == 0 and not wip_records else 0)
-                if av > 0:
+                onhand = wr.onhand_qty if wr else 0
+                if onhand > 0:
                     movable_from_stage = stg2
-                    movable_wip_qty = av
+                    movable_wip_qty = onhand
                     movable_to_stage = route_stages[idx2 + 1]
                     break
 
@@ -975,8 +974,8 @@ class WorkOrderService:
                 if idx2 + 1 >= len(route_stages):
                     break
                 wr = wip_records.get(stg2)
-                av = wr.available_wip if wr else (wo.physical_wo_qty if idx2 == 0 and not wip_records else 0)
-                if av > 0:
+                onhand = wr.onhand_qty if wr else 0
+                if onhand > 0:
                     dest_stage = route_stages[idx2 + 1]
                     order = wo.order
                     items.append(MovableWorkOrderItem(
@@ -989,7 +988,7 @@ class WorkOrderService:
                         part_name=order.part.description if (order and order.part) else None,
                         from_stage=stg2,
                         to_stage=dest_stage,
-                        movable_wip=av,
+                        movable_wip=onhand,
                         current_stage=wo.current_stage or stg2,
                         heat_number=wo.heat_number,
                         delivery_date=order.delivery_date if order else None,

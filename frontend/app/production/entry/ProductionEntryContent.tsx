@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Factory,
   Search,
@@ -66,6 +67,10 @@ const FALLBACK_DEFECT_CODES = [
 ];
 
 export function ProductionEntryContent() {
+  const searchParams = useSearchParams();
+  const queryWO = searchParams?.get("wo");
+  const queryStage = searchParams?.get("stage");
+
   const [searchTerm, setSearchTerm] = useState("WO-1001");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -111,7 +116,8 @@ export function ProductionEntryContent() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableWOs(data);
-          lookupWO(data[0].wo_number);
+          const targetWO = queryWO || data[0].wo_number;
+          lookupWO(targetWO, queryStage || undefined);
         }
       })
       .catch((err) => {
@@ -120,7 +126,7 @@ export function ProductionEntryContent() {
     getRejectionTypes()
       .then((types) => setRejectionTypes(types))
       .catch(() => setRejectionTypes([]));
-  }, []);
+  }, [queryWO, queryStage]);
 
   // Active Rejection Types drive the dropdown -- never arbitrary free text. Falls
   // back to the legacy static list only when the master has never been configured.
@@ -155,7 +161,7 @@ export function ProductionEntryContent() {
     setTimeout(() => inputGoodQtyRef.current?.focus(), 100);
   };
 
-  const lookupWO = async (woNum: string) => {
+  const lookupWO = async (woNum: string, overrideStage?: string) => {
     if (!woNum || !woNum.trim()) return;
     const cleanWO = woNum.trim();
     setSearchTerm(cleanWO);
@@ -183,9 +189,10 @@ export function ProductionEntryContent() {
       setSearchTerm(tracking.wo_number);
       setHeatNumber(tracking.heat_number || "");
 
-      // Default stage: if currently selected stage is valid in timeline, keep it; otherwise use current_stage
+      // Default stage: if overrideStage is specified and valid, use it; otherwise prefer selectedStage or current_stage
       const validStages = tracking.timeline?.map((s: any) => s.stage) || ["F1"];
-      const targetStage = validStages.includes(selectedStage) ? selectedStage : (tracking.current_stage || "F1");
+      const candidateStage = overrideStage || selectedStage;
+      const targetStage = validStages.includes(candidateStage) ? candidateStage : (tracking.current_stage || "F1");
       setSelectedStage(targetStage);
 
       // Fetch authoritative stage state for chosen stage

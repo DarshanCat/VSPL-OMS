@@ -253,35 +253,29 @@ class ProductionService:
             wip_records[matched_to] = to_wip
 
         # 5. Validate Available Movable WIP at Source Stage
-        # If production entries were recorded via Production Entry (ProductionUpdate), only completed
-        # on-hand good parts (onhand_qty) can be moved downstream. Direct floor movement
-        # without prior production entry is permitted against inproc_qty when no ProductionUpdate exists.
-        has_production_entry = db.query(ProductionUpdate).filter(
-            ProductionUpdate.work_order_id == wo.id,
-            ProductionUpdate.stage == matched_from
-        ).first() is not None
+        # Physical shop floor rule: parts MUST be produced (via Production Entry) before they can be moved downstream.
+        # Only completed good parts on-hand (onhand_qty) awaiting transfer are eligible for movement.
+        max_movable = from_wip.onhand_qty if from_wip else 0
+        if max_movable <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot move parts from stage '{matched_from}'. "
+                    f"No completed good parts are on-hand awaiting transfer (0 pcs produced). "
+                    f"Please record production in Production Entry before moving parts."
+                )
+            )
 
-        if has_production_entry:
-            max_movable = from_wip.onhand_qty
-            if req.quantity_moved > max_movable:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"Cannot move {req.quantity_moved} pieces from stage '{matched_from}'. "
-                        f"Only {max_movable} completed good pieces are currently on-hand awaiting transfer "
-                        f"({from_wip.inproc_qty} pieces still in-process / yet to produce). "
-                        f"Record production entry before moving additional parts."
-                    )
+        if req.quantity_moved > max_movable:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot move {req.quantity_moved} pieces from stage '{matched_from}'. "
+                    f"Only {max_movable} completed good pieces are currently on-hand awaiting transfer "
+                    f"({from_wip.inproc_qty} pieces still in-process / yet to produce). "
+                    f"Record production entry before moving additional parts."
                 )
-        else:
-            if req.quantity_moved > from_wip.inproc_qty:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"Cannot move {req.quantity_moved} pieces from stage '{matched_from}'. "
-                        f"Only {from_wip.inproc_qty} pieces are available at stage '{matched_from}'."
-                    )
-                )
+            )
 
         total_consumed = req.quantity_moved + req.rejected_quantity
         if total_consumed > from_wip.available_wip:

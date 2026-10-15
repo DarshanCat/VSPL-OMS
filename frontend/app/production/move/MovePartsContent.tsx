@@ -224,11 +224,18 @@ export function MovePartsContent() {
 
     const originStageNow = woData.movable_from_stage || woData.current_stage;
     const destStageNow = woData.movable_to_stage || woData.next_allowed_stage;
-    const availableNow = woData.movable_from_stage ? woData.movable_wip : woData.available_wip;
+    const availableNow = woData.movable_wip || 0;
+
+    if (availableNow <= 0) {
+      setFormError(
+        `Cannot move parts from stage ${originStageNow}. No completed good parts are on-hand awaiting transfer (0 pcs produced). Please record production in Production Entry before moving parts.`
+      );
+      return;
+    }
 
     if (moveQtyNum > availableNow) {
       setFormError(
-        `Cannot move ${moveQtyNum} pieces. Only ${availableNow} pieces available at stage ${originStageNow}.`
+        `Cannot move ${moveQtyNum} pieces. Only ${availableNow} completed good pieces are currently on-hand at stage ${originStageNow}.`
       );
       return;
     }
@@ -289,7 +296,7 @@ export function MovePartsContent() {
   // anywhere, so "no movable material" banners still show correct, consistent figures.
   const originStage = woData ? (woData.movable_from_stage || woData.current_stage) : null;
   const destStage = woData ? (woData.movable_to_stage || woData.next_allowed_stage) : null;
-  const availableAtOrigin = woData ? (woData.movable_from_stage ? woData.movable_wip : woData.available_wip) : 0;
+  const availableAtOrigin = woData ? (woData.movable_wip || 0) : 0;
 
   return (
       <div className="max-w-5xl mx-auto space-y-6">
@@ -615,8 +622,8 @@ export function MovePartsContent() {
                     <span className="font-mono font-extrabold text-blue-600 text-sm">{stageState.already_moved_qty} pcs</span>
                   </div>
                   <div className="rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800 p-3">
-                    <span className="block text-[10px] uppercase font-bold text-purple-700 dark:text-purple-400">Available to Move</span>
-                    <span className="font-mono font-extrabold text-purple-700 dark:text-purple-400 text-sm">{stageState.available_wip} pcs</span>
+                    <span className="block text-[10px] uppercase font-bold text-purple-700 dark:text-purple-400">Available to Move (On-Hand)</span>
+                    <span className="font-mono font-extrabold text-purple-700 dark:text-purple-400 text-sm">{stageState.on_hand_qty} pcs</span>
                   </div>
                   <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800 p-3">
                     <span className="block text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">Remaining to Produce</span>
@@ -698,11 +705,11 @@ export function MovePartsContent() {
                     </div>
                     <div className="pt-2">
                       <Link
-                        href="/production/entry"
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                        href={`/production/entry?wo=${encodeURIComponent(woData.wo_number)}&stage=${encodeURIComponent(originStage || "F1")}`}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
                       >
-                        <span>Record production at {originStage} to create movable WIP</span>
-                        <ArrowRight className="h-3.5 w-3.5" />
+                        <span>Record Production at {originStage}</span>
+                        <ArrowRight className="h-4 w-4" />
                       </Link>
                     </div>
                   </div>

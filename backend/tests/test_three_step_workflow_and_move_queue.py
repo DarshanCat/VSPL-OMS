@@ -149,10 +149,38 @@ def test_movable_work_orders_queue(db_session):
     r3 = WORoute(work_order_id=wo.id, stage="DISPATCH", sequence=3, stage_target_qty=50)
     db_session.add_all([r1, r2, r3])
 
-    # 10 pieces produced at F1, waiting to move to F2
-    wip_f1 = StageWIP(work_order_id=wo.id, stage="F1", available_wip=10)
-    wip_f2 = StageWIP(work_order_id=wo.id, stage="F2", available_wip=0)
+    # 1. Unproduced material (inproc_qty=50, onhand_qty=0) must NOT appear in the movable queue
+    wip_f1 = StageWIP(work_order_id=wo.id, stage="F1", inproc_qty=50, onhand_qty=0, available_wip=50)
+    wip_f2 = StageWIP(work_order_id=wo.id, stage="F2", inproc_qty=0, onhand_qty=0, available_wip=0)
     db_session.add_all([wip_f1, wip_f2])
+    db_session.commit()
+
+    movable_empty = WorkOrderService.list_movable_work_orders(db_session)
+    assert len(movable_empty) == 0, "Work order with 0 produced onhand pieces must not appear in movable queue"
+
+    # Moving without producing must fail with 400 Bad Request
+    from app.services.production_service import ProductionService
+    from app.schemas.production import MovePartsRequest
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        ProductionService.move_parts(
+            db_session,
+            MovePartsRequest(
+                wo_number="WO-5001",
+                from_stage="F1",
+                to_stage="F2",
+                quantity_moved=10,
+                rejected_quantity=0,
+            )
+        )
+    assert exc_info.value.status_code == 400
+    assert "No completed good parts are on-hand awaiting transfer" in exc_info.value.detail
+
+    # 2. Once 10 pieces are produced and on-hand (onhand_qty=10), it appears in movable queue
+    wip_f1.onhand_qty = 10
+    wip_f1.ok_qty = 10
+    wip_f1.inproc_qty = 40
+    wip_f1.available_wip = 50
     db_session.commit()
 
     movable = WorkOrderService.list_movable_work_orders(db_session)
@@ -162,6 +190,20 @@ def test_movable_work_orders_queue(db_session):
     assert movable[0].from_stage == "F1"
     assert movable[0].to_stage == "F2"
     assert movable[0].movable_wip == 10
+
+    # Moving the 10 produced on-hand parts succeeds
+    move_res = ProductionService.move_parts(
+        db_session,
+        MovePartsRequest(
+            wo_number="WO-5001",
+            from_stage="F1",
+            to_stage="F2",
+            quantity_moved=10,
+            rejected_quantity=0,
+        )
+    )
+    assert move_res.success is True
+    assert move_res.quantity_moved == 10
 
 def test_planner_divides_quantity_into_multiple_wos_and_allows_overrun(db_session):
     cust = Customer(customer_code="ACCU", name="Accutech CNC", is_active=True)
