@@ -17,7 +17,7 @@ from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterUpdate, POMasterOut, POLineOut, POLineUpdate,
     POLineOrderSummary, POLineWorkOrderSummary,
-    ScheduleCreate, ScheduleOut,
+    ScheduleCreate, ScheduleUpdate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
     PartMasterKPIs, PartMasterListResponse,
@@ -855,6 +855,87 @@ class ScheduleMasterService:
         db.commit()
         db.refresh(schedule)
         return ScheduleMasterService._schedule_out(schedule)
+
+    @staticmethod
+    def update_schedule(db: Session, schedule_id: str, req: ScheduleUpdate, current_user: Optional[User] = None) -> ScheduleOut:
+        schedule = db.query(ScheduleMaster).filter(ScheduleMaster.id == schedule_id).with_for_update().first()
+        if not schedule:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found.")
+
+        changes = []
+        if req.customer_code is not None:
+            customer = db.query(Customer).filter(Customer.customer_code == req.customer_code.strip().upper()).first()
+            if not customer:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{req.customer_code}' not found.")
+            if schedule.customer_id != customer.id:
+                changes.append(f"customer: {schedule.customer.customer_code} -> {customer.customer_code}")
+                schedule.customer_id = customer.id
+
+        if req.part_number is not None:
+            part = _get_part(db, req.part_number)
+            if schedule.part_id != part.id:
+                changes.append(f"part: {schedule.part.part_number} -> {part.part_number}")
+                schedule.part_id = part.id
+
+        if req.scheduled_qty is not None and req.scheduled_qty != schedule.scheduled_qty:
+            changes.append(f"qty: {schedule.scheduled_qty} -> {req.scheduled_qty}")
+            schedule.scheduled_qty = req.scheduled_qty
+
+        if req.unit_price is not None:
+            u_price = round(float(req.unit_price), 2)
+            if getattr(schedule, "unit_price", 0.0) != u_price:
+                changes.append(f"unit_price: {getattr(schedule, 'unit_price', 0.0)} -> {u_price}")
+                schedule.unit_price = u_price
+
+        # Recalculate total value
+        curr_price = getattr(schedule, "unit_price", 0.0) or 0.0
+        if req.total_value is not None:
+            schedule.total_value = round(float(req.total_value), 2)
+        else:
+            schedule.total_value = round(schedule.scheduled_qty * curr_price, 2)
+
+        if req.required_date is not None:
+            schedule.required_date = req.required_date
+
+        if req.customer_schedule_ref is not None:
+            schedule.customer_schedule_ref = req.customer_schedule_ref
+
+        if req.po_status is not None:
+            try:
+                schedule.po_status = ScheduleStatus(req.po_status)
+            except ValueError:
+                pass
+
+        _audit(db, current_user, "SCHEDULE_UPDATED", "ScheduleMaster", schedule.schedule_number, details="; ".join(changes) if changes else "Updated")
+        db.commit()
+        db.refresh(schedule)
+        return ScheduleMasterService._schedule_out(schedule)
+
+    @staticmethod
+    def delete_schedule(db: Session, schedule_id: str, current_user: Optional[User] = None) -> dict:
+        schedule = db.query(ScheduleMaster).filter(ScheduleMaster.id == schedule_id).with_for_update().first()
+        if not schedule:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found.")
+
+        # Prevent delete if linked to orders with released work orders and production
+        if schedule.orders:
+            from app.models.work_order import WorkOrder
+            from app.models.production import ProductionUpdate
+            for order in schedule.orders:
+                wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).all()
+                for wo in wos:
+                    has_prod = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+                    if has_prod:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Cannot delete schedule '{schedule.schedule_number}' because linked order '{order.oar_number}' has work orders with production history."
+                        )
+
+        num = schedule.schedule_number
+        _audit(db, current_user, "SCHEDULE_DELETED", "ScheduleMaster", num, details=f"Deleted schedule {num}")
+        db.delete(schedule)
+        db.commit()
+        return {"message": f"Schedule '{num}' deleted successfully."}
 
 
 def _machine_out(m: Machine) -> MachineOut:

@@ -9,7 +9,7 @@ from app.core.roles import PLANNING_ROLES, PO_MASTER_VIEW_ROLES, PO_MASTER_EDIT_
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
     POMasterCreate, POMasterUpdate, POMasterOut,
-    ScheduleCreate, ScheduleOut,
+    ScheduleCreate, ScheduleUpdate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
     PartMasterKPIs, PartMasterListResponse,
@@ -148,6 +148,26 @@ def create_schedule(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return ScheduleMasterService.create_schedule(db, payload, current_user=user)
+
+
+@router.put("/schedules/{schedule_id}", response_model=ScheduleOut)
+def update_schedule(
+    schedule_id: str,
+    payload: ScheduleUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    return ScheduleMasterService.update_schedule(db, schedule_id=schedule_id, req=payload, current_user=user)
+
+
+@router.delete("/schedules/{schedule_id}")
+def delete_schedule(
+    schedule_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    """Delete a Customer Schedule (allowed for Sales, Planner, Admin, CEO)."""
+    return ScheduleMasterService.delete_schedule(db, schedule_id=schedule_id, current_user=user)
 
 
 # --- Part Master ---

@@ -476,3 +476,44 @@ def test_schedule_unit_price_and_total_value_calculation(client):
     assert data["total_value"] == 18750.00
 
 
+def test_schedule_update_price_and_details(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+
+    # 1. Create a schedule without price (legacy schedule like SCH-00001)
+    resp = client.post(
+        "/api/v1/masters/schedules",
+        headers=headers,
+        json={
+            "customer_code": customer["customer_code"],
+            "part_number": "BRZ-BUSH-100",
+            "scheduled_qty": 500,
+            "unit_price": 0.0,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    created = resp.json()
+    schedule_id = created["id"]
+    assert created["unit_price"] == 0.0
+    assert created["total_value"] == 0.0
+
+    # 2. Update price and details via PUT endpoint
+    upd_resp = client.put(
+        f"/api/v1/masters/schedules/{schedule_id}",
+        headers=headers,
+        json={
+            "unit_price": 250.00,
+            "scheduled_qty": 500,
+        },
+    )
+    assert upd_resp.status_code == 200, upd_resp.text
+    updated = upd_resp.json()
+    # 500 * 250.00 = 125000.00
+    assert updated["unit_price"] == 250.00
+    assert updated["total_value"] == 125000.00
+
+    # 3. Delete schedule
+    del_resp = client.delete(f"/api/v1/masters/schedules/{schedule_id}", headers=headers)
+    assert del_resp.status_code == 200, del_resp.text
+
+

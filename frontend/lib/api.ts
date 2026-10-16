@@ -779,6 +779,28 @@ export async function createSchedule(payload: {
   return data;
 }
 
+export async function updateSchedule(
+  scheduleId: string,
+  payload: {
+    customer_code?: string;
+    part_number?: string;
+    scheduled_qty?: number;
+    unit_price?: number;
+    total_value?: number;
+    required_date?: string;
+    customer_schedule_ref?: string;
+    po_status?: string;
+  }
+): Promise<ScheduleOut> {
+  const { data } = await api.put(`/api/v1/masters/schedules/${scheduleId}`, payload);
+  return data;
+}
+
+export async function deleteSchedule(scheduleId: string): Promise<{ message: string }> {
+  const { data } = await api.delete(`/api/v1/masters/schedules/${scheduleId}`);
+  return data;
+}
+
 // --- PO <-> Schedule Matching ---
 
 export interface MatchCandidate {

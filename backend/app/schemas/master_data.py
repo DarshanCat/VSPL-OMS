@@ -171,6 +171,17 @@ class ScheduleCreate(BaseModel):
     customer_schedule_ref: Optional[str] = Field(None, max_length=200)
 
 
+class ScheduleUpdate(BaseModel):
+    customer_code: Optional[str] = Field(None, max_length=100)
+    part_number: Optional[str] = Field(None, max_length=100)
+    scheduled_qty: Optional[int] = Field(None, gt=0, le=1_000_000)
+    unit_price: Optional[float] = Field(None, ge=0)
+    total_value: Optional[float] = Field(None, ge=0)
+    required_date: Optional[date] = None
+    customer_schedule_ref: Optional[str] = Field(None, max_length=200)
+    po_status: Optional[str] = Field(None, max_length=50)
+
+
 class ScheduleOut(BaseModel):
     id: str
     schedule_number: str
