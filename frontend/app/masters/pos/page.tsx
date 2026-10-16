@@ -34,6 +34,8 @@ interface LineDraft {
   customer_part_number?: string;
   part_number: string;
   po_qty: string;
+  unit_price: string;
+  line_total?: number;
   allocated_qty?: number;
   available_qty?: number;
   required_date: string;
@@ -95,7 +97,7 @@ function POLineTraceability({ orders }: { orders: POLineOrderSummary[] }) {
 }
 
 function emptyLine(): LineDraft {
-  return { customer_part_number: "", part_number: "", po_qty: "", required_date: "" };
+  return { customer_part_number: "", part_number: "", po_qty: "", unit_price: "", line_total: 0, required_date: "" };
 }
 
 export default function POMasterPage() {
@@ -186,14 +188,18 @@ export default function POMasterPage() {
     (acc, po) => {
       acc.totalPOs += 1;
       acc.totalLines += po.lines.length;
+      let poVal = Number(po.total_value) || 0;
+      let computedPoVal = 0;
       for (const line of po.lines) {
         acc.totalQty += Number(line.po_qty) || 0;
         acc.totalAllocated += Number(line.allocated_qty) || 0;
         acc.totalAvailable += Number(line.available_qty) || 0;
+        computedPoVal += Number(line.line_total) || ((Number(line.po_qty) || 0) * (Number(line.unit_price) || 0));
       }
+      acc.totalValue += poVal > 0 ? poVal : computedPoVal;
       return acc;
     },
-    { totalPOs: 0, totalLines: 0, totalQty: 0, totalAllocated: 0, totalAvailable: 0 }
+    { totalPOs: 0, totalLines: 0, totalQty: 0, totalAllocated: 0, totalAvailable: 0, totalValue: 0 }
   );
 
   // Group PO counts by customer for the dropdown
@@ -223,7 +229,16 @@ export default function POMasterPage() {
   }, []);
 
   function updateLine(idx: number, field: keyof LineDraft, value: string) {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== idx) return l;
+        const updated = { ...l, [field]: value };
+        const qty = Number(field === "po_qty" ? value : updated.po_qty) || 0;
+        const price = Number(field === "unit_price" ? value : updated.unit_price) || 0;
+        updated.line_total = Math.round(qty * price * 100) / 100;
+        return updated;
+      })
+    );
   }
 
   function updateEditLine(idx: number, field: keyof LineDraft, value: string) {
@@ -231,8 +246,10 @@ export default function POMasterPage() {
       prev.map((l, i) => {
         if (i !== idx) return l;
         const updated = { ...l, [field]: value };
+        const qty = Number(field === "po_qty" ? value : updated.po_qty) || 0;
+        const price = Number(field === "unit_price" ? value : updated.unit_price) || 0;
+        updated.line_total = Math.round(qty * price * 100) / 100;
         if (field === "po_qty") {
-          const qty = Number(value) || 0;
           const alloc = l.allocated_qty || 0;
           updated.available_qty = Math.max(0, qty - alloc);
         }
@@ -248,15 +265,23 @@ export default function POMasterPage() {
     setEditValidityDate(po.validity_date || "");
     setEditStatus(po.status);
     setEditLines(
-      po.lines.map((l: POLineOut) => ({
-        id: l.id,
-        customer_part_number: l.customer_part_number || "",
-        part_number: l.part_number,
-        po_qty: String(l.po_qty),
-        allocated_qty: l.allocated_qty,
-        available_qty: l.available_qty,
-        required_date: l.required_date || "",
-      }))
+      po.lines.map((l: POLineOut) => {
+        const uPrice = l.unit_price !== undefined && l.unit_price !== null ? String(l.unit_price) : "";
+        const lTotal = l.line_total !== undefined && l.line_total !== null
+          ? l.line_total
+          : Math.round((Number(l.po_qty) * (Number(l.unit_price) || 0)) * 100) / 100;
+        return {
+          id: l.id,
+          customer_part_number: l.customer_part_number || "",
+          part_number: l.part_number,
+          po_qty: String(l.po_qty),
+          unit_price: uPrice,
+          line_total: lTotal,
+          allocated_qty: l.allocated_qty,
+          available_qty: l.available_qty,
+          required_date: l.required_date || "",
+        };
+      })
     );
     setEditError("");
     setEditSuccess("");
@@ -273,19 +298,30 @@ export default function POMasterPage() {
     setCreateError("");
     setCreating(true);
     try {
+      const validLines = lines.filter(
+        (l) => (l.customer_part_number?.trim() || l.part_number?.trim()) && l.po_qty
+      );
+      if (validLines.length === 0) {
+        throw new Error("PO must have at least one valid line with positive quantity.");
+      }
+
       await createPOMaster({
         po_number: poNumber,
         customer_code: customerCode,
         po_date: poDate || undefined,
         validity_date: validityDate || undefined,
-        lines: lines
-          .filter((l) => (l.customer_part_number?.trim() || l.part_number?.trim()) && l.po_qty)
-          .map((l) => ({
+        lines: validLines.map((l) => {
+          const qty = Number(l.po_qty);
+          const unitPrice = Number(l.unit_price) || 0;
+          return {
             customer_part_number: l.customer_part_number?.trim() || undefined,
             part_number: l.part_number?.trim() || undefined,
-            po_qty: Number(l.po_qty),
+            po_qty: qty,
+            unit_price: unitPrice,
+            line_total: Math.round(qty * unitPrice * 100) / 100,
             required_date: l.required_date || undefined,
-          })),
+          };
+        }),
       });
       setPoNumber("");
       setPoDate("");
@@ -293,7 +329,7 @@ export default function POMasterPage() {
       setLines([emptyLine()]);
       await loadAll();
     } catch (err: any) {
-      setCreateError(err?.response?.data?.detail || "Could not create PO.");
+      setCreateError(err?.response?.data?.detail || err?.message || "Could not create PO.");
     } finally {
       setCreating(false);
     }
@@ -320,13 +356,19 @@ export default function POMasterPage() {
         po_date: editPoDate || undefined,
         validity_date: editValidityDate || undefined,
         status: editStatus,
-        lines: validLines.map((l) => ({
-          id: l.id || undefined,
-          customer_part_number: l.customer_part_number?.trim() || undefined,
-          part_number: l.part_number.trim() || undefined,
-          po_qty: Number(l.po_qty),
-          required_date: l.required_date || undefined,
-        })),
+        lines: validLines.map((l) => {
+          const qty = Number(l.po_qty);
+          const unitPrice = Number(l.unit_price) || 0;
+          return {
+            id: l.id || undefined,
+            customer_part_number: l.customer_part_number?.trim() || undefined,
+            part_number: l.part_number.trim() || undefined,
+            po_qty: qty,
+            unit_price: unitPrice,
+            line_total: Math.round(qty * unitPrice * 100) / 100,
+            required_date: l.required_date || undefined,
+          };
+        }),
       });
 
       setEditSuccess("Purchase Order updated successfully.");
@@ -437,65 +479,117 @@ export default function POMasterPage() {
               </div>
 
               {/* Column Headers for lines on medium+ screens */}
-              <div className="hidden md:grid md:grid-cols-5 gap-2 px-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                <div>Customer Part No *</div>
-                <div>Internal Part No <span className="text-[10px] text-zinc-400 font-normal lowercase">(optional)</span></div>
-                <div>PO Qty *</div>
-                <div>Req. Delivery Date</div>
-                <div>Action</div>
+              <div className="hidden md:grid md:grid-cols-12 gap-2 px-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                <div className="md:col-span-3">Customer Part No *</div>
+                <div className="md:col-span-2">Internal Part <span className="text-[10px] text-zinc-400 font-normal lowercase">(opt)</span></div>
+                <div className="md:col-span-2 text-right">PO Qty *</div>
+                <div className="md:col-span-2 text-right">Value / Pc (₹)</div>
+                <div className="md:col-span-1 text-right">Line Total (₹)</div>
+                <div className="md:col-span-1">Req. Date</div>
+                <div className="md:col-span-1 text-right">Action</div>
               </div>
 
-              {lines.map((l, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
-                  <div>
-                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Customer Part No *</label>
-                    <input
-                      placeholder="e.g. RC47NN135000000092"
-                      value={l.customer_part_number || ""}
-                      onChange={(e) => updateLine(idx, "customer_part_number", e.target.value)}
-                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono font-medium"
-                    />
+              {lines.map((l, idx) => {
+                const qty = Number(l.po_qty) || 0;
+                const unitPrice = Number(l.unit_price) || 0;
+                const lineTotal = l.line_total !== undefined ? l.line_total : Math.round(qty * unitPrice * 100) / 100;
+                return (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center rounded-lg border border-zinc-100 dark:border-zinc-800/80 p-2 md:p-1 bg-zinc-50/50 dark:bg-zinc-800/20">
+                    <div className="md:col-span-3">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Customer Part No *</label>
+                      <input
+                        placeholder="e.g. RC47NN135000000092"
+                        value={l.customer_part_number || ""}
+                        onChange={(e) => updateLine(idx, "customer_part_number", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-xs font-mono font-medium"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Internal Part No (Optional)</label>
+                      <input
+                        placeholder="e.g. 54400902"
+                        value={l.part_number}
+                        onChange={(e) => updateLine(idx, "part_number", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">PO Qty *</label>
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        placeholder="Qty"
+                        value={l.po_qty}
+                        onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-xs text-right"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Value / Pc (₹)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min={0}
+                        placeholder="Rate / Pc (₹)"
+                        value={l.unit_price}
+                        onChange={(e) => updateLine(idx, "unit_price", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-xs text-right font-medium text-blue-600 dark:text-blue-400"
+                      />
+                    </div>
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Line Total (₹)</label>
+                      <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 font-mono">
+                        ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="md:col-span-1">
+                      <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Req. Delivery Date</label>
+                      <input
+                        type="date"
+                        value={l.required_date}
+                        onChange={(e) => updateLine(idx, "required_date", e.target.value)}
+                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs"
+                      />
+                    </div>
+                    <div className="md:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                        disabled={lines.length === 1}
+                        className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-40 transition-colors"
+                        title="Remove line"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
+                );
+              })}
+
+              {/* Calculated Summary Bar for Add PO */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs mt-2">
+                <div className="flex items-center gap-4">
                   <div>
-                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Internal Part No (Optional)</label>
-                    <input
-                      placeholder="e.g. 54400902"
-                      value={l.part_number}
-                      onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
-                    />
+                    <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Total Lines</span>
+                    <p className="font-bold text-zinc-800 dark:text-zinc-200">{lines.length}</p>
                   </div>
+                  <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
                   <div>
-                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">PO Qty *</label>
-                    <input
-                      required
-                      type="number"
-                      min={1}
-                      placeholder="e.g. 500"
-                      value={l.po_qty}
-                      onChange={(e) => updateLine(idx, "po_qty", e.target.value)}
-                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-                    />
+                    <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Total Pieces</span>
+                    <p className="font-bold text-zinc-800 dark:text-zinc-200">
+                      {lines.reduce((acc, l) => acc + (Number(l.po_qty) || 0), 0).toLocaleString()} pcs
+                    </p>
                   </div>
-                  <div>
-                    <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Customer Required Delivery Date</label>
-                    <input
-                      type="date"
-                      value={l.required_date}
-                      onChange={(e) => updateLine(idx, "required_date", e.target.value)}
-                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
-                    disabled={lines.length === 1}
-                    className="flex items-center justify-center gap-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 px-2.5 py-2 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 transition-colors"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-rose-500" /> Remove
-                  </button>
                 </div>
-              ))}
+                <div className="text-right">
+                  <span className="text-[10px] font-bold uppercase text-blue-700 dark:text-blue-400 tracking-wider">Total PO Value</span>
+                  <p className="text-base font-extrabold text-blue-700 dark:text-blue-400 font-mono">
+                    ₹{lines.reduce((acc, l) => acc + ((Number(l.po_qty) || 0) * (Number(l.unit_price) || 0)), 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setLines((prev) => [...prev, emptyLine()])}
@@ -615,7 +709,7 @@ export default function POMasterPage() {
             </div>
 
             {/* Metrics Strip for Customer / Search Results */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 pt-2">
               <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                   {filterCustomerCode ? "Customer POs" : "Total POs"}
@@ -650,12 +744,20 @@ export default function POMasterPage() {
                 <p className="text-[10px] text-zinc-400">pcs with OAR raised</p>
               </div>
 
-              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5 col-span-2 sm:col-span-1">
+              <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
                 <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Available / Pending</p>
                 <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {metrics.totalAvailable.toLocaleString()}
                 </p>
                 <p className="text-[10px] text-zinc-400">pcs awaiting OAR</p>
+              </div>
+
+              <div className="rounded-xl border border-blue-200/80 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/30 p-2.5 col-span-2 sm:col-span-1">
+                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Total Value</p>
+                <p className="text-base font-extrabold text-blue-600 dark:text-blue-400 mt-0.5 font-mono">
+                  ₹{metrics.totalValue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-[10px] text-zinc-400">contracted order value</p>
               </div>
             </div>
           </div>
@@ -688,82 +790,107 @@ export default function POMasterPage() {
             </div>
           ) : (
             <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {filteredPOs.map((po) => (
-                <div key={po.id} className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{po.po_number}</p>
-                        <span className="rounded-md bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 px-2 py-0.5 text-[10px] font-bold uppercase">
-                          {po.status}
-                        </span>
+              {filteredPOs.map((po) => {
+                const poTotalVal = Number(
+                  po.total_value ||
+                    po.lines.reduce((s, l) => s + (Number(l.line_total) || (Number(l.po_qty) * (Number(l.unit_price) || 0))), 0)
+                );
+                return (
+                  <div key={po.id} className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{po.po_number}</p>
+                          <span className="rounded-md bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 px-2 py-0.5 text-[10px] font-bold uppercase">
+                            {po.status}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">{po.customer_code} — {po.customer_name}</p>
+                        <div className="flex flex-wrap items-center gap-3 text-[10px] text-zinc-400 mt-1">
+                          <span>PO Date: {po.po_date || "—"}</span>
+                          <span>Validity: {po.validity_date || "—"}</span>
+                          <span className="font-semibold text-blue-600 dark:text-blue-400 font-mono">
+                            Total Value: ₹{poTotalVal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">{po.customer_code} — {po.customer_name}</p>
-                      <div className="flex items-center gap-4 text-[10px] text-zinc-400 mt-1">
-                        <span>PO Date: {po.po_date || "—"}</span>
-                        <span>Validity: {po.validity_date || "—"}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(po)}
+                          className="flex items-center gap-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-colors"
+                        >
+                          <Edit3 className="h-3.5 w-3.5 text-blue-500" /> Edit PO
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeletingPO(po);
+                            setDeleteError("");
+                            setDeleteSuccess("");
+                          }}
+                          className="flex items-center gap-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/40 transition-colors cursor-pointer"
+                          title="Delete Purchase Order"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete PO
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(po)}
-                        className="flex items-center gap-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200 transition-colors"
-                      >
-                        <Edit3 className="h-3.5 w-3.5 text-blue-500" /> Edit PO
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeletingPO(po);
-                          setDeleteError("");
-                          setDeleteSuccess("");
-                        }}
-                        className="flex items-center gap-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-900/40 transition-colors cursor-pointer"
-                        title="Delete Purchase Order"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> Delete PO
-                      </button>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs mt-3 min-w-[750px]">
+                        <thead className="text-zinc-500 dark:text-zinc-400">
+                          <tr>
+                            <th className="text-left py-1 font-semibold">Customer Part</th>
+                            <th className="text-left py-1 font-semibold">Internal Part</th>
+                            <th className="text-right py-1 font-semibold">PO Qty</th>
+                            <th className="text-right py-1 font-semibold">Rate / Pc (₹)</th>
+                            <th className="text-right py-1 font-semibold">Line Total (₹)</th>
+                            <th className="text-right py-1 font-semibold">Allocated</th>
+                            <th className="text-right py-1 font-semibold">Available</th>
+                            <th className="text-left py-1 font-semibold">Required Date</th>
+                            <th className="text-left py-1 font-semibold">OAR / WO</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {po.lines.map((l) => {
+                            const uPrice = Number(l.unit_price) || 0;
+                            const lTotal = l.line_total !== undefined && l.line_total !== null
+                              ? Number(l.line_total)
+                              : Math.round((Number(l.po_qty) * uPrice) * 100) / 100;
+                            return (
+                              <tr key={l.id} className="border-t border-zinc-100 dark:border-zinc-800 align-top">
+                                <td className="py-1.5 font-mono text-zinc-900 dark:text-zinc-100 font-medium">
+                                  {l.customer_part_number || "—"}
+                                </td>
+                                <td className="py-1.5 font-mono text-zinc-500">{l.part_number}</td>
+                                <td className="py-1.5 text-right font-medium">{l.po_qty.toLocaleString()}</td>
+                                <td className="py-1.5 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                                  ₹{uPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-1.5 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                                  ₹{lTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-1.5 text-right font-medium text-amber-600 dark:text-amber-400">{l.allocated_qty}</td>
+                                <td
+                                  className={`py-1.5 text-right font-semibold ${
+                                    l.available_qty === 0 ? "text-zinc-400" : "text-emerald-600 dark:text-emerald-400"
+                                  }`}
+                                >
+                                  {l.available_qty}
+                                </td>
+                                <td className="py-1.5 text-zinc-500">{l.required_date || "-"}</td>
+                                <td className="py-1.5">
+                                  <POLineTraceability orders={l.orders} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                  <table className="w-full text-xs mt-3">
-                    <thead className="text-zinc-500 dark:text-zinc-400">
-                      <tr>
-                        <th className="text-left py-1 font-semibold">Customer Part</th>
-                        <th className="text-left py-1 font-semibold">Internal Part</th>
-                        <th className="text-right py-1 font-semibold">PO Qty</th>
-                        <th className="text-right py-1 font-semibold">Allocated</th>
-                        <th className="text-right py-1 font-semibold">Available</th>
-                        <th className="text-left py-1 font-semibold">Required Date</th>
-                        <th className="text-left py-1 font-semibold">OAR / WO</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {po.lines.map((l) => (
-                        <tr key={l.id} className="border-t border-zinc-100 dark:border-zinc-800 align-top">
-                          <td className="py-1.5 font-mono text-zinc-900 dark:text-zinc-100 font-medium">
-                            {l.customer_part_number || "—"}
-                          </td>
-                          <td className="py-1.5 font-mono text-zinc-500">{l.part_number}</td>
-                          <td className="py-1.5 text-right font-medium">{l.po_qty}</td>
-                          <td className="py-1.5 text-right font-medium text-amber-600 dark:text-amber-400">{l.allocated_qty}</td>
-                          <td
-                            className={`py-1.5 text-right font-semibold ${
-                              l.available_qty === 0 ? "text-zinc-400" : "text-emerald-600 dark:text-emerald-400"
-                            }`}
-                          >
-                            {l.available_qty}
-                          </td>
-                          <td className="py-1.5 text-zinc-500">{l.required_date || "-"}</td>
-                          <td className="py-1.5">
-                            <POLineTraceability orders={l.orders} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -889,16 +1016,22 @@ export default function POMasterPage() {
                   <div className="hidden md:grid md:grid-cols-12 gap-2 px-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                     <div className="col-span-3">Customer Part No</div>
                     <div className="col-span-2">Internal Part No</div>
-                    <div className="col-span-2 text-right">PO Qty</div>
-                    <div className="col-span-1 text-right">Allocated</div>
-                    <div className="col-span-1 text-right">Available</div>
-                    <div className="col-span-2">Req. Delivery Date</div>
+                    <div className="col-span-1 text-right">PO Qty</div>
+                    <div className="col-span-2 text-right">Value / Pc (₹)</div>
+                    <div className="col-span-1 text-right">Line Total</div>
+                    <div className="col-span-1 text-center">Alloc / Avail</div>
+                    <div className="col-span-1">Req. Date</div>
                     <div className="col-span-1 text-right">Action</div>
                   </div>
 
                   <div className="space-y-2">
                     {editLines.map((l, idx) => {
                       const isAllocated = (l.allocated_qty || 0) > 0;
+                      const qty = Number(l.po_qty) || 0;
+                      const unitPrice = Number(l.unit_price) || 0;
+                      const lineTotal = l.line_total !== undefined ? l.line_total : Math.round(qty * unitPrice * 100) / 100;
+                      const avail = l.available_qty !== undefined ? l.available_qty : Math.max(0, qty - (l.allocated_qty || 0));
+
                       return (
                         <div
                           key={idx}
@@ -928,7 +1061,7 @@ export default function POMasterPage() {
                             />
                           </div>
 
-                          <div className="md:col-span-2">
+                          <div className="md:col-span-1">
                             <label className="text-[10px] text-zinc-400 block md:hidden">PO Qty</label>
                             <input
                               type="number"
@@ -937,28 +1070,43 @@ export default function POMasterPage() {
                               placeholder="PO Qty"
                               value={l.po_qty}
                               onChange={(e) => updateEditLine(idx, "po_qty", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 text-xs text-right"
+                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right"
                             />
                           </div>
 
-                          <div className="md:col-span-1 text-center md:text-right">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Allocated</label>
-                            <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                              {l.allocated_qty || 0} alloc
-                            </span>
-                          </div>
-
-                          <div className="md:col-span-1 text-center md:text-right">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Available</label>
-                            <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                              {l.available_qty !== undefined
-                                ? l.available_qty
-                                : Math.max(0, (Number(l.po_qty) || 0) - (l.allocated_qty || 0))}{" "}
-                              avail
-                            </span>
-                          </div>
-
                           <div className="md:col-span-2">
+                            <label className="text-[10px] text-zinc-400 block md:hidden">Value / Pc (₹)</label>
+                            <input
+                              type="number"
+                              step="any"
+                              min={0}
+                              placeholder="0.00"
+                              value={l.unit_price}
+                              onChange={(e) => updateEditLine(idx, "unit_price", e.target.value)}
+                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right font-medium text-blue-600 dark:text-blue-400"
+                            />
+                          </div>
+
+                          <div className="md:col-span-1 text-right">
+                            <label className="text-[10px] text-zinc-400 block md:hidden">Line Total</label>
+                            <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 font-mono">
+                              ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+
+                          <div className="md:col-span-1 text-center">
+                            <label className="text-[10px] text-zinc-400 block md:hidden">Alloc / Avail</label>
+                            <div className="flex flex-col items-center">
+                              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                {l.allocated_qty || 0} alloc
+                              </span>
+                              <span className={`text-[10px] font-semibold ${avail === 0 ? "text-zinc-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                                {avail} avail
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="md:col-span-1">
                             <label className="text-[10px] text-zinc-400 block md:hidden">Req Date</label>
                             <input
                               type="date"
@@ -988,6 +1136,29 @@ export default function POMasterPage() {
                         </div>
                       );
                     })}
+                  </div>
+
+                  {/* Calculated Summary Bar for Edit PO */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs mt-2">
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Total Lines</span>
+                        <p className="font-bold text-zinc-800 dark:text-zinc-200">{editLines.length}</p>
+                      </div>
+                      <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-zinc-500 tracking-wider">Total Pieces</span>
+                        <p className="font-bold text-zinc-800 dark:text-zinc-200">
+                          {editLines.reduce((acc, l) => acc + (Number(l.po_qty) || 0), 0).toLocaleString()} pcs
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold uppercase text-blue-700 dark:text-blue-400 tracking-wider">Total PO Value</span>
+                      <p className="text-base font-extrabold text-blue-700 dark:text-blue-400 font-mono">
+                        ₹{editLines.reduce((acc, l) => acc + ((Number(l.po_qty) || 0) * (Number(l.unit_price) || 0)), 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
                   </div>
 
                   <button

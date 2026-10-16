@@ -7,7 +7,7 @@ and Order.oar_po_status below.
 """
 import enum
 import uuid
-from sqlalchemy import Column, String, Integer, Date, DateTime, Enum, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Float, Date, DateTime, Enum, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base, GUID
@@ -51,6 +51,7 @@ class POMaster(Base):
     po_date = Column(Date, nullable=True)
     validity_date = Column(Date, nullable=True)
     status = Column(Enum(POStatus), nullable=False, default=POStatus.OPEN)
+    total_value = Column(Float, nullable=True, default=0.0)
     created_by_id = Column(GUID, ForeignKey("users.id"), nullable=True)
     created_by_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -67,6 +68,8 @@ class POLine(Base):
     part_id = Column(GUID, ForeignKey("parts.id"), nullable=False)
     customer_part_number = Column(String(200), nullable=True)
     po_qty = Column(Integer, nullable=False)
+    unit_price = Column(Float, nullable=True, default=0.0)
+    line_total = Column(Float, nullable=True, default=0.0)
     required_date = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

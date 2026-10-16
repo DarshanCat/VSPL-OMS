@@ -379,3 +379,75 @@ def test_non_planning_role_cannot_manage_masters_or_matching(client):
     assert client.post("/api/v1/masters/schedules", headers=headers, json={
         "customer_code": "CUST-VALVE", "part_number": "BRZ-BUSH-100", "scheduled_qty": 10,
     }).status_code == 403
+
+
+def test_po_unit_price_and_total_value_calculation(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+    po_num = f"PO-VAL-{uuid.uuid4().hex[:6].upper()}"
+
+    # Create PO with unit prices
+    resp = client.post(
+        "/api/v1/masters/pos",
+        headers=headers,
+        json={
+            "customer_code": customer["customer_code"],
+            "po_number": po_num,
+            "lines": [
+                {
+                    "customer_part_number": "CUST-PART-A",
+                    "po_qty": 200,
+                    "unit_price": 45.50,
+                },
+                {
+                    "customer_part_number": "CUST-PART-B",
+                    "po_qty": 100,
+                    "unit_price": 120.00,
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    # 200 * 45.50 = 9100.00
+    # 100 * 120.00 = 12000.00
+    # Total PO value = 21100.00
+    line_a = [l for l in data["lines"] if l["customer_part_number"] == "CUST-PART-A"][0]
+    line_b = [l for l in data["lines"] if l["customer_part_number"] == "CUST-PART-B"][0]
+
+    assert line_a["unit_price"] == 45.50
+    assert line_a["line_total"] == 9100.00
+    assert line_b["unit_price"] == 120.00
+    assert line_b["line_total"] == 12000.00
+    assert data["total_value"] == 21100.00
+    assert data["total_qty"] == 300
+
+    # Update line quantity and price
+    po_id = data["id"]
+    update_resp = client.put(
+        f"/api/v1/masters/pos/{po_id}",
+        headers=headers,
+        json={
+            "lines": [
+                {
+                    "id": line_a["id"],
+                    "customer_part_number": "CUST-PART-A",
+                    "po_qty": 300,
+                    "unit_price": 50.00,
+                },
+                {
+                    "id": line_b["id"],
+                    "customer_part_number": "CUST-PART-B",
+                    "po_qty": 100,
+                    "unit_price": 120.00,
+                },
+            ],
+        },
+    )
+    assert update_resp.status_code == 200, update_resp.text
+    upd_data = update_resp.json()
+    # 300 * 50 = 15000 + 12000 = 27000
+    assert upd_data["total_value"] == 27000.00
+    assert upd_data["total_qty"] == 400
+

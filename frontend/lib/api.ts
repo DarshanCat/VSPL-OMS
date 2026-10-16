@@ -666,6 +666,8 @@ export interface POLineOut {
   part_number: string;
   customer_part_number?: string | null;
   po_qty: number;
+  unit_price?: number;
+  line_total?: number;
   allocated_qty: number;
   available_qty: number;
   required_date?: string | null;
@@ -680,6 +682,8 @@ export interface POMasterOut {
   po_date?: string | null;
   validity_date?: string | null;
   status: string;
+  total_value?: number;
+  total_qty?: number;
   lines: POLineOut[];
 }
 
@@ -694,6 +698,8 @@ export interface POLineCreatePayload {
   part_number?: string;
   customer_part_number?: string;
   po_qty: number;
+  unit_price?: number;
+  line_total?: number;
   required_date?: string;
 }
 
@@ -702,6 +708,7 @@ export async function createPOMaster(payload: {
   customer_code: string;
   po_date?: string;
   validity_date?: string;
+  total_value?: number;
   lines: POLineCreatePayload[];
 }): Promise<POMasterOut> {
   const { data } = await api.post("/api/v1/masters/pos", payload);
@@ -713,6 +720,8 @@ export interface POLineUpdatePayload {
   part_number?: string;
   customer_part_number?: string;
   po_qty: number;
+  unit_price?: number;
+  line_total?: number;
   required_date?: string;
 }
 
@@ -722,6 +731,7 @@ export interface POMasterUpdatePayload {
   po_date?: string;
   validity_date?: string;
   status?: string;
+  total_value?: number;
   lines?: POLineUpdatePayload[];
 }
 

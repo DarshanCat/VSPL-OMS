@@ -55,6 +55,8 @@ class POLineCreate(BaseModel):
     # Master UI no longer sends this field.
     part_number: Optional[str] = Field(None, max_length=100)
     po_qty: int = Field(..., gt=0, le=1_000_000)
+    unit_price: Optional[float] = Field(0.0, ge=0)
+    line_total: Optional[float] = Field(0.0, ge=0)
     required_date: Optional[date] = None
 
 
@@ -63,6 +65,7 @@ class POMasterCreate(BaseModel):
     customer_code: str = Field(..., max_length=100)
     po_date: Optional[date] = None
     validity_date: Optional[date] = None
+    total_value: Optional[float] = Field(None, ge=0)
     lines: List[POLineCreate] = Field(..., min_length=1)
 
 
@@ -89,6 +92,8 @@ class POLineOut(BaseModel):
     part_number: str
     customer_part_number: Optional[str] = None
     po_qty: int
+    unit_price: Optional[float] = 0.0
+    line_total: Optional[float] = 0.0
     allocated_qty: int
     available_qty: int
     required_date: Optional[date] = None
@@ -126,6 +131,8 @@ class POMasterOut(BaseModel):
     po_date: Optional[date] = None
     validity_date: Optional[date] = None
     status: str
+    total_value: Optional[float] = 0.0
+    total_qty: Optional[int] = 0
     lines: List[POLineOut] = []
 
 
@@ -134,6 +141,8 @@ class POLineUpdate(BaseModel):
     customer_part_number: Optional[str] = Field(None, max_length=200)
     part_number: Optional[str] = Field(None, max_length=100)
     po_qty: int = Field(..., gt=0, le=1_000_000)
+    unit_price: Optional[float] = Field(None, ge=0)
+    line_total: Optional[float] = Field(None, ge=0)
     required_date: Optional[date] = None
 
 
@@ -143,6 +152,7 @@ class POMasterUpdate(BaseModel):
     po_date: Optional[date] = None
     validity_date: Optional[date] = None
     status: Optional[str] = Field(None, max_length=50)
+    total_value: Optional[float] = Field(None, ge=0)
     lines: Optional[List[POLineUpdate]] = None
 
 

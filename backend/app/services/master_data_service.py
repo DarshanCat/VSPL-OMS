@@ -291,19 +291,33 @@ class POMasterService:
             )
             for o in line.orders
         ]
+        u_price = getattr(line, "unit_price", 0.0) or 0.0
+        l_total = getattr(line, "line_total", 0.0)
+        if l_total is None or l_total == 0.0:
+            l_total = round(line.po_qty * u_price, 2)
         return POLineOut(
             id=str(line.id), part_number=line.part.part_number,
             customer_part_number=line.customer_part_number if hasattr(line, "customer_part_number") else None,
             po_qty=line.po_qty, allocated_qty=allocated, available_qty=max(line.po_qty - allocated, 0),
+            unit_price=round(u_price, 2),
+            line_total=round(l_total, 2),
             required_date=line.required_date, orders=orders_summary,
         )
 
     @staticmethod
     def _po_out(po: POMaster) -> POMasterOut:
+        lines_out = [POMasterService._line_out(l) for l in po.lines]
+        tot_val = getattr(po, "total_value", 0.0)
+        computed_tot_val = round(sum(l.line_total or 0.0 for l in lines_out), 2)
+        final_total_val = round(tot_val, 2) if (tot_val and tot_val > 0) else computed_tot_val
+        total_qty = sum(l.po_qty for l in lines_out)
         return POMasterOut(
             id=str(po.id), po_number=po.po_number, customer_code=po.customer.customer_code,
             customer_name=po.customer.name, po_date=po.po_date, validity_date=po.validity_date,
-            status=po.status.value, lines=[POMasterService._line_out(l) for l in po.lines],
+            status=po.status.value,
+            total_value=final_total_val,
+            total_qty=total_qty,
+            lines=lines_out,
         )
 
     @staticmethod
@@ -366,12 +380,14 @@ class POMasterService:
                 po_number=req.po_number.strip(), customer_id=customer.id,
                 po_date=req.po_date, validity_date=req.validity_date,
                 status=POStatus.OPEN,
+                total_value=0.0,
                 created_by_id=current_user.id if current_user else None,
                 created_by_name=current_user.full_name if current_user else "System",
             )
             db.add(po)
             db.flush()
 
+            po_total_value = 0.0
             for line_req in req.lines:
                 cust_pn = (line_req.customer_part_number or "").strip()
                 pn = (line_req.part_number or "").strip()
@@ -398,15 +414,23 @@ class POMasterService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
                     )
+
+                u_price = round(float(line_req.unit_price or 0.0), 2)
+                l_total = round(float(line_req.po_qty * u_price), 2)
+                po_total_value += l_total
+
                 db.add(POLine(
                     po_id=po.id,
                     part_id=part.id,
                     customer_part_number=cust_pn or None,
                     po_qty=line_req.po_qty,
+                    unit_price=u_price,
+                    line_total=l_total,
                     required_date=line_req.required_date,
                 ))
 
-            _audit(db, current_user, "PO_CREATED", "POMaster", str(po.id), details=f"po_number={req.po_number}, lines={len(req.lines)}")
+            po.total_value = round(po_total_value, 2)
+            _audit(db, current_user, "PO_CREATED", "POMaster", str(po.id), details=f"po_number={req.po_number}, lines={len(req.lines)}, total_value={po.total_value}")
 
             try:
                 db.commit()
@@ -609,6 +633,14 @@ class POMasterService:
                         changes.append(f"line[{line.id}] po_qty: {line.po_qty} -> {line_req.po_qty}")
                         line.po_qty = line_req.po_qty
 
+                    if line_req.unit_price is not None:
+                        u_price = round(float(line_req.unit_price), 2)
+                        if getattr(line, "unit_price", 0.0) != u_price:
+                            changes.append(f"line[{line.id}] unit_price: {getattr(line, 'unit_price', 0.0)} -> {u_price}")
+                            line.unit_price = u_price
+
+                    line.line_total = round(float(line.po_qty * (getattr(line, "unit_price", 0.0) or 0.0)), 2)
+
                     if line.required_date != line_req.required_date:
                         changes.append(f"line[{line.id}] required_date: {line.required_date} -> {line_req.required_date}")
                         line.required_date = line_req.required_date
@@ -640,15 +672,19 @@ class POMasterService:
                             detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
                         )
 
+                    u_price = round(float(line_req.unit_price or 0.0), 2)
+                    l_total = round(float(line_req.po_qty * u_price), 2)
                     new_line = POLine(
                         po_id=po.id,
                         part_id=part.id,
                         customer_part_number=cust_pn or None,
                         po_qty=line_req.po_qty,
+                        unit_price=u_price,
+                        line_total=l_total,
                         required_date=line_req.required_date,
                     )
                     db.add(new_line)
-                    changes.append(f"added line: part={part.part_number}, po_qty={line_req.po_qty}")
+                    changes.append(f"added line: part={part.part_number}, po_qty={line_req.po_qty}, unit_price={u_price}")
 
             # Deleted lines check
             for line_id_str, line in existing_lines_by_id.items():
@@ -664,6 +700,12 @@ class POMasterService:
                         )
                     changes.append(f"deleted line: part={line.part.part_number}, po_qty={line.po_qty}")
                     db.delete(line)
+
+            db.flush()
+            po.total_value = round(sum(getattr(l, "line_total", 0.0) or (l.po_qty * (getattr(l, "unit_price", 0.0) or 0.0)) for l in po.lines), 2)
+
+        elif req.total_value is not None:
+            po.total_value = round(float(req.total_value), 2)
 
         details_str = "; ".join(changes) if changes else "No fields changed"
         _audit(db, current_user, "PO_UPDATED", "POMaster", str(po.id), details=details_str)

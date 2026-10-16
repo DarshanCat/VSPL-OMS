@@ -337,6 +337,11 @@ def auto_migrate_schema():
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS customer_part_number VARCHAR;",
         "UPDATE po_lines SET customer_part_number = (SELECT customer_part_number FROM customer_part_mappings WHERE customer_part_mappings.part_id = po_lines.part_id LIMIT 1) WHERE customer_part_number IS NULL;",
 
+        # PO Master & PO Line Pricing / Value
+        "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS unit_price FLOAT DEFAULT 0.0;",
+        "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS line_total FLOAT DEFAULT 0.0;",
+        "ALTER TABLE po_master ADD COLUMN IF NOT EXISTS total_value FLOAT DEFAULT 0.0;",
+
         # MRB Reviews Table
         "CREATE TABLE IF NOT EXISTS mrb_reviews ("
         "    id UUID PRIMARY KEY,"
