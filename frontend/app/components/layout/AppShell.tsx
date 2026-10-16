@@ -101,6 +101,13 @@ const NAV_GROUPS: NavGroup[] = [
         badge: "Floor",
       },
       {
+        name: "MRB Review Board",
+        href: "/quality/mrb",
+        icon: <ClipboardCheck className="h-4 w-4 text-amber-500" />,
+        badge: "MRB",
+        roles: ["admin", "qa", "planner", "ceo"],
+      },
+      {
         name: "WO Tracking & Timeline",
         href: "/production/tracking",
         icon: <Route className="h-4 w-4 text-purple-500" />,
@@ -231,13 +238,6 @@ const NAV_GROUPS: NavGroup[] = [
         name: "Rejection Tracking",
         href: "/quality/nc",
         icon: <AlertTriangle className="h-4 w-4 text-rose-500" />,
-      },
-      {
-        name: "MRB Review Board",
-        href: "/quality/mrb",
-        icon: <ClipboardCheck className="h-4 w-4 text-amber-500" />,
-        badge: "MRB",
-        roles: ["admin", "qa", "planner", "ceo"],
       },
     ],
   },
@@ -473,7 +473,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col lg:pl-72">
+      <div className="flex flex-1 flex-col lg:pl-72 min-w-0 max-w-full">
         {/* Top Navbar */}
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 px-6 backdrop-blur">
           <div className="flex items-center gap-4">
@@ -553,7 +553,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Dynamic Page Content */}
-        <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto min-w-0">{children}</main>
       </div>
     </div>
   );

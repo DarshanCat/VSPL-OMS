@@ -160,7 +160,7 @@ export default function MRBReviewBoardPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6">
+      <div className="space-y-6 w-full min-w-0 max-w-full">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -349,9 +349,9 @@ export default function MRBReviewBoardPage() {
         </div>
 
         {/* Tickets Table */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-sm w-full min-w-0">
+          <div className="overflow-x-auto w-full">
+            <table className="w-full text-left text-xs min-w-[900px]">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-800">
                 <tr>
                   <th className="px-4 py-3">Ticket / Date</th>
