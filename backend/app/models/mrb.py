@@ -15,6 +15,11 @@ def next_mrb_number(db: Session) -> str:
         m = _MRB_NUMBER_RE.match(mrb_number or "")
         if m:
             highest = max(highest, int(m.group(1)))
+    for obj in getattr(db, "new", []):
+        if isinstance(obj, MRBReview) and getattr(obj, "mrb_number", None):
+            m = _MRB_NUMBER_RE.match(obj.mrb_number)
+            if m:
+                highest = max(highest, int(m.group(1)))
     return f"MRB-{highest + 1:05d}"
 
 

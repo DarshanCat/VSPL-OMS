@@ -30,11 +30,20 @@ class MRBService:
             r[0] for r in db.query(MRBReview.production_update_id)
             .filter(MRBReview.production_update_id.isnot(None)).all()
         }
+        import re
+        mrb_re = re.compile(r"^MRB-(\d+)$")
+        highest = 0
+        for (mrb_num_row,) in db.query(MRBReview.mrb_number).all():
+            m = mrb_re.match(mrb_num_row or "")
+            if m:
+                highest = max(highest, int(m.group(1)))
+
         all_pus = db.query(ProductionUpdate).all()
         created = 0
         for pu in all_pus:
             if pu.id not in existing_pu_ids:
-                mrb_num = next_mrb_number(db)
+                highest += 1
+                mrb_num = f"MRB-{highest:05d}"
                 mrb = MRBReview(
                     mrb_number=mrb_num,
                     production_update_id=pu.id,
