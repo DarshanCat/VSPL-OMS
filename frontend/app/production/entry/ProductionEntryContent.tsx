@@ -421,7 +421,19 @@ export function ProductionEntryContent() {
       await lookupWO(woData.wo_number);
       inputGoodQtyRef.current?.focus();
     } catch (err: any) {
-      setFormError(err?.response?.data?.detail || "Production recording failed. Please check validation rules.");
+      let detailMsg = "Production recording failed. Please check validation rules.";
+      if (err?.response?.data?.detail) {
+        if (typeof err.response.data.detail === "string") {
+          detailMsg = err.response.data.detail;
+        } else if (Array.isArray(err.response.data.detail)) {
+          detailMsg = err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+        } else {
+          detailMsg = JSON.stringify(err.response.data.detail);
+        }
+      } else if (err?.message) {
+        detailMsg = err.message;
+      }
+      setFormError(detailMsg);
     } finally {
       setSubmitting(false);
     }
@@ -928,6 +940,17 @@ export function ProductionEntryContent() {
                 <span>On-Hand Available: <strong className="text-blue-600">{successResult.stage_onhand_available}</strong></span>
                 <span>In-Process Remaining: <strong className="text-amber-600">{successResult.stage_inproc_remaining}</strong></span>
               </div>
+              {successResult.stage_onhand_available > 0 && (
+                <div className="pt-2">
+                  <Link
+                    href={`/production/entry?tab=move&wo=${encodeURIComponent(successResult.wo_number)}&stage=${encodeURIComponent(successResult.stage)}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-sm transition-all"
+                  >
+                    <span>Move Parts Now</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         )}

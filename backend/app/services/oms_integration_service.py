@@ -196,20 +196,23 @@ class OMSIntegrationService:
                 or (i + 1 < len(routes) and routes[i + 1].stage.upper() == "DISPATCH")
             )
 
-            if is_packing_or_final and pr:
-                net_ip = pr.pending_qty
-                on_hand = pr.ready_for_dispatch_qty
-            else:
-                # OMS Flow Formula: In-Process (net) = max(Ent - OK - Rej, 0)
-                net_ip = max(ent - ok - rej, 0)
+            # OMS Flow Formula: In-Process (net) = max(Ent - OK - Rej, 0)
+            std_inproc = max(ent - ok - rej, 0)
 
-                # OMS Flow Formula: On-Hand = max(OK - Ent(next), 0)
-                nxt_ent = 0
-                if i + 1 < len(routes):
-                    nxt_stg = routes[i + 1].stage
-                    nxt_wip = wip_map.get(nxt_stg)
-                    nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
-                on_hand = max(ok - nxt_ent, 0)
+            # OMS Flow Formula: On-Hand = max(OK - Ent(next), 0)
+            nxt_ent = 0
+            if i + 1 < len(routes):
+                nxt_stg = routes[i + 1].stage
+                nxt_wip = wip_map.get(nxt_stg)
+                nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
+            std_on_hand = max(ok - nxt_ent, 0)
+
+            if is_packing_or_final and pr:
+                net_ip = max(std_inproc, pr.pending_qty)
+                on_hand = max(std_on_hand, pr.ready_for_dispatch_qty)
+            else:
+                net_ip = std_inproc
+                on_hand = std_on_hand
 
             # Update StageWIP
             wip_rec.inproc_qty = net_ip

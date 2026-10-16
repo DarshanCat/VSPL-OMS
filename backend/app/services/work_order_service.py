@@ -996,7 +996,6 @@ class WorkOrderService:
                         delivery_date=order.delivery_date if order else None,
                         created_at=wo.created_at,
                     ))
-                    break
 
         items.sort(key=lambda x: (x.delivery_date or date(2099, 12, 31), -x.movable_wip))
         for rank, item in enumerate(items, start=1):

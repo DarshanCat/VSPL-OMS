@@ -24,8 +24,14 @@ from app.services.oms_integration_service import (
 )
 
 def _get_next_movement_id(db: Session) -> str:
-    count = db.query(ProductionMovement).count()
-    return f"MOV-{count + 1:06d}"
+    import re
+    mov_re = re.compile(r"^MOV-(\d+)$")
+    highest = 0
+    for (m_id,) in db.query(ProductionMovement.movement_id).all():
+        m = mov_re.match(m_id or "")
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return f"MOV-{highest + 1:06d}"
 
 class ProductionService:
     @staticmethod

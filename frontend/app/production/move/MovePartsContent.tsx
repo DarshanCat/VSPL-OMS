@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowRightLeft,
   Search,
@@ -53,9 +54,14 @@ const MACHINES = [
 ];
 
 export function MovePartsContent() {
+  const searchParams = useSearchParams();
+  const urlWO = searchParams?.get("wo");
+  const urlStage = searchParams?.get("stage");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
   const [woData, setWoData] = useState<any>(null);
+  const [selectedStageOverride, setSelectedStageOverride] = useState<string | null>(null);
   const [stageState, setStageState] = useState<any>(null);
   const [mlDelayPred, setMlDelayPred] = useState<any>(null);
   const [mlRejPred, setMlRejPred] = useState<any>(null);
@@ -111,9 +117,13 @@ export function MovePartsContent() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableWOs(data);
-          lookupWO(data[0].wo_number);
+          const initialTarget = urlWO || data[0].wo_number;
+          lookupWO(initialTarget, urlStage || undefined);
         } else {
           setAvailableWOs([]);
+          if (urlWO) {
+            lookupWO(urlWO, urlStage || undefined);
+          }
         }
       })
       .catch((err) => {
@@ -169,12 +179,13 @@ export function MovePartsContent() {
       ];
 
   const handleSelectMovable = (item: MovableWorkOrderItem) => {
-    lookupWO(item.wo_number);
+    setSelectedStageOverride(item.from_stage || null);
+    lookupWO(item.wo_number, item.from_stage);
     setQuantityToMove(item.movable_wip);
     document.getElementById("move-form-section")?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const lookupWO = async (woNum: string) => {
+  const lookupWO = async (woNum: string, initialStage?: string) => {
     if (!woNum || !woNum.trim()) return;
     const targetWO = woNum.trim();
 
@@ -201,20 +212,19 @@ export function MovePartsContent() {
       // the available WIP -- an operator must enter what was actually physically moved.
       setQuantityToMove("");
 
-      // Authoritative production/movement breakdown for the actual movement-eligible
-      // SOURCE stage (movable_from_stage) -- not necessarily data.current_stage, which
-      // is the OMS "furthest stage touched" snapshot and advances as soon as the next
-      // stage receives any material, even while this stage still has WIP available to
-      // move. Same data source (get_current_stage_state) the Production Entry screen
-      // uses, so the two screens never show competing numbers for a given stage.
-      const originStage = data.movable_from_stage || data.current_stage;
-      getStageState(targetWO, originStage)
+      const effectiveStage = initialStage || data.movable_from_stage || data.current_stage;
+      setSelectedStageOverride(initialStage || null);
+
+      getStageState(targetWO, effectiveStage)
         .then((s) => setStageState(s))
         .catch(() => setStageState(null));
 
       // Preset machine based on the actual movement destination
-      const destStage = data.movable_to_stage || data.next_allowed_stage;
-      const matchingMach = MACHINES.find((m) => m.stage === destStage || m.stage === originStage);
+      const stgIdx = data.timeline?.findIndex((s: any) => s.stage === effectiveStage);
+      const nextStg = (stgIdx >= 0 && stgIdx + 1 < (data.timeline?.length || 0))
+        ? data.timeline[stgIdx + 1].stage
+        : (data.movable_to_stage || data.next_allowed_stage);
+      const matchingMach = MACHINES.find((m) => m.stage === nextStg || m.stage === effectiveStage);
       if (matchingMach) setSelectedMachine(matchingMach.id);
 
       // Fetch ML risk insights
@@ -245,6 +255,23 @@ export function MovePartsContent() {
     }
   };
 
+  const handleStageSelect = (stg: string) => {
+    setSelectedStageOverride(stg);
+    setFormError("");
+    setQuantityToMove("");
+    if (woData) {
+      getStageState(woData.wo_number, stg)
+        .then((s) => setStageState(s))
+        .catch(() => setStageState(null));
+      const stgIdx = woData.timeline?.findIndex((s: any) => s.stage === stg);
+      const nextStg = (stgIdx >= 0 && stgIdx + 1 < (woData.timeline?.length || 0))
+        ? woData.timeline[stgIdx + 1].stage
+        : (woData.movable_to_stage || woData.next_allowed_stage);
+      const matchingMach = MACHINES.find((m) => m.stage === nextStg || m.stage === stg);
+      if (matchingMach) setSelectedMachine(matchingMach.id);
+    }
+  };
+
   // Tally-Style Enter Key Handler
   const handleKeyDownEnter = (
     e: React.KeyboardEvent,
@@ -266,6 +293,20 @@ export function MovePartsContent() {
     }
   };
 
+  const timelineStages: string[] = woData?.timeline?.map((s: any) => s.stage) || [];
+  const originStage: string | null = selectedStageOverride || (woData ? (woData.movable_from_stage || woData.current_stage) : null);
+  const originIndex = originStage ? timelineStages.indexOf(originStage) : -1;
+  const destStage: string | null = (originIndex >= 0 && originIndex < timelineStages.length - 1)
+    ? timelineStages[originIndex + 1]
+    : (woData ? (woData.movable_to_stage || woData.next_allowed_stage) : null);
+
+  const curTimelineStep = woData?.timeline?.find((s: any) => s.stage === originStage);
+  const availableAtOrigin: number = curTimelineStep
+    ? (curTimelineStep.on_hand_wip ?? 0)
+    : (woData ? (woData.movable_wip || 0) : 0);
+
+  const isTerminalStage = woData && (!destStage || originStage === "DISPATCH" || woData.current_stage === "Completed");
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!woData) return;
@@ -277,9 +318,14 @@ export function MovePartsContent() {
       return;
     }
 
-    const originStageNow = woData.movable_from_stage || woData.current_stage;
-    const destStageNow = woData.movable_to_stage || woData.next_allowed_stage;
-    const availableNow = woData.movable_wip || 0;
+    const originStageNow = originStage;
+    const destStageNow = destStage;
+    const availableNow = availableAtOrigin;
+
+    if (!originStageNow) {
+      setFormError("Source stage could not be determined for this Work Order.");
+      return;
+    }
 
     if (availableNow <= 0) {
       setFormError(
@@ -333,25 +379,26 @@ export function MovePartsContent() {
       });
 
       setShowSuccessModal(true);
-      lookupWO(woData.wo_number);
+      lookupWO(woData.wo_number, originStageNow);
       loadMovableWOs();
     } catch (err: any) {
-      setFormError(err?.response?.data?.detail || "Transfer failed. Please check route and WIP balance.");
+      let detailMsg = "Transfer failed. Please check route and WIP balance.";
+      if (err?.response?.data?.detail) {
+        if (typeof err.response.data.detail === "string") {
+          detailMsg = err.response.data.detail;
+        } else if (Array.isArray(err.response.data.detail)) {
+          detailMsg = err.response.data.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+        } else {
+          detailMsg = JSON.stringify(err.response.data.detail);
+        }
+      } else if (err?.message) {
+        detailMsg = err.message;
+      }
+      setFormError(detailMsg);
     } finally {
       setSubmitting(false);
     }
   };
-
-  const isTerminalStage = woData && (!woData.next_allowed_stage || woData.current_stage === "DISPATCH");
-
-  // The actual origin/destination/available-qty for a NEW movement -- the earliest
-  // stage (by route sequence) that still has WIP available to move, which can be
-  // behind woData.current_stage (see movable_from_stage doc comment on the backend
-  // schema). Falls back to current_stage/available_wip when nothing is movable
-  // anywhere, so "no movable material" banners still show correct, consistent figures.
-  const originStage = woData ? (woData.movable_from_stage || woData.current_stage) : null;
-  const destStage = woData ? (woData.movable_to_stage || woData.next_allowed_stage) : null;
-  const availableAtOrigin = woData ? (woData.movable_wip || 0) : 0;
 
   return (
       <div className="max-w-5xl mx-auto space-y-6">
@@ -612,32 +659,64 @@ export function MovePartsContent() {
 
               {/* Dynamic Route Pipeline Visualizer */}
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block mb-2">
-                  Dynamic Route & Stage Sequence:
-                </span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                    Dynamic Route Sequence (Click any stage to move from it):
+                  </span>
+                  {woData.timeline && woData.timeline.length > 1 && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-[11px] font-semibold text-zinc-500">Source:</span>
+                      <select
+                        value={originStage || ""}
+                        onChange={(e) => handleStageSelect(e.target.value)}
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-2 py-0.5 text-xs font-mono font-bold text-blue-600 focus:outline-none cursor-pointer"
+                      >
+                        {woData.timeline.slice(0, -1).map((step: any) => (
+                          <option key={step.stage} value={step.stage}>
+                            {step.stage} ({step.on_hand_wip || 0} pcs on-hand)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-2">
                   {woData.timeline.map((step: any, i: number) => {
                     const isOrigin = step.stage === originStage;
                     const isDest = step.stage === destStage;
                     const isDone = step.is_completed;
+                    const onHand = step.on_hand_wip || 0;
+                    const canSelect = i < woData.timeline.length - 1;
 
                     return (
                       <React.Fragment key={step.stage}>
-                        <div
+                        <button
+                          type="button"
+                          disabled={!canSelect}
+                          onClick={() => canSelect && handleStageSelect(step.stage)}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold transition-all ${
+                            canSelect ? "cursor-pointer hover:scale-[1.02]" : "cursor-default"
+                          } ${
                             isOrigin
                               ? "bg-blue-600 text-white border-blue-500 shadow-md ring-2 ring-blue-500/30"
                               : isDest
                               ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-400 dark:border-emerald-700"
+                              : onHand > 0
+                              ? "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-700"
                               : isDone
                               ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 opacity-80"
                               : "bg-zinc-50 dark:bg-zinc-950 text-zinc-400 border-zinc-200 dark:border-zinc-800 opacity-50"
                           }`}
                         >
                           <span>{step.stage}</span>
+                          {onHand > 0 && !isOrigin && (
+                            <span className="text-[9px] bg-purple-200 dark:bg-purple-900/60 text-purple-900 dark:text-purple-100 px-1 rounded font-extrabold">
+                              {onHand}
+                            </span>
+                          )}
                           {isOrigin && <span className="text-[9px] bg-white/20 px-1 rounded uppercase">From</span>}
                           {isDest && <span className="text-[9px] bg-emerald-600 text-white px-1 rounded uppercase">To</span>}
-                        </div>
+                        </button>
                         {i < woData.timeline.length - 1 && (
                           <ChevronRight className="h-4 w-4 text-zinc-400 shrink-0" />
                         )}
