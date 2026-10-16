@@ -59,6 +59,10 @@ MATERIAL_MOVEMENT_ROLES = (
 # Only the approval/disposition decision that follows is access-controlled.
 QUALITY_APPROVAL_ROLES = (UserRole.ADMIN, UserRole.QA)
 
+# Material Review Board (MRB): Quality, Planner, Admin, and CEO
+# Authorizes verification, approval, adjustment, and disposition of shop floor OK and rejection entries.
+MRB_ROLES = (UserRole.ADMIN, UserRole.QA, UserRole.PLANNER, UserRole.CEO)
+
 # Read/oversight visibility only (e.g. audit log listing) -- broader than approval
 # since nothing here is a mutation. Kept as its own tuple (not reused for approval)
 # so widening who may *view* oversight data never accidentally widens who may

@@ -37,7 +37,8 @@ import {
   Clock,
   UserCircle,
   AlertOctagon,
-  Link2
+  Link2,
+  ClipboardCheck
 } from "lucide-react";
 import { logout, getCurrentUserRole, getCurrentUser } from "@/lib/api";
 
@@ -230,6 +231,13 @@ const NAV_GROUPS: NavGroup[] = [
         name: "Rejection Tracking",
         href: "/quality/nc",
         icon: <AlertTriangle className="h-4 w-4 text-rose-500" />,
+      },
+      {
+        name: "MRB Review Board",
+        href: "/quality/mrb",
+        icon: <ClipboardCheck className="h-4 w-4 text-amber-500" />,
+        badge: "MRB",
+        roles: ["admin", "qa", "planner", "ceo"],
       },
     ],
   },

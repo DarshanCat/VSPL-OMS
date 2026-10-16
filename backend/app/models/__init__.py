@@ -25,6 +25,7 @@ from app.models.continuous_casting import (
     ContinuousCastingCutRecord,
 )
 from app.models.oms_exception import OMSException
+from app.models.mrb import MRBReview, next_mrb_number
 
 __all__ = [
     "User",
@@ -69,6 +70,8 @@ __all__ = [
     "ContinuousCastingStockLedger",
     "ContinuousCastingCutRecord",
     "OMSException",
+    "MRBReview",
+    "next_mrb_number",
 ]
 
 

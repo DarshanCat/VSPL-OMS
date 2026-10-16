@@ -10,6 +10,7 @@ from app.models.production import ProductionUpdate, ProductionStatus
 from app.models.packing import PackingRecord
 from app.models.nc import NCRecord, next_nc_number
 from app.models.audit import AuditLog
+from app.models.mrb import MRBReview, next_mrb_number
 from app.models.user import User
 from app.schemas.production import (
     MovePartsRequest, MovementResponse,
@@ -365,7 +366,7 @@ class ProductionService:
             wo.heat_number = req.heat_number.strip()
         db.add(movement)
 
-        # 10. Record NC if rejected
+        # 10. Record NC and MRB review if rejected
         if req.rejected_quantity > 0:
             nc_num = next_nc_number(db)
             nc_record = NCRecord(
@@ -380,6 +381,29 @@ class ProductionService:
                 status="Open"
             )
             db.add(nc_record)
+
+            # Auto-route movement rejection to Material Review Board (MRB)
+            mrb_num = next_mrb_number(db)
+            mrb_ticket = MRBReview(
+                mrb_number=mrb_num,
+                movement_id=movement.id,
+                work_order_id=wo.id,
+                stage=matched_from,
+                machine_id=req.machine_id,
+                operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
+                shift=req.shift or "Shift A",
+                heat_number=movement.heat_number,
+                reported_ok_qty=req.quantity_moved,
+                reported_reject_qty=req.rejected_quantity,
+                reported_defect_code=req.defect_code or "DEF-POROSITY",
+                floor_remarks=req.remarks or f"Transfer rejection from {matched_from} to {matched_to}",
+                verified_ok_qty=req.quantity_moved,
+                verified_reject_qty=req.rejected_quantity,
+                verified_defect_code=req.defect_code or "DEF-POROSITY",
+                status="PENDING",
+                disposition="PENDING"
+            )
+            db.add(mrb_ticket)
 
         # 11. Create Audit Log
         audit = AuditLog(
@@ -577,6 +601,30 @@ class ProductionService:
         if req.heat_number and req.heat_number.strip():
             wo.heat_number = req.heat_number.strip()
         db.add(entry)
+        db.flush()
+
+        # Create Material Review Board (MRB) ticket for Quality, Planner, and Admin review
+        mrb_num = next_mrb_number(db)
+        mrb_ticket = MRBReview(
+            mrb_number=mrb_num,
+            production_update_id=entry.id,
+            work_order_id=wo.id,
+            stage=matched_stage,
+            machine_id=req.machine_id,
+            operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
+            shift=req.shift or "Shift A",
+            heat_number=entry.heat_number,
+            reported_ok_qty=req.good_qty,
+            reported_reject_qty=req.rejected_quantity,
+            reported_defect_code=req.defect_code if req.rejected_quantity > 0 else None,
+            floor_remarks=req.remarks,
+            verified_ok_qty=req.good_qty,
+            verified_reject_qty=req.rejected_quantity,
+            verified_defect_code=req.defect_code if req.rejected_quantity > 0 else None,
+            status="PENDING",
+            disposition="PENDING",
+        )
+        db.add(mrb_ticket)
 
         # Log NC if rejected
         if req.rejected_quantity > 0:

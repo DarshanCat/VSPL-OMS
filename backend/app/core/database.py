@@ -336,6 +336,37 @@ def auto_migrate_schema():
         # PO Lines customer_part_number
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS customer_part_number VARCHAR;",
         "UPDATE po_lines SET customer_part_number = (SELECT customer_part_number FROM customer_part_mappings WHERE customer_part_mappings.part_id = po_lines.part_id LIMIT 1) WHERE customer_part_number IS NULL;",
+
+        # MRB Reviews Table
+        "CREATE TABLE IF NOT EXISTS mrb_reviews ("
+        "    id UUID PRIMARY KEY,"
+        "    mrb_number VARCHAR UNIQUE NOT NULL,"
+        "    production_update_id UUID,"
+        "    movement_id UUID,"
+        "    work_order_id UUID NOT NULL,"
+        "    stage VARCHAR NOT NULL,"
+        "    machine_id VARCHAR,"
+        "    operator_name VARCHAR,"
+        "    shift VARCHAR,"
+        "    heat_number VARCHAR,"
+        "    reported_ok_qty INTEGER NOT NULL DEFAULT 0,"
+        "    reported_reject_qty INTEGER NOT NULL DEFAULT 0,"
+        "    reported_defect_code VARCHAR,"
+        "    floor_remarks VARCHAR,"
+        "    verified_ok_qty INTEGER,"
+        "    verified_reject_qty INTEGER,"
+        "    verified_defect_code VARCHAR,"
+        "    status VARCHAR NOT NULL DEFAULT 'PENDING',"
+        "    disposition VARCHAR DEFAULT 'PENDING',"
+        "    reviewed_by_id UUID,"
+        "    reviewed_by_name VARCHAR,"
+        "    reviewed_at TIMESTAMPTZ,"
+        "    review_notes VARCHAR,"
+        "    created_at TIMESTAMPTZ DEFAULT NOW(),"
+        "    updated_at TIMESTAMPTZ DEFAULT NOW()"
+        ");",
+        "CREATE INDEX IF NOT EXISTS ix_mrb_reviews_status ON mrb_reviews (status);",
+        "CREATE INDEX IF NOT EXISTS ix_mrb_reviews_created_at ON mrb_reviews (created_at);",
     ]
 
 

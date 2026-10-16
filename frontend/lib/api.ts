@@ -1354,4 +1354,121 @@ export async function updateMasterPart(
   return data;
 }
 
+// ==========================================
+// Material Review Board (MRB)
+// ==========================================
+
+export interface MRBReviewItem {
+  id: string;
+  mrb_number: string;
+  production_update_id?: string | null;
+  movement_id?: string | null;
+  work_order_id: string;
+  wo_number: string;
+  part_number?: string | null;
+  part_name?: string | null;
+  customer_name?: string | null;
+  stage: string;
+  machine_id?: string | null;
+  operator_name?: string | null;
+  shift?: string | null;
+  heat_number?: string | null;
+
+  reported_ok_qty: number;
+  reported_reject_qty: number;
+  reported_defect_code?: string | null;
+  floor_remarks?: string | null;
+
+  verified_ok_qty?: number | null;
+  verified_reject_qty?: number | null;
+  verified_defect_code?: string | null;
+
+  status: "PENDING" | "APPROVED" | "ADJUSTED" | "REJECTED";
+  disposition?: string | null;
+
+  reviewed_by_id?: string | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface MRBListResponse {
+  total_count: number;
+  pending_count: number;
+  approved_count: number;
+  adjusted_count: number;
+  rejected_count: number;
+  items: MRBReviewItem[];
+}
+
+export interface MRBReviewDecisionRequest {
+  action: "APPROVE" | "ADJUST" | "REJECT";
+  verified_ok_qty?: number;
+  verified_reject_qty?: number;
+  verified_defect_code?: string;
+  disposition?: string;
+  review_notes?: string;
+}
+
+export interface MRBDecisionResponse {
+  success: boolean;
+  message: string;
+  item: MRBReviewItem;
+}
+
+export async function getMRBReviews(params?: {
+  status?: string;
+  stage?: string;
+  wo_number?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<MRBListResponse> {
+  const { data } = await api.get("/api/v1/mrb/reviews", { params });
+  return data;
+}
+
+export async function getMRBReview(reviewId: string): Promise<MRBReviewItem> {
+  const { data } = await api.get(`/api/v1/mrb/reviews/${encodeURIComponent(reviewId)}`);
+  return data;
+}
+
+export async function submitMRBDecision(
+  reviewId: string,
+  payload: MRBReviewDecisionRequest
+): Promise<MRBDecisionResponse> {
+  const { data } = await api.post(`/api/v1/mrb/reviews/${encodeURIComponent(reviewId)}/decision`, payload);
+  return data;
+}
+
+export async function approveMRBReview(
+  reviewId: string,
+  payload?: { disposition?: string; review_notes?: string }
+): Promise<MRBDecisionResponse> {
+  const { data } = await api.post(`/api/v1/mrb/reviews/${encodeURIComponent(reviewId)}/approve`, {
+    action: "APPROVE",
+    ...payload,
+  });
+  return data;
+}
+
+export async function adjustMRBReview(
+  reviewId: string,
+  payload: {
+    verified_ok_qty: number;
+    verified_reject_qty: number;
+    verified_defect_code?: string;
+    disposition?: string;
+    review_notes?: string;
+  }
+): Promise<MRBDecisionResponse> {
+  const { data } = await api.post(`/api/v1/mrb/reviews/${encodeURIComponent(reviewId)}/adjust`, {
+    action: "ADJUST",
+    ...payload,
+  });
+  return data;
+}
+
 
