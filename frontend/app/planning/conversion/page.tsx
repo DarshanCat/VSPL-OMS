@@ -7,7 +7,8 @@ import {
   AlertTriangle,
   Layers,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  RotateCcw
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { getWorkOrders, createConversion } from "@/lib/api";
@@ -92,6 +93,21 @@ export default function ConversionPage() {
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Reallocate pieces between Work Orders & OARs with strict debit-stage WIP validation and lineage tracking.
           </p>
+        </div>
+
+        {/* Customer Returns & Complaints Link Banner */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3.5 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 rounded-2xl text-xs">
+          <div className="flex items-center gap-2 text-rose-800 dark:text-rose-300">
+            <RotateCcw className="h-4 w-4 text-rose-600 shrink-0" />
+            <span>Looking to convert a <strong>Customer Return / Rejection</strong> into a new Work Order?</span>
+          </div>
+          <Link
+            href="/dispatch"
+            className="inline-flex items-center gap-1 font-bold text-rose-700 dark:text-rose-300 hover:underline shrink-0"
+          >
+            <span>Customer Returns & Complaints Bay</span>
+            <ArrowRight className="h-3 w-3" />
+          </Link>
         </div>
 
         {error && (

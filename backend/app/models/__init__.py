@@ -24,10 +24,13 @@ from app.models.continuous_casting import (
     ContinuousCastingRouting, ContinuousCastingAllocation, ContinuousCastingStockLedger,
     ContinuousCastingCutRecord,
 )
+from app.models.customer_return import CustomerReturn, next_return_number
 from app.models.oms_exception import OMSException
 from app.models.mrb import MRBReview, next_mrb_number
 
 __all__ = [
+    "CustomerReturn",
+    "next_return_number",
     "User",
     "UserRole",
     "Customer",

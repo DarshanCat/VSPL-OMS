@@ -483,6 +483,49 @@ export async function updatePacking(payload: {
 }
 
 // Dispatch
+export interface DispatchItem {
+  id: string;
+  work_order_id: string;
+  wo_number: string;
+  customer_code?: string;
+  customer_name: string;
+  customer_po: string;
+  part_number: string;
+  invoice_number: string;
+  dispatched_qty: number;
+  dispatch_date: string;
+  dispatcher_name?: string | null;
+  unit_price?: number;
+  total_invoice_value?: number;
+  payment_status?: "UNPAID" | "PAID" | "PARTIALLY_PAID" | "OVERDUE" | string;
+  paid_amount?: number;
+  payment_date?: string | null;
+  payment_reference?: string | null;
+  payment_remarks?: string | null;
+}
+
+export interface CustomerReturnItem {
+  id: string;
+  return_number: string;
+  customer_code: string;
+  customer_name: string;
+  customer_po?: string | null;
+  invoice_number?: string | null;
+  original_wo_number?: string | null;
+  part_number: string;
+  returned_qty: number;
+  unit_price: number;
+  total_return_value: number;
+  complaint_reason: string;
+  complaint_date: string;
+  status: string;
+  conversion_wo_number: string;
+  entry_stage: string;
+  destination_oar_number?: string | null;
+  created_by_name?: string | null;
+  created_at: string;
+}
+
 export async function getDispatchQueue() {
   const { data } = await api.get("/api/v1/dispatch/queue");
   return data;
@@ -492,17 +535,68 @@ export async function executeDispatch(payload: {
   wo_number: string;
   invoice_number: string;
   dispatched_quantity: number;
+  unit_price?: number;
+  payment_status?: string;
+  paid_amount?: number;
+  payment_reference?: string;
   customer_po?: string;
   vehicle_number?: string;
   transporter?: string;
   remarks?: string;
+  client_request_id?: string;
 }) {
   const { data } = await api.post("/api/v1/dispatch/ship", payload);
   return data;
 }
 
-export async function getDispatchHistory() {
+export async function getDispatchHistory(): Promise<DispatchItem[]> {
   const { data } = await api.get("/api/v1/dispatch/history");
+  return data;
+}
+
+export async function updateInvoicePayment(dispatchId: string, payload: {
+  payment_status: string;
+  paid_amount?: number;
+  payment_date?: string;
+  payment_reference?: string;
+  payment_remarks?: string;
+}): Promise<DispatchItem> {
+  const { data } = await api.patch(`/api/v1/dispatch/${encodeURIComponent(dispatchId)}/payment`, payload);
+  return data;
+}
+
+export async function lookupProductPricing(params: {
+  customer_code?: string;
+  part_number?: string;
+  wo_number?: string;
+}): Promise<{ unit_price: number; source: string }> {
+  const { data } = await api.get("/api/v1/dispatch/pricing-lookup", { params });
+  return data;
+}
+
+export async function createCustomerReturn(payload: {
+  customer_code: string;
+  customer_name?: string;
+  customer_po?: string;
+  invoice_number?: string;
+  original_wo_number?: string;
+  part_number: string;
+  returned_qty: number;
+  unit_price?: number;
+  complaint_reason: string;
+  conversion_wo_number?: string;
+  entry_stage?: string;
+  destination_oar_number?: string;
+}) {
+  const { data } = await api.post("/api/v1/dispatch/returns", payload);
+  return data;
+}
+
+export async function getCustomerReturns(params?: {
+  customer_code?: string;
+  search?: string;
+}): Promise<CustomerReturnItem[]> {
+  const { data } = await api.get("/api/v1/dispatch/returns", { params });
   return data;
 }
 

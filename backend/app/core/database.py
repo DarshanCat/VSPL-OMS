@@ -206,6 +206,13 @@ def auto_migrate_schema():
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS remarks VARCHAR;",
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS created_by UUID;",
         "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS unit_price FLOAT DEFAULT 0.0;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS total_invoice_value FLOAT DEFAULT 0.0;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS payment_status VARCHAR DEFAULT 'UNPAID';",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS paid_amount FLOAT DEFAULT 0.0;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS payment_date TIMESTAMP;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS payment_reference VARCHAR;",
+        "ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS payment_remarks VARCHAR;",
 
         # NC Records
         "ALTER TABLE nc_records ADD COLUMN IF NOT EXISTS nc_number VARCHAR;",
@@ -379,6 +386,39 @@ def auto_migrate_schema():
         ");",
         "CREATE INDEX IF NOT EXISTS ix_mrb_reviews_status ON mrb_reviews (status);",
         "CREATE INDEX IF NOT EXISTS ix_mrb_reviews_created_at ON mrb_reviews (created_at);",
+
+        # Customer Returns & Complaints
+        "CREATE TABLE IF NOT EXISTS customer_returns ("
+        "    id UUID PRIMARY KEY,"
+        "    return_number VARCHAR UNIQUE NOT NULL,"
+        "    customer_id UUID REFERENCES customers(id),"
+        "    customer_code VARCHAR NOT NULL,"
+        "    customer_name VARCHAR NOT NULL,"
+        "    customer_po VARCHAR,"
+        "    invoice_number VARCHAR,"
+        "    original_wo_id UUID REFERENCES work_orders(id),"
+        "    original_wo_number VARCHAR,"
+        "    part_id UUID REFERENCES parts(id),"
+        "    part_number VARCHAR NOT NULL,"
+        "    returned_qty INTEGER NOT NULL,"
+        "    unit_price FLOAT NOT NULL DEFAULT 0.0,"
+        "    total_return_value FLOAT NOT NULL DEFAULT 0.0,"
+        "    complaint_reason VARCHAR NOT NULL,"
+        "    complaint_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    status VARCHAR NOT NULL DEFAULT 'SENT_TO_CONVERSION',"
+        "    conversion_wo_id UUID REFERENCES work_orders(id),"
+        "    conversion_wo_number VARCHAR NOT NULL,"
+        "    entry_stage VARCHAR NOT NULL DEFAULT 'F1',"
+        "    destination_oar_id UUID REFERENCES orders(id),"
+        "    destination_oar_number VARCHAR,"
+        "    created_by_id UUID REFERENCES users(id),"
+        "    created_by_name VARCHAR,"
+        "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+        "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ");",
+        "CREATE INDEX IF NOT EXISTS ix_customer_returns_customer_code ON customer_returns (customer_code);",
+        "CREATE INDEX IF NOT EXISTS ix_customer_returns_return_number ON customer_returns (return_number);",
+        "CREATE INDEX IF NOT EXISTS ix_customer_returns_conversion_wo ON customer_returns (conversion_wo_number);",
     ]
 
 
