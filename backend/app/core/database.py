@@ -342,6 +342,10 @@ def auto_migrate_schema():
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS line_total FLOAT DEFAULT 0.0;",
         "ALTER TABLE po_master ADD COLUMN IF NOT EXISTS total_value FLOAT DEFAULT 0.0;",
 
+        # Schedule Master Pricing / Value
+        "ALTER TABLE schedule_master ADD COLUMN IF NOT EXISTS unit_price FLOAT DEFAULT 0.0;",
+        "ALTER TABLE schedule_master ADD COLUMN IF NOT EXISTS total_value FLOAT DEFAULT 0.0;",
+
         # MRB Reviews Table
         "CREATE TABLE IF NOT EXISTS mrb_reviews ("
         "    id UUID PRIMARY KEY,"

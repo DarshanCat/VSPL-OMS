@@ -165,6 +165,8 @@ class ScheduleCreate(BaseModel):
     customer_code: str = Field(..., max_length=100)
     part_number: str = Field(..., max_length=100)
     scheduled_qty: int = Field(..., gt=0, le=1_000_000)
+    unit_price: Optional[float] = Field(0.0, ge=0)
+    total_value: Optional[float] = Field(0.0, ge=0)
     required_date: Optional[date] = None
     customer_schedule_ref: Optional[str] = Field(None, max_length=200)
 
@@ -176,6 +178,8 @@ class ScheduleOut(BaseModel):
     customer_name: str
     part_number: str
     scheduled_qty: int
+    unit_price: Optional[float] = 0.0
+    total_value: Optional[float] = 0.0
     required_date: Optional[date] = None
     customer_schedule_ref: Optional[str] = None
     po_status: str

@@ -804,9 +804,14 @@ class ScheduleMasterService:
     @staticmethod
     def _schedule_out(s: ScheduleMaster) -> ScheduleOut:
         linked_order = s.orders[0] if s.orders else None
+        u_price = getattr(s, "unit_price", 0.0) or 0.0
+        t_val = getattr(s, "total_value", 0.0)
+        if t_val is None or t_val == 0.0:
+            t_val = round(s.scheduled_qty * u_price, 2)
         return ScheduleOut(
             id=str(s.id), schedule_number=s.schedule_number, customer_code=s.customer.customer_code,
             customer_name=s.customer.name, part_number=s.part.part_number, scheduled_qty=s.scheduled_qty,
+            unit_price=round(u_price, 2), total_value=round(t_val, 2),
             required_date=s.required_date, customer_schedule_ref=s.customer_schedule_ref,
             po_status=s.po_status.value, linked_oar_number=linked_order.oar_number if linked_order else None,
         )
@@ -832,15 +837,21 @@ class ScheduleMasterService:
         count = db.query(ScheduleMaster).count()
         schedule_number = f"SCH-{count + 1:05d}"
 
+        u_price = round(float(req.unit_price or 0.0), 2)
+        t_val = round(float(req.scheduled_qty * u_price), 2)
+
         schedule = ScheduleMaster(
             schedule_number=schedule_number, customer_id=customer.id, part_id=part.id,
-            scheduled_qty=req.scheduled_qty, required_date=req.required_date,
+            scheduled_qty=req.scheduled_qty,
+            unit_price=u_price,
+            total_value=t_val,
+            required_date=req.required_date,
             customer_schedule_ref=req.customer_schedule_ref, po_status=ScheduleStatus.SCHEDULED,
             created_by_id=current_user.id if current_user else None,
             created_by_name=current_user.full_name if current_user else "System",
         )
         db.add(schedule)
-        _audit(db, current_user, "SCHEDULE_CREATED", "ScheduleMaster", schedule_number, details=f"qty={req.scheduled_qty}")
+        _audit(db, current_user, "SCHEDULE_CREATED", "ScheduleMaster", schedule_number, details=f"qty={req.scheduled_qty}, unit_price={u_price}, total_value={t_val}")
         db.commit()
         db.refresh(schedule)
         return ScheduleMasterService._schedule_out(schedule)

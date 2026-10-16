@@ -451,3 +451,28 @@ def test_po_unit_price_and_total_value_calculation(client):
     assert upd_data["total_value"] == 27000.00
     assert upd_data["total_qty"] == 400
 
+
+def test_schedule_unit_price_and_total_value_calculation(client):
+    headers = _auth(_login(client))
+    customer = _create_customer(client, headers)
+
+    resp = client.post(
+        "/api/v1/masters/schedules",
+        headers=headers,
+        json={
+            "customer_code": customer["customer_code"],
+            "part_number": "BRZ-BUSH-100",
+            "scheduled_qty": 250,
+            "unit_price": 75.00,
+            "customer_schedule_ref": "SCH-REF-01",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    # 250 * 75.00 = 18750.00
+    assert data["scheduled_qty"] == 250
+    assert data["unit_price"] == 75.00
+    assert data["total_value"] == 18750.00
+
+

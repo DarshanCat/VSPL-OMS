@@ -25,6 +25,7 @@ export default function ScheduleMasterPage() {
   const [customerCode, setCustomerCode] = useState("");
   const [partNumber, setPartNumber] = useState("");
   const [scheduledQty, setScheduledQty] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
   const [requiredDate, setRequiredDate] = useState("");
   const [customerScheduleRef, setCustomerScheduleRef] = useState("");
   const [createError, setCreateError] = useState("");
@@ -59,11 +60,13 @@ export default function ScheduleMasterPage() {
         customer_code: customerCode,
         part_number: partNumber,
         scheduled_qty: Number(scheduledQty),
+        unit_price: unitPrice ? Number(unitPrice) : 0,
         required_date: requiredDate || undefined,
         customer_schedule_ref: customerScheduleRef || undefined,
       });
       setPartNumber("");
       setScheduledQty("");
+      setUnitPrice("");
       setRequiredDate("");
       setCustomerScheduleRef("");
       await loadAll();
@@ -73,6 +76,12 @@ export default function ScheduleMasterPage() {
       setCreating(false);
     }
   }
+
+  const totalQuantity = schedules.reduce((acc, s) => acc + (s.scheduled_qty || 0), 0);
+  const totalScheduledValue = schedules.reduce(
+    (acc, s) => acc + (s.total_value || ((s.scheduled_qty || 0) * (s.unit_price || 0))),
+    0
+  );
 
   return (
     <AppShell>
@@ -113,11 +122,26 @@ export default function ScheduleMasterPage() {
             <input required type="number" min={1} placeholder="Scheduled qty" value={scheduledQty}
               onChange={(e) => setScheduledQty(e.target.value)}
               className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+            <input type="number" step="any" min={0} placeholder="Value / Piece (₹) (Optional)" value={unitPrice}
+              onChange={(e) => setUnitPrice(e.target.value)}
+              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
             <input type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)}
               className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
             <input placeholder="Customer schedule reference" value={customerScheduleRef}
               onChange={(e) => setCustomerScheduleRef(e.target.value)}
-              className="md:col-span-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+
+            {Number(scheduledQty) > 0 && Number(unitPrice) > 0 && (
+              <div className="md:col-span-3 flex items-center justify-between p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs">
+                <span className="font-semibold text-zinc-600 dark:text-zinc-300">
+                  Calculated Total Value ({Number(scheduledQty).toLocaleString()} pcs @ ₹{Number(unitPrice).toLocaleString("en-IN", { minimumFractionDigits: 2 })}):
+                </span>
+                <span className="font-extrabold text-blue-700 dark:text-blue-400 font-mono text-sm">
+                  ₹{(Number(scheduledQty) * Number(unitPrice)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+
             <button type="submit" disabled={creating}
               className="md:col-span-3 justify-self-end rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors">
               {creating ? "Creating..." : "Add Schedule"}
@@ -126,9 +150,20 @@ export default function ScheduleMasterPage() {
         </div>
 
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
-            <FileSpreadsheet className="h-4 w-4 text-zinc-500" />
-            <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing Schedules</h3>
+          <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-zinc-500" />
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing Schedules</h3>
+              <span className="text-xs text-zinc-400">({schedules.length})</span>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <span className="text-zinc-500">
+                Total Qty: <strong className="font-mono text-zinc-800 dark:text-zinc-200">{totalQuantity.toLocaleString()}</strong>
+              </span>
+              <span className="text-zinc-500">
+                Total Scheduled Value: <strong className="font-mono text-blue-600 dark:text-blue-400">₹{totalScheduledValue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              </span>
+            </div>
           </div>
           {listError && (
             <div className="m-4 flex items-start gap-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
@@ -146,6 +181,8 @@ export default function ScheduleMasterPage() {
                   <th className="text-left px-4 py-2 font-semibold">Customer</th>
                   <th className="text-left px-4 py-2 font-semibold">Part</th>
                   <th className="text-right px-4 py-2 font-semibold">Qty</th>
+                  <th className="text-right px-4 py-2 font-semibold">Rate / Pc (₹)</th>
+                  <th className="text-right px-4 py-2 font-semibold">Total Value (₹)</th>
                   <th className="text-left px-4 py-2 font-semibold">Required Date</th>
                   <th className="text-left px-4 py-2 font-semibold">Status</th>
                   <th className="text-left px-4 py-2 font-semibold">Linked OAR</th>
@@ -157,7 +194,19 @@ export default function ScheduleMasterPage() {
                     <td className="px-4 py-2 font-mono">{s.schedule_number}</td>
                     <td className="px-4 py-2">{s.customer_code} — {s.customer_name}</td>
                     <td className="px-4 py-2 font-mono">{s.part_number}</td>
-                    <td className="px-4 py-2 text-right">{s.scheduled_qty}</td>
+                    <td className="px-4 py-2 text-right font-mono">{s.scheduled_qty}</td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {s.unit_price && s.unit_price > 0
+                        ? `₹${Number(s.unit_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                      {s.total_value && s.total_value > 0
+                        ? `₹${Number(s.total_value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : s.unit_price && s.scheduled_qty
+                        ? `₹${(Number(s.scheduled_qty) * Number(s.unit_price)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "-"}
+                    </td>
                     <td className="px-4 py-2">{s.required_date || "-"}</td>
                     <td className="px-4 py-2">
                       <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_STYLES[s.po_status] || ""}`}>

@@ -86,6 +86,8 @@ class ScheduleMaster(Base):
     customer_id = Column(GUID, ForeignKey("customers.id"), nullable=False)
     part_id = Column(GUID, ForeignKey("parts.id"), nullable=False)
     scheduled_qty = Column(Integer, nullable=False)
+    unit_price = Column(Float, nullable=True, default=0.0)
+    total_value = Column(Float, nullable=True, default=0.0)
     required_date = Column(Date, nullable=True)
     customer_schedule_ref = Column(String, nullable=True)
     po_status = Column(Enum(ScheduleStatus), nullable=False, default=ScheduleStatus.SCHEDULED)

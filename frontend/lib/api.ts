@@ -752,6 +752,8 @@ export interface ScheduleOut {
   customer_name: string;
   part_number: string;
   scheduled_qty: number;
+  unit_price?: number;
+  total_value?: number;
   required_date?: string | null;
   customer_schedule_ref?: string | null;
   po_status: string;
@@ -769,6 +771,7 @@ export async function createSchedule(payload: {
   customer_code: string;
   part_number: string;
   scheduled_qty: number;
+  unit_price?: number;
   required_date?: string;
   customer_schedule_ref?: string;
 }): Promise<ScheduleOut> {
