@@ -16,11 +16,12 @@ import {
   Plus,
   X,
   Calendar,
-  Edit3
+  Edit3,
+  Download
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
-import { getOarList, OARListItem, createReplacement, ReplacementResult, updateOAR } from "@/lib/api";
+import { getOarList, OARListItem, createReplacement, ReplacementResult, updateOAR, exportOarsExcel } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -79,6 +80,8 @@ function POCoverageBadge({
 export default function OarWoListPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [classificationFilter, setClassificationFilter] = useState<"ALL" | "Production" | "NPD">("ALL");
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [oars, setOars] = useState<OARListItem[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
@@ -94,13 +97,14 @@ export default function OarWoListPage() {
   const [patchError, setPatchError] = useState<string>("");
   const [patchSuccess, setPatchSuccess] = useState<ReplacementResult | null>(null);
 
-  const fetchOars = useCallback(async (searchTerm: string, status: string) => {
+  const fetchOars = useCallback(async (searchTerm: string, status: string, classification: string = "ALL") => {
     setLoading(true);
     setError("");
     try {
       const data = await getOarList({
         search: searchTerm.trim() || undefined,
         status_filter: status || undefined,
+        classification: classification === "ALL" ? undefined : classification,
         limit: 200
       });
       const items = Array.isArray(data) ? data : [];
@@ -121,8 +125,19 @@ export default function OarWoListPage() {
   }, []);
 
   useEffect(() => {
-    fetchOars("", "");
-  }, [fetchOars]);
+    fetchOars("", "", classificationFilter);
+  }, [fetchOars, classificationFilter]);
+
+  const handleExportExcel = async () => {
+    try {
+      setExportingExcel(true);
+      await exportOarsExcel(classificationFilter === "ALL" ? undefined : classificationFilter);
+    } catch (err: any) {
+      setError(err?.message || "Failed to export Excel dump. Please check connection.");
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   const toggleExpand = (oarNumber: string) => {
     setExpanded((prev) => ({ ...prev, [oarNumber]: !prev[oarNumber] }));
@@ -231,26 +246,103 @@ export default function OarWoListPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-              Order Tracking &amp; Genealogy
-            </span>
-            <span className="text-xs text-zinc-400">Authoritative OAR / Patch WO Roll-Up</span>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
+                Order Tracking &amp; Genealogy
+              </span>
+              <span className="text-xs text-zinc-400">Authoritative OAR / Patch WO Roll-Up</span>
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
+              OAR Production Genealogy
+            </h1>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Complete production genealogy across original and patch/replacement Work Orders. Separate tracking for Series Production vs NPD.
+            </p>
           </div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mt-1">
-            OAR Production Genealogy
-          </h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Complete production genealogy across original and patch/replacement Work Orders. Shows authoritative
-            production entries, stage rejections, final good contributions, and OAR fulfillment without double-counting.
-          </p>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={exportingExcel}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 shadow-xs transition cursor-pointer"
+              title="Download comprehensive multi-tab Excel dump with Open OARs, WOs, Traceability Matrix, and Data Capture Specifications"
+            >
+              <Download className={`h-4 w-4 ${exportingExcel ? "animate-bounce text-emerald-600" : "text-emerald-600 dark:text-emerald-400"}`} />
+              <span>{exportingExcel ? "Exporting Excel..." : "Export to Excel (.xlsx)"}</span>
+            </button>
+
+            <Link
+              href="/orders/intake"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 px-3.5 py-2.5 text-xs font-bold text-white shadow-xs transition"
+            >
+              <Plus className="h-4 w-4" />
+              <span>New OAR Intake</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Classification Filter Tabs */}
+        <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              setClassificationFilter("ALL");
+              fetchOars(search, statusFilter, "ALL");
+            }}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "ALL"
+                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs"
+                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            }`}
+          >
+            <span>All Classifications</span>
+            <span className="text-[10px] opacity-75 font-mono">({oars.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setClassificationFilter("Production");
+              fetchOars(search, statusFilter, "Production");
+            }}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "Production"
+                ? "bg-emerald-600 text-white shadow-xs"
+                : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50"
+            }`}
+          >
+            <span>🏭 Production Series</span>
+            {classificationFilter === "Production" && (
+              <span className="text-[10px] opacity-90 font-mono">({oars.length})</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setClassificationFilter("NPD");
+              fetchOars(search, statusFilter, "NPD");
+            }}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "NPD"
+                ? "bg-rose-600 text-white shadow-xs"
+                : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50"
+            }`}
+          >
+            <span>🔬 NPD Traceability</span>
+            {classificationFilter === "NPD" && (
+              <span className="text-[10px] opacity-90 font-mono">({oars.length})</span>
+            )}
+          </button>
         </div>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            fetchOars(search, statusFilter);
+            fetchOars(search, statusFilter, classificationFilter);
           }}
           className="flex flex-col sm:flex-row gap-3"
         >
@@ -268,7 +360,7 @@ export default function OarWoListPage() {
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
-              fetchOars(search, e.target.value);
+              fetchOars(search, e.target.value, classificationFilter);
             }}
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
           >
@@ -286,7 +378,7 @@ export default function OarWoListPage() {
           </button>
           <button
             type="button"
-            onClick={() => fetchOars(search, statusFilter)}
+            onClick={() => fetchOars(search, statusFilter, classificationFilter)}
             disabled={loading}
             title="Fetch latest production and order data"
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1.5"
@@ -326,7 +418,9 @@ export default function OarWoListPage() {
                   <React.Fragment key={oar.oar_number}>
                     <tr
                       onClick={() => toggleExpand(oar.oar_number)}
-                      className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40 cursor-pointer"
+                      className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40 cursor-pointer ${
+                        oar.classification?.toUpperCase() === "NPD" ? "bg-rose-50/20 dark:bg-rose-950/10" : ""
+                      }`}
                     >
                       <td className="py-3 px-3 text-zinc-400">
                         {expanded[oar.oar_number] ? (
@@ -335,8 +429,21 @@ export default function OarWoListPage() {
                           <ChevronRight className="h-3.5 w-3.5" />
                         )}
                       </td>
-                      <td className="py-3 px-3 font-mono font-bold text-zinc-900 dark:text-zinc-100">
-                        {oar.oar_number}
+                      <td className="py-3 px-3">
+                        <div className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                          {oar.oar_number}
+                        </div>
+                        <div className="mt-1">
+                          {oar.classification?.toUpperCase() === "NPD" ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                              🔬 NPD
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              🏭 PROD
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-3">
                         <div className="text-zinc-800 dark:text-zinc-200">{oar.customer_name}</div>
@@ -542,7 +649,14 @@ export default function OarWoListPage() {
                                       {oar.work_orders.map((wo) => (
                                         <tr key={wo.wo_number} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
                                           <td className="py-2 px-2.5 font-mono font-bold text-zinc-900 dark:text-zinc-100">
-                                            {wo.wo_number}
+                                            <div className="flex items-center gap-1.5">
+                                              <span>{wo.wo_number}</span>
+                                              {wo.classification?.toUpperCase() === "NPD" && (
+                                                <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                                                  NPD
+                                                </span>
+                                              )}
+                                            </div>
                                           </td>
                                           <td className="py-2 px-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
                                             {formatDate(wo.wo_date || wo.created_at)}

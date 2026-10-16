@@ -212,7 +212,7 @@ class OperationsService:
             max_batch_size=effective_batch_size,
             delivery_date=req.delivery_date,
             commitment_date=req.commitment_date,
-            order_type=req.order_type or "Standard",
+            order_type=req.order_type if req.order_type in ("Production", "NPD") else "Production",
             status=req.status,
             source_type=source_type,
             po_line_id=po_line.id if po_line else None,
@@ -252,7 +252,8 @@ class OperationsService:
                     current_stage="F1",
                     projected_final_good=wo_qty,
                     shortfall="No",
-                    status=WOStatus.IN_PRODUCTION
+                    status=WOStatus.IN_PRODUCTION,
+                    classification=order.order_type or "Production"
                 )
                 db.add(wo)
                 db.flush()
@@ -317,6 +318,7 @@ class OperationsService:
             total_qty=req.po_quantity,
             source_type=source_type,
             oar_po_status=oar_po_status,
+            order_type=order.order_type or "Production",
             message=msg
         )
 
@@ -361,6 +363,12 @@ class OperationsService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Invalid OAR status '{payload.status}'. Valid statuses: {valid_st}."
                     )
+            if payload.order_type is not None:
+                new_type = payload.order_type.strip()
+                if new_type in ("Production", "NPD"):
+                    order.order_type = new_type
+                    for wo in order.work_orders:
+                        wo.classification = new_type
 
         if payload.commitment_date is not None:
             changes.append(f"Commitment Date: {old_commit} -> {payload.commitment_date}")
@@ -368,6 +376,8 @@ class OperationsService:
             changes.append(f"Delivery Date -> {payload.delivery_date}")
         if payload.status is not None:
             changes.append(f"Status -> {payload.status}")
+        if payload.order_type is not None:
+            changes.append(f"Classification -> {payload.order_type}")
 
         audit = AuditLog(
             user_id=current_user.id if current_user else None,
@@ -496,6 +506,7 @@ class OperationsService:
                 status=WOStatus.PLANNED,
                 casting_process=req.casting_process or "CENTRIFUGAL",
                 heat_number=req.heat_number,
+                classification=req.classification or order.order_type or "Production",
                 created_at=wo_created_dt
             )
             db.add(wo)

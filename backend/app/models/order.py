@@ -66,7 +66,7 @@ class Order(Base):
     max_batch_size = Column(Integer, nullable=True, default=1000)
     delivery_date = Column(Date)
     commitment_date = Column(Date, nullable=True)
-    order_type = Column(String)
+    order_type = Column(String(50), nullable=False, default="Production")  # 'Production' | 'NPD'
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

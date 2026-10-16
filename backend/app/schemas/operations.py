@@ -14,7 +14,7 @@ class OrderIntakeCreate(BaseModel):
     max_batch_size: Optional[int] = Field(None, gt=0, le=1_000_000)
     delivery_date: Optional[date] = None
     commitment_date: Optional[date] = None
-    order_type: Optional[str] = Field("Standard", max_length=100)
+    order_type: Optional[str] = Field("Production", max_length=100, description="'Production' or 'NPD'")
     status: OrderStatus = OrderStatus.ACCEPT
     remarks: Optional[str] = Field(None, max_length=2000)
     wo_quantities: Optional[List[int]] = Field(
@@ -45,12 +45,14 @@ class OrderIntakeResponse(BaseModel):
     total_qty: int
     source_type: str = "po"
     oar_po_status: Optional[str] = None
+    order_type: str = "Production"
     message: str
 
 class OARUpdate(BaseModel):
     commitment_date: Optional[date] = None
     delivery_date: Optional[date] = None
     status: Optional[str] = Field(None, description="'accept', 'hold', or 'reject'")
+    order_type: Optional[str] = Field(None, description="'Production' or 'NPD'")
     remarks: Optional[str] = Field(None, max_length=2000)
 
 class WorkOrderCreatePayload(BaseModel):
@@ -59,6 +61,7 @@ class WorkOrderCreatePayload(BaseModel):
     physical_wo_qty: int = Field(..., gt=0, le=1_000_000)
     wo_quantities: Optional[List[int]] = Field(None, description="Optional split quantities into multiple Work Orders")
     allow_overrun: bool = Field(False, description="Allow generating Work Order(s) even if quantity exceeds remaining OAR balance")
+    classification: Optional[str] = Field(None, max_length=50, description="'Production' or 'NPD'. If omitted, inherited from OAR.")
     wo_date: Optional[date] = None
     target_date: Optional[date] = None
     casting_process: Optional[str] = Field("CENTRIFUGAL", max_length=50)

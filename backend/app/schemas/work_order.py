@@ -49,6 +49,7 @@ class WorkOrderListItem(BaseModel):
     is_released: bool = False
     ready_for_production: bool = False
     heat_number: Optional[str] = None
+    classification: Optional[str] = "Production"
 
 class StageTimelineStep(BaseModel):
     stage: str
@@ -128,6 +129,7 @@ class WorkOrderTrackingDetail(BaseModel):
     yield_pct: float
     created_at: datetime
     heat_number: Optional[str] = None
+    classification: Optional[str] = "Production"
 
 class OARWorkOrderSummary(BaseModel):
     wo_id: str
@@ -156,6 +158,7 @@ class OARWorkOrderSummary(BaseModel):
     is_released: bool = False
     ready_for_production: bool = False
     heat_number: Optional[str] = None
+    classification: Optional[str] = "Production"
 
 class PlanningSummaryResponse(BaseModel):
     unreleased_count: int
@@ -176,6 +179,8 @@ class OARListItem(BaseModel):
     oar_po_status: Optional[str] = None
     po_matched: bool = False
     po_coverage_status: Optional[str] = "COMMERCIAL_PO_PENDING"
+    order_type: Optional[str] = "Production"
+    classification: Optional[str] = "Production"
     part_number: str
     oar_qty: int
     allocated_qty: int
@@ -206,6 +211,8 @@ class OARGenealogyResponse(BaseModel):
     oar_po_status: Optional[str] = None
     po_matched: bool = False
     po_coverage_status: Optional[str] = "COMMERCIAL_PO_PENDING"
+    order_type: Optional[str] = "Production"
+    classification: Optional[str] = "Production"
     part_number: str
     oar_qty: int
     delivery_date: Optional[date] = None

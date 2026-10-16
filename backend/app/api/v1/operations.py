@@ -1,5 +1,6 @@
+from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
@@ -57,6 +58,7 @@ def list_oars(
     search: Optional[str] = Query(None, description="Search by OAR, customer, part, or PO"),
     status_filter: Optional[str] = Query(None, description="Filter by OAR status (accept/hold/reject)"),
     customer_code: Optional[str] = Query(None, description="Filter by customer code"),
+    classification: Optional[str] = Query(None, description="Filter by classification: 'Production' or 'NPD'"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -70,8 +72,25 @@ def list_oars(
         search=search,
         status_filter=status_filter,
         customer_code=customer_code,
+        classification=classification,
         limit=limit,
         offset=offset
+    )
+
+@router.get("/oars/export/excel")
+def export_oars_excel(
+    classification: Optional[str] = Query(None, description="Filter by classification: 'Production' or 'NPD'"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Export all open OARs, Work Orders, Traceability Matrix, and Data Capture Specifications to Excel."""
+    from app.services.excel_export_service import generate_excel_bytes
+    excel_content = generate_excel_bytes(db, classification_filter=classification)
+    filename = f"VSPL_Open_OAR_and_WO_Dump_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return Response(
+        content=excel_content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 @router.get("/oars/{oar_number}/genealogy", response_model=OARGenealogyResponse)

@@ -327,7 +327,8 @@ class WorkOrderService:
                 release_status=rel_status,
                 is_released=is_rel,
                 ready_for_production=ready_prod,
-                heat_number=getattr(wo, "heat_number", None)
+                heat_number=getattr(wo, "heat_number", None),
+                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
             ))
 
         return results
@@ -512,7 +513,8 @@ class WorkOrderService:
             total_rejected=total_rejected,
             yield_pct=yield_pct,
             created_at=wo.created_at or datetime.now(),
-            heat_number=getattr(wo, "heat_number", None)
+            heat_number=getattr(wo, "heat_number", None),
+            classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
         )
 
     @staticmethod
@@ -563,6 +565,7 @@ class WorkOrderService:
         search: Optional[str] = None,
         status_filter: Optional[str] = None,
         customer_code: Optional[str] = None,
+        classification: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[OARListItem]:
@@ -590,6 +593,10 @@ class WorkOrderService:
 
         if status_filter:
             query = query.filter(Order.status == status_filter)
+
+        if classification:
+            c = classification.strip()
+            query = query.filter(Order.order_type.ilike(f"{c}%"))
 
         orders = query.order_by(Order.created_at.desc()).offset(offset).limit(limit).all()
         return [WorkOrderService.build_oar_summary(db, order) for order in orders]
@@ -698,7 +705,8 @@ class WorkOrderService:
                 release_date=wo.release_date,
                 is_released=is_rel,
                 ready_for_production=ready_prod,
-                heat_number=getattr(wo, "heat_number", None)
+                heat_number=getattr(wo, "heat_number", None),
+                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
             ))
 
         num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")
@@ -727,6 +735,8 @@ class WorkOrderService:
             if po_rec:
                 po_date = po_rec.po_date or (po_rec.created_at.date() if po_rec.created_at else None)
 
+        order_classification = getattr(order, "order_type", None) or "Production"
+
         return OARListItem(
             oar_number=order.oar_number or "—",
             order_id=str(order.id),
@@ -737,6 +747,8 @@ class WorkOrderService:
             oar_po_status=oar_po_st,
             po_matched=po_matched_flag,
             po_coverage_status=po_cov_status,
+            order_type=order_classification,
+            classification=order_classification,
             part_number=order.part.part_number if order.part else "N/A",
             oar_qty=order.po_qty,
             allocated_qty=allocated_total,

@@ -125,6 +125,7 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS is_replacement BOOLEAN DEFAULT FALSE;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS replacement_reason VARCHAR;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS classification VARCHAR DEFAULT 'Production';",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
 
@@ -134,9 +135,11 @@ def auto_migrate_schema():
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS po_qty INTEGER DEFAULT 0;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS max_batch_size INTEGER DEFAULT 500;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;",
-        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR DEFAULT 'Standard';",
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR DEFAULT 'Production';",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;",
+        "UPDATE orders SET order_type = 'Production' WHERE order_type IS NULL OR order_type = 'Standard';",
+        "UPDATE work_orders SET classification = 'Production' WHERE classification IS NULL OR classification = 'Standard';",
 
         # Production movements
         "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS client_request_id VARCHAR;",

@@ -362,6 +362,7 @@ export interface WorkOrderListItem {
   is_released?: boolean;
   ready_for_production?: boolean;
   heat_number?: string | null;
+  classification?: string | null;
 }
 
 export interface PlanningSummary {
@@ -875,6 +876,7 @@ export interface OARWorkOrderSummary {
   release_date?: string | null;
   is_released?: boolean;
   ready_for_production?: boolean;
+  classification?: string | null;
 }
 
 export interface OARListItem {
@@ -905,6 +907,7 @@ export interface OARListItem {
   created_at: string;
   po_date?: string | null;
   oar_date?: string | null;
+  classification?: string | null;
   work_orders: OARWorkOrderSummary[];
 }
 
@@ -914,11 +917,18 @@ export async function getOarList(params?: {
   search?: string;
   status_filter?: string;
   customer_code?: string;
+  classification?: string;
   limit?: number;
   offset?: number;
 }): Promise<OARListItem[]> {
   const { data } = await api.get("/api/v1/operations/oars", { params });
   return data;
+}
+
+export async function exportOarsExcel(classification?: string): Promise<void> {
+  const query = classification ? `?classification=${encodeURIComponent(classification)}` : "";
+  const dateStr = new Date().toISOString().slice(0, 10);
+  await downloadFile(`/api/v1/operations/oars/export/excel${query}`, `VSPL_Open_OAR_and_WO_Dump_${dateStr}.xlsx`);
 }
 
 export async function getOarGenealogy(oarNumber: string): Promise<OARGenealogyResponse> {

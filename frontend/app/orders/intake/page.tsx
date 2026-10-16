@@ -66,7 +66,7 @@ export default function OrderIntakePage() {
   const [batchSize, setBatchSize] = useState<number | "">(500);
   const [deliveryDate, setDeliveryDate] = useState("2026-09-20");
   const [commitmentDate, setCommitmentDate] = useState("2026-09-20");
-  const [orderType, setOrderType] = useState("Standard");
+  const [orderType, setOrderType] = useState<"Production" | "NPD">("Production");
 
   // OAR Number (manual or auto-generated next sequence)
   const [oarNumber, setOarNumber] = useState("");
@@ -736,6 +736,77 @@ export default function OrderIntakePage() {
                   </span>
                 </span>
               </label>
+            </div>
+          </div>
+
+          {/* Order Classification: Production vs NPD */}
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <span>Order Classification *</span>
+                </label>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Strict separation between Series Production and New Product Development (NPD)
+                </p>
+              </div>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                orderType === "NPD"
+                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800"
+                  : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+              }`}>
+                {orderType === "NPD" ? "🔬 NPD Route Active" : "🏭 Series Production"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setOrderType("Production")}
+                className={`flex items-start gap-3 p-3 rounded-xl border text-left transition ${
+                  orderType === "Production"
+                    ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 ring-2 ring-emerald-500/20"
+                    : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700"
+                }`}
+              >
+                <div className={`mt-0.5 h-4 w-4 rounded-full border flex items-center justify-center shrink-0 ${
+                  orderType === "Production" ? "border-emerald-600 bg-emerald-600" : "border-zinc-400"
+                }`}>
+                  {orderType === "Production" && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                    🏭 Production (Series)
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">
+                    Standard mass manufacturing against released POs with regular production routing.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOrderType("NPD")}
+                className={`flex items-start gap-3 p-3 rounded-xl border text-left transition ${
+                  orderType === "NPD"
+                    ? "border-rose-500 bg-rose-50/50 dark:bg-rose-950/20 ring-2 ring-rose-500/20"
+                    : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700"
+                }`}
+              >
+                <div className={`mt-0.5 h-4 w-4 rounded-full border flex items-center justify-center shrink-0 ${
+                  orderType === "NPD" ? "border-rose-600 bg-rose-600" : "border-zinc-400"
+                }`}>
+                  {orderType === "NPD" && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                    🔬 NPD (New Product Development)
+                  </div>
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">
+                    Pilot batch, trial lot, prototype &amp; sample runs. Isolated tracking across all stages.
+                  </p>
+                </div>
+              </button>
             </div>
           </div>
 

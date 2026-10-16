@@ -183,6 +183,15 @@ function WorkOrderTrackingPageInner() {
                       <Badge variant={woData.shortfall === "YES" ? "red" : "green"}>
                         Shortfall: {woData.shortfall}
                       </Badge>
+                      {woData.classification?.toUpperCase() === "NPD" ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                          🔬 NPD Traceability
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                          🏭 Production Series
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                       Part: <strong className="text-zinc-800 dark:text-zinc-200">{woData.part_number}</strong> — {woData.part_name || "Precision Engineered Component"} ({woData.grade || "Alloy"})
