@@ -158,4 +158,4 @@ def test_gate_locks_when_full_quantity_produced_and_moved(db_session):
             wo_number=wo_num, stage="F1", good_qty=1, rejected_quantity=0
         ), current_user=user)
     assert exc_info.value.status_code == 400
-    assert "Gate 'F1' is completely finished and locked" in str(exc_info.value.detail)
+    assert "Gate 'F1' has completed and passed" in str(exc_info.value.detail)

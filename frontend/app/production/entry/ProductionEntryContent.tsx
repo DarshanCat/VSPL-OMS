@@ -619,7 +619,7 @@ export function ProductionEntryContent() {
                           }`}
                         >
                           <span>{stg.stage}</span>
-                          {isDone && <Lock className="h-3 w-3 text-zinc-400" />}
+                          {isDone && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
                           {isCur && !isSelected && !isDone && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
                         </button>
                         {idx < woData.timeline.length - 1 && (
@@ -646,8 +646,8 @@ export function ProductionEntryContent() {
                         {selectedStage}
                       </h3>
                     </div>
-                    <Badge variant={activeStage.is_gate_locked ? "blue" : "green"} size="md">
-                      {activeStage.is_gate_locked ? "🔒 COMPLETED & LOCKED" : (activeStage.stage_status || "IN PROGRESS")}
+                    <Badge variant="green" size="md">
+                      {activeStage.is_gate_locked ? "✓ COMPLETED & PASSED" : (activeStage.stage_status || "IN PROGRESS")}
                     </Badge>
                   </div>
 
@@ -691,15 +691,15 @@ export function ProductionEntryContent() {
 
                     <div className={`flex items-center justify-between p-2.5 rounded-xl border ${
                       activeStage.is_gate_locked
-                        ? "bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800 text-zinc-500"
+                        ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400"
                         : "bg-amber-50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400"
                     }`}>
                       <span className="font-bold flex items-center gap-1.5">
-                        {activeStage.is_gate_locked && <Lock className="h-3.5 w-3.5" />}
+                        {activeStage.is_gate_locked && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
                         <span>Remaining to Produce:</span>
                       </span>
                       <span className="font-mono font-extrabold text-sm">
-                        {activeStage.is_gate_locked ? "0 pcs (Locked)" : `${activeStage.remaining_to_produce ?? activeStage.in_process_qty} pcs`}
+                        {activeStage.is_gate_locked ? "0 pcs (Passed)" : `${activeStage.remaining_to_produce ?? activeStage.in_process_qty} pcs`}
                       </span>
                     </div>
                   </div>
@@ -710,20 +710,20 @@ export function ProductionEntryContent() {
                     <ShieldCheck className="h-4 w-4" />
                     <span>Target & Ceiling Enforcement</span>
                   </div>
-                  <p>Target quantity matches the released Work Order quantity ({activeStage.target_qty} pcs). When all material is processed and moved downstream, this gate automatically locks.</p>
+                  <p>Target quantity matches the released Work Order quantity ({activeStage.target_qty} pcs). When all material is processed and moved downstream, this gate is completed and passed.</p>
                 </div>
               </div>
 
-              {/* Step 6: Production Input Form OR Locked State */}
+              {/* Step 6: Production Input Form OR Completed State */}
               <div className="lg:col-span-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm">
                 {activeStage.is_gate_locked ? (
                   <div className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-4">
                     <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner">
-                      <Lock className="h-8 w-8" />
+                      <CheckCircle2 className="h-8 w-8" />
                     </div>
                     <div>
                       <h3 className="text-xl font-extrabold text-zinc-900 dark:text-zinc-50">
-                        Gate {selectedStage} is Completed & Locked
+                        Gate {selectedStage} Completed & Passed
                       </h3>
                       <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 max-w-md mx-auto">
                         All {activeStage.target_qty} pcs for Work Order {woData.wo_number} have been produced and moved downstream. Zero material remains at this gate.
