@@ -392,6 +392,7 @@ export async function getWorkOrders(params?: {
   from_date?: string;
   to_date?: string;
   date_type?: string;
+  classification?: string;
   limit?: number;
   offset?: number;
 }): Promise<WorkOrderListItem[]> {

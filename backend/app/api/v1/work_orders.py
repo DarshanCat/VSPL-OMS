@@ -48,6 +48,7 @@ def list_work_orders(
     from_date: Optional[str] = Query(None, description="Start date filter (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, description="End date filter (YYYY-MM-DD)"),
     date_type: Optional[str] = Query("wo_date", description="Date field to filter: 'wo_date', 'release_date', 'delivery_date'"),
+    classification: Optional[str] = Query(None, description="Filter by classification: 'Production' or 'NPD'"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -67,6 +68,7 @@ def list_work_orders(
         from_date=from_date,
         to_date=to_date,
         date_type=date_type,
+        classification=classification,
         limit=limit,
         offset=offset
     )

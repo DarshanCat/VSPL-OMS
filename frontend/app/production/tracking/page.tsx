@@ -37,6 +37,7 @@ export default function WorkOrderTrackingPage() {
 function WorkOrderTrackingPageInner() {
   const searchParams = useSearchParams();
   const initialWO = searchParams.get("wo") || "WO-1001";
+  const [classificationFilter, setClassificationFilter] = useState<"ALL" | "Production" | "NPD">("ALL");
   const [searchTerm, setSearchTerm] = useState(initialWO);
   const [selectedWO, setSelectedWO] = useState<string>(initialWO);
   const [loading, setLoading] = useState(false);
@@ -44,17 +45,30 @@ function WorkOrderTrackingPageInner() {
   const [wosList, setWosList] = useState<any[]>([]);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    getWorkOrders({ limit: 50 })
+  const loadWorkOrders = (cls: "ALL" | "Production" | "NPD") => {
+    getWorkOrders({
+      limit: 100,
+      classification: cls === "ALL" ? undefined : cls,
+    })
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setWosList(data);
+          if (cls !== "ALL" && data.length > 0) {
+            const hasCurrent = data.some((w) => w.wo_number === selectedWO);
+            if (!hasCurrent) {
+              fetchTracking(data[0].wo_number);
+            }
+          }
         }
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadWorkOrders(classificationFilter);
     fetchTracking(initialWO);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [classificationFilter]);
 
   const fetchTracking = async (woNum: string) => {
     if (!woNum || !woNum.trim()) return;
@@ -112,6 +126,43 @@ function WorkOrderTrackingPageInner() {
           </div>
         </div>
 
+        {/* Classification Filter Tabs */}
+        <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setClassificationFilter("ALL")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "ALL"
+                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs"
+                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            }`}
+          >
+            <span>All Work Orders</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setClassificationFilter("Production")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "Production"
+                ? "bg-emerald-600 text-white shadow-xs"
+                : "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50"
+            }`}
+          >
+            <span>🏭 Production Series</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setClassificationFilter("NPD")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              classificationFilter === "NPD"
+                ? "bg-rose-600 text-white shadow-xs"
+                : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50"
+            }`}
+          >
+            <span>🔬 NPD Traceability</span>
+          </button>
+        </div>
+
         {/* Top Search & Filter */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="md:col-span-3">
@@ -148,11 +199,15 @@ function WorkOrderTrackingPageInner() {
               onChange={(e) => fetchTracking(e.target.value)}
               className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-mono font-bold focus:outline-none"
             >
-              {wosList.map((w) => (
-                <option key={w.wo_number} value={w.wo_number}>
-                  {w.wo_number} — {w.current_stage} ({w.customer_code})
-                </option>
-              ))}
+              {wosList.length === 0 ? (
+                <option value="">No {classificationFilter === "ALL" ? "" : classificationFilter} WOs found</option>
+              ) : (
+                wosList.map((w) => (
+                  <option key={w.wo_number} value={w.wo_number}>
+                    {w.classification?.toUpperCase() === "NPD" ? "🔬 [NPD] " : ""}{w.wo_number} — {w.current_stage} ({w.customer_code})
+                  </option>
+                ))
+              )}
             </select>
           </div>
         </div>

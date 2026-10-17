@@ -112,10 +112,21 @@ class WorkOrderService:
         from_date: Optional[str] = None,
         to_date: Optional[str] = None,
         date_type: Optional[str] = "wo_date",
+        classification: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
         query = db.query(WorkOrder).join(Order).join(Customer).join(Part)
+
+        if classification:
+            c = classification.strip()
+            if c.upper() != "ALL":
+                query = query.filter(
+                    or_(
+                        WorkOrder.classification.ilike(c),
+                        Order.order_type.ilike(c)
+                    )
+                )
 
         if search:
             s = f"%{search.strip()}%"
