@@ -209,6 +209,8 @@ class DispatchService:
             paid_amount=paid_amount,
             payment_date=payment_date,
             payment_reference=req.payment_reference,
+            vehicle_number=req.vehicle_number,
+            transporter=req.transporter,
             remarks=req.remarks,
             created_by=current_user.id if current_user else None
         )

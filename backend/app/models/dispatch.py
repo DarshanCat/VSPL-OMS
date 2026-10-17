@@ -16,6 +16,11 @@ class Dispatch(Base):
     dispatch_date = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(GUID, ForeignKey("users.id"), nullable=True)
 
+    # Logistics & Remarks
+    transporter = Column(String(200), nullable=True)
+    vehicle_number = Column(String(100), nullable=True)
+    remarks = Column(String(1000), nullable=True)
+
     # Invoice Commercial Value & Payment Tracking
     unit_price = Column(Float, nullable=False, default=0.0)  # per piece rate
     total_invoice_value = Column(Float, nullable=False, default=0.0)  # dispatched_qty * unit_price
