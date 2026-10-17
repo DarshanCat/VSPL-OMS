@@ -261,3 +261,7 @@ class MovableWorkOrderItem(BaseModel):
     delivery_date: Optional[date] = None
     created_at: Optional[datetime] = None
     priority_rank: int = 1
+    mrb_status: str = "APPROVED"  # APPROVED, PENDING_MRB, PARTIAL
+    pending_mrb_count: int = 0
+    mrb_pending_qty: int = 0
+

@@ -368,3 +368,111 @@ class MRBService:
         # Recompute entire WO downstream targets and status
         if wo:
             OMSIntegrationService.recompute_work_order(db, wo)
+
+    @staticmethod
+    def get_stage_mrb_summary(
+        db: Session,
+        work_order_id: Any,
+        stage: str,
+        onhand_qty: int = 0,
+        already_moved: int = 0
+    ) -> dict:
+        """Calculates stage-level Material Review Board (MRB) approval status and
+        cleared movable quantities for Option 2 (Lock movement until MRB Approval).
+
+        Rules:
+        1. If no MRB review tickets exist for this stage, movement is UNLOCKED (e.g. direct stock or non-MRB stages).
+        2. If MRB tickets exist, only parts from APPROVED or ADJUSTED tickets are eligible for movement.
+        3. If there are PENDING tickets and 0 approved pieces remain movable, movement is strictly LOCKED.
+        4. If some parts are approved and some pending, status is PARTIAL and only up to approved_movable_qty can be moved.
+        """
+        import uuid
+        wo_uuid = uuid.UUID(str(work_order_id)) if isinstance(work_order_id, str) else work_order_id
+
+        tickets = db.query(MRBReview).filter(
+            MRBReview.work_order_id == wo_uuid,
+            MRBReview.stage == stage.strip().upper()
+        ).all()
+
+        if not tickets:
+            return {
+                "total_tickets": 0,
+                "approved_tickets_count": 0,
+                "pending_tickets_count": 0,
+                "rejected_tickets_count": 0,
+                "approved_movable_qty": onhand_qty,
+                "total_approved_good": onhand_qty,
+                "pending_qty": 0,
+                "lock_status": "UNLOCKED",
+                "pending_tickets": []
+            }
+
+        approved_tickets = [t for t in tickets if t.status in ("APPROVED", "ADJUSTED")]
+        pending_tickets = [t for t in tickets if t.status == "PENDING"]
+        rejected_tickets = [t for t in tickets if t.status == "REJECTED"]
+
+        total_approved_good = sum(
+            (t.verified_ok_qty if t.verified_ok_qty is not None else t.reported_ok_qty)
+            for t in approved_tickets
+        )
+        total_pending_good = sum(t.reported_ok_qty for t in pending_tickets)
+
+        # Approved pieces still sitting on-hand (not yet transferred downstream)
+        approved_movable = max(total_approved_good - already_moved, 0)
+        approved_movable = min(approved_movable, onhand_qty)
+
+        if len(pending_tickets) > 0 and approved_movable <= 0:
+            lock_status = "LOCKED"
+        elif len(pending_tickets) > 0 and approved_movable > 0:
+            lock_status = "PARTIAL"
+        else:
+            lock_status = "UNLOCKED"
+
+        return {
+            "total_tickets": len(tickets),
+            "approved_tickets_count": len(approved_tickets),
+            "pending_tickets_count": len(pending_tickets),
+            "rejected_tickets_count": len(rejected_tickets),
+            "approved_movable_qty": approved_movable,
+            "total_approved_good": total_approved_good,
+            "pending_qty": total_pending_good,
+            "lock_status": lock_status,
+            "pending_tickets": [t.mrb_number for t in pending_tickets]
+        }
+
+    @classmethod
+    def approve_stage_reviews(
+        cls,
+        db: Session,
+        wo_number: str,
+        stage: str,
+        current_user: User,
+        notes: Optional[str] = None
+    ) -> int:
+        """Batch approve all PENDING MRB reviews for a specific Work Order and stage."""
+        wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).first()
+        if not wo:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Work Order '{wo_number}' not found.")
+
+        pending_reviews = db.query(MRBReview).filter(
+            MRBReview.work_order_id == wo.id,
+            MRBReview.stage == stage.strip().upper(),
+            MRBReview.status == "PENDING"
+        ).all()
+
+        now = datetime.now()
+        for rev in pending_reviews:
+            rev.status = "APPROVED"
+            rev.verified_ok_qty = rev.reported_ok_qty
+            rev.verified_reject_qty = rev.reported_reject_qty
+            rev.verified_defect_code = rev.reported_defect_code
+            rev.disposition = "SCRAP" if rev.reported_reject_qty > 0 else "VERIFIED_OK"
+            rev.reviewed_by_id = current_user.id
+            rev.reviewed_by_name = current_user.full_name
+            rev.reviewed_at = now
+            rev.review_notes = notes or "Batch approved for stage movement release."
+
+        if pending_reviews:
+            db.commit()
+        return len(pending_reviews)
+

@@ -13,6 +13,8 @@ import {
   UserCheck,
   Clock,
   ShieldCheck,
+  ShieldAlert,
+  Lock,
   ChevronRight,
   ClipboardList,
   CheckSquare,
@@ -37,10 +39,12 @@ import {
   getMasterMachines,
   getShifts,
   getOperators,
+  batchApproveStageMRB,
   MasterMachine,
   MasterShift,
   MasterOperator,
 } from "@/lib/api";
+
 
 const MACHINES = [
   { id: "M-CC01", name: "M-CC01 (Centrifugal Casting 1)", stage: "F1" },
@@ -181,9 +185,10 @@ export function MovePartsContent() {
   const handleSelectMovable = (item: MovableWorkOrderItem) => {
     setSelectedStageOverride(item.from_stage || null);
     lookupWO(item.wo_number, item.from_stage);
-    setQuantityToMove(item.movable_wip);
+    setQuantityToMove(item.mrb_status === "PENDING_MRB" ? "" : item.movable_wip);
     document.getElementById("move-form-section")?.scrollIntoView({ behavior: "smooth" });
   };
+
 
   const lookupWO = async (woNum: string, initialStage?: string) => {
     if (!woNum || !woNum.trim()) return;
@@ -301,9 +306,15 @@ export function MovePartsContent() {
     : (woData ? (woData.movable_to_stage || woData.next_allowed_stage) : null);
 
   const curTimelineStep = woData?.timeline?.find((s: any) => s.stage === originStage);
-  const availableAtOrigin: number = curTimelineStep
+  const onHandAtOrigin: number = curTimelineStep
     ? (curTimelineStep.on_hand_wip ?? 0)
     : (woData ? (woData.movable_wip || 0) : 0);
+
+  // MRB Quality Gate (Option 2: Lock movement until MRB Approval)
+  const isMrbLocked = stageState?.mrb_lock_status === "LOCKED";
+  const isMrbPartial = stageState?.mrb_lock_status === "PARTIAL";
+  const mrbApprovedMovable = stageState?.mrb_approved_movable_qty ?? onHandAtOrigin;
+  const availableAtOrigin: number = isMrbLocked ? 0 : mrbApprovedMovable;
 
   const isTerminalStage = woData && (!destStage || originStage === "DISPATCH" || woData.current_stage === "Completed");
 
@@ -327,6 +338,13 @@ export function MovePartsContent() {
       return;
     }
 
+    if (isMrbLocked) {
+      setFormError(
+        `Movement locked: Parts produced at stage ${originStageNow} require Quality or Planning review and approval in the Material Review Board (MRB) before they can move to ${destStageNow || "next stage"}.`
+      );
+      return;
+    }
+
     if (availableNow <= 0) {
       setFormError(
         `Cannot move parts from stage ${originStageNow}. No completed good parts are on-hand awaiting transfer (0 pcs produced). Please record production in Production Entry before moving parts.`
@@ -335,11 +353,18 @@ export function MovePartsContent() {
     }
 
     if (moveQtyNum > availableNow) {
-      setFormError(
-        `Cannot move ${moveQtyNum} pieces. Only ${availableNow} completed good pieces are currently on-hand at stage ${originStageNow}.`
-      );
+      if (isMrbPartial) {
+        setFormError(
+          `Cannot move ${moveQtyNum} pieces. Only ${availableNow} pieces are approved by Quality/Planner in MRB (${stageState?.mrb_pending_qty} pieces still pending review).`
+        );
+      } else {
+        setFormError(
+          `Cannot move ${moveQtyNum} pieces. Only ${availableNow} completed good pieces are currently available at stage ${originStageNow}.`
+        );
+      }
       return;
     }
+
 
     if (!destStageNow) {
       setFormError("Terminal Stage — No further movement available for this Work Order.");
@@ -538,7 +563,23 @@ export function MovePartsContent() {
                           <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 font-extrabold text-xs">
                             {item.movable_wip} pcs
                           </span>
+                          {item.mrb_status === "PENDING_MRB" && (
+                            <span className="mt-1 flex items-center justify-end gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                              <Lock className="h-2.5 w-2.5" /> MRB Pending ({item.pending_mrb_count || 1})
+                            </span>
+                          )}
+                          {item.mrb_status === "PARTIAL" && (
+                            <span className="mt-1 flex items-center justify-end gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                              MRB Partial
+                            </span>
+                          )}
+                          {item.mrb_status === "APPROVED" && (
+                            <span className="mt-1 flex items-center justify-end gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="h-2.5 w-2.5" /> MRB Cleared
+                            </span>
+                          )}
                         </td>
+
                         <td className="p-2.5 text-right">
                           <button
                             type="button"
@@ -921,6 +962,74 @@ export function MovePartsContent() {
                       </div>
                     )}
 
+                    {/* MRB Quality Gate Lock Status Alert (Option 2) */}
+                    {isMrbLocked && (
+                      <div className="rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 p-4 space-y-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 text-rose-700 dark:text-rose-400 font-bold text-xs">
+                            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-rose-600 text-white">
+                              <Lock className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <span className="block font-extrabold text-sm text-rose-900 dark:text-rose-200">
+                                Movement Locked — MRB Quality / Planner Approval Required
+                              </span>
+                              <span className="block text-[11px] font-normal text-rose-700 dark:text-rose-300">
+                                Option 2 Quality Gate Active: Parts cannot move until verified &amp; approved in MRB.
+                              </span>
+                            </div>
+                          </div>
+                          <Link
+                            href={`/quality/mrb?search=${encodeURIComponent(woData.wo_number)}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-500 text-white shadow-sm transition shrink-0"
+                          >
+                            <span>Open MRB Board</span>
+                            <ArrowRight className="h-3 w-3" />
+                          </Link>
+                        </div>
+                        <div className="pt-2 border-t border-rose-200 dark:border-rose-900/60 text-[11px] text-rose-800 dark:text-rose-300 flex flex-wrap items-center gap-2">
+                          <span>
+                            Awaiting Quality Review: <strong>{stageState?.mrb_pending_qty ?? onHandAtOrigin} pcs</strong> on-hand
+                          </span>
+                          {stageState?.pending_mrb_tickets && stageState.pending_mrb_tickets.length > 0 && (
+                            <span className="font-mono bg-white dark:bg-zinc-900 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800">
+                              Ticket(s): {stageState.pending_mrb_tickets.join(", ")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {isMrbPartial && (
+                      <div className="rounded-xl border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-800 dark:text-amber-300">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                          <span>
+                            <strong>Partial MRB Approval:</strong> Only <strong>{availableAtOrigin} pcs</strong> of {onHandAtOrigin} pcs have been approved for movement. The remaining {stageState?.mrb_pending_qty} pcs are pending review.
+                          </span>
+                        </div>
+                        <Link
+                          href={`/quality/mrb?search=${encodeURIComponent(woData.wo_number)}`}
+                          className="font-bold text-amber-700 dark:text-amber-400 hover:underline shrink-0"
+                        >
+                          Review in MRB →
+                        </Link>
+                      </div>
+                    )}
+
+                    {!isMrbLocked && !isMrbPartial && (stageState?.ok_completed_qty || 0) > 0 && (
+                      <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/20 px-3.5 py-2 flex items-center justify-between text-xs text-emerald-800 dark:text-emerald-300">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                          <span>MRB Quality Gate Cleared: Production approved for downstream movement.</span>
+                        </div>
+                        <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                          {availableAtOrigin} pcs cleared
+                        </span>
+                      </div>
+                    )}
+
+
                     {/* Quantity to Move */}
                     <div>
                       <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center justify-between">
@@ -1044,16 +1153,30 @@ export function MovePartsContent() {
                       <button
                         ref={btnSubmitRef}
                         type="submit"
-                        disabled={submitting || availableAtOrigin <= 0 || !destStage}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-blue-500/25 hover:bg-blue-500 focus:outline-none disabled:opacity-50 transition-all cursor-pointer"
+                        disabled={submitting || availableAtOrigin <= 0 || !destStage || isMrbLocked}
+                        className={`flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold text-white shadow-lg transition-all ${
+                          isMrbLocked
+                            ? "bg-zinc-400 dark:bg-zinc-700 cursor-not-allowed opacity-75"
+                            : "bg-blue-600 hover:bg-blue-500 shadow-blue-500/25 cursor-pointer"
+                        }`}
                       >
-                        <ArrowRightLeft className="h-4 w-4" />
-                        <span>
-                          {submitting
-                            ? "Validating & Moving..."
-                            : `Transfer ${quantityToMove || 0} pcs to Stage ${destStage}`}
-                        </span>
+                        {isMrbLocked ? (
+                          <>
+                            <Lock className="h-4 w-4" />
+                            <span>Movement Locked Pending MRB Approval</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowRightLeft className="h-4 w-4" />
+                            <span>
+                              {submitting
+                                ? "Validating & Moving..."
+                                : `Transfer ${quantityToMove || 0} pcs to Stage ${destStage}`}
+                            </span>
+                          </>
+                        )}
                       </button>
+
                     </div>
                   </form>
                 </div>

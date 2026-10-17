@@ -6,6 +6,8 @@ from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
 from app.models.user import User
 from app.core.roles import MRB_ROLES
+from app.models.work_order import WorkOrder
+from app.models.production_movement import StageWIP
 from app.schemas.mrb import (
     MRBReviewItem,
     MRBReviewDecisionRequest,
@@ -99,3 +101,50 @@ def adjust_mrb_review(
         req=payload,
         current_user=user
     )
+
+
+@router.get("/stage-summary")
+def get_stage_mrb_summary(
+    wo_number: str = Query(..., description="Work Order number"),
+    stage: str = Query(..., description="Stage code e.g. F1, F2"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Retrieve stage-level MRB approval status and locked/unlocked quantities."""
+    wo = db.query(WorkOrder).filter(WorkOrder.wo_number == wo_number.strip()).first()
+    if not wo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Work Order '{wo_number}' not found.")
+    wip = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id, StageWIP.stage == stage.strip().upper()).first()
+    onhand = wip.onhand_qty if wip else 0
+    already_moved = max(wip.ok_qty - wip.onhand_qty, 0) if wip else 0
+    return MRBService.get_stage_mrb_summary(
+        db=db,
+        work_order_id=wo.id,
+        stage=stage,
+        onhand_qty=onhand,
+        already_moved=already_moved
+    )
+
+
+@router.post("/stage-approve")
+def batch_approve_stage(
+    wo_number: str = Query(..., description="Work Order number"),
+    stage: str = Query(..., description="Stage code e.g. F1, F2"),
+    notes: Optional[str] = Query(None, description="Optional approval notes"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*MRB_ROLES))
+):
+    """Batch approve all PENDING MRB reviews for a specific Work Order and stage."""
+    count = MRBService.approve_stage_reviews(
+        db=db,
+        wo_number=wo_number,
+        stage=stage,
+        current_user=user,
+        notes=notes
+    )
+    return {
+        "success": True,
+        "approved_count": count,
+        "message": f"Successfully approved {count} pending MRB ticket(s) for {wo_number} at {stage}."
+    }
+

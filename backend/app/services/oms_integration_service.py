@@ -378,6 +378,16 @@ class OMSIntegrationService:
         rag = route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty)
         next_stage = OMSIntegrationService.get_next_stage(db, wo, matched or stage_name)
 
+        # Check MRB summary for this stage (Option 2)
+        from app.services.mrb_service import MRBService
+        mrb_summary = MRBService.get_stage_mrb_summary(
+            db=db,
+            work_order_id=wo.id,
+            stage=matched or stage_name,
+            onhand_qty=onhand_qty,
+            already_moved=already_moved_qty
+        )
+
         return {
             "wo_number": wo.wo_number,
             "stage": matched or stage_name,
@@ -392,8 +402,13 @@ class OMSIntegrationService:
             "remaining_to_produce": not_yet_produced,
             "stage_status": rag,
             "is_current_stage": (wo.current_stage == (matched or stage_name)),
-            "next_stage": next_stage
+            "next_stage": next_stage,
+            "mrb_lock_status": mrb_summary["lock_status"],
+            "mrb_approved_movable_qty": mrb_summary["approved_movable_qty"],
+            "mrb_pending_qty": mrb_summary["pending_qty"],
+            "pending_mrb_tickets": mrb_summary["pending_tickets"]
         }
+
 
     @staticmethod
     def initialize_wo_stages(db: Session, wo: WorkOrder, route_str: Optional[str] = None) -> List[WORoute]:

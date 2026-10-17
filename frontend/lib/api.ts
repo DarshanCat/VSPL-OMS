@@ -186,7 +186,12 @@ export interface StageDashboard {
   wip_qty: number;
   yet_to_produce: number;
   remaining_movable_qty: number;
+  mrb_lock_status?: "UNLOCKED" | "LOCKED" | "PARTIAL";
+  mrb_approved_movable_qty?: number;
+  mrb_pending_qty?: number;
+  pending_mrb_tickets?: string[];
 }
+
 
 export async function getStageSummary(woNumber: string, stage: string): Promise<StageDashboard> {
   const { data } = await api.get("/api/v1/production/stage-summary", { params: { wo_number: woNumber, stage } });
@@ -689,6 +694,9 @@ export interface MovableWorkOrderItem {
   delivery_date?: string | null;
   created_at?: string | null;
   priority_rank: number;
+  mrb_status?: "APPROVED" | "PENDING_MRB" | "PARTIAL";
+  pending_mrb_count?: number;
+  mrb_pending_qty?: number;
 }
 
 export async function getMovableWorkOrders(limit?: number): Promise<MovableWorkOrderItem[]> {
@@ -697,6 +705,18 @@ export async function getMovableWorkOrders(limit?: number): Promise<MovableWorkO
   });
   return data;
 }
+
+export async function batchApproveStageMRB(
+  woNumber: string,
+  stage: string,
+  notes?: string
+): Promise<{ success: boolean; approved_count: number; message: string }> {
+  const { data } = await api.post("/api/v1/mrb/stage-approve", null, {
+    params: { wo_number: woNumber, stage, notes },
+  });
+  return data;
+}
+
 
 // --- Masters: Customer / PO / Schedule ---
 

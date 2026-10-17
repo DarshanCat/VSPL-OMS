@@ -1077,6 +1077,24 @@ class WorkOrderService:
                 if onhand > 0:
                     dest_stage = route_stages[idx2 + 1]
                     order = wo.order
+
+                    # Compute MRB status for this waiting stage (Option 2)
+                    from app.services.mrb_service import MRBService
+                    already_moved = max(wr.ok_qty - wr.onhand_qty, 0)
+                    mrb_summary = MRBService.get_stage_mrb_summary(
+                        db=db,
+                        work_order_id=wo.id,
+                        stage=stg2,
+                        onhand_qty=onhand,
+                        already_moved=already_moved
+                    )
+
+                    mrb_st = "APPROVED"
+                    if mrb_summary["lock_status"] == "LOCKED":
+                        mrb_st = "PENDING_MRB"
+                    elif mrb_summary["lock_status"] == "PARTIAL":
+                        mrb_st = "PARTIAL"
+
                     items.append(MovableWorkOrderItem(
                         wo_id=str(wo.id),
                         wo_number=wo.wo_number,
@@ -1092,7 +1110,11 @@ class WorkOrderService:
                         heat_number=wo.heat_number,
                         delivery_date=order.delivery_date if order else None,
                         created_at=wo.created_at,
+                        mrb_status=mrb_st,
+                        pending_mrb_count=mrb_summary["pending_tickets_count"],
+                        mrb_pending_qty=mrb_summary["pending_qty"]
                     ))
+
 
         items.sort(key=lambda x: (x.delivery_date or date(2099, 12, 31), -x.movable_wip))
         for rank, item in enumerate(items, start=1):

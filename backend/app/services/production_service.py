@@ -105,14 +105,30 @@ class ProductionService:
         # downstream (StageWIP.onhand_qty) -- rejected quantity is never included.
         remaining_movable = wip.onhand_qty if wip else 0
 
+        # Compute MRB approval status (Option 2)
+        from app.services.mrb_service import MRBService
+        already_moved = max(wip.ok_qty - wip.onhand_qty, 0) if wip else 0
+        mrb_summary = MRBService.get_stage_mrb_summary(
+            db=db,
+            work_order_id=wo.id,
+            stage=matched_stage,
+            onhand_qty=remaining_movable,
+            already_moved=already_moved
+        )
+
         return StageDashboard(
             wo_number=wo.wo_number, stage=matched_stage, target_qty=target,
             total_produced=produced, total_rejected=rejected, total_good=good,
-            wip_qty=wip_qty, yet_to_produce=yet_to_produce, remaining_movable_qty=remaining_movable
+            wip_qty=wip_qty, yet_to_produce=yet_to_produce, remaining_movable_qty=remaining_movable,
+            mrb_lock_status=mrb_summary["lock_status"],
+            mrb_approved_movable_qty=mrb_summary["approved_movable_qty"],
+            mrb_pending_qty=mrb_summary["pending_qty"],
+            pending_mrb_tickets=mrb_summary["pending_tickets"]
         )
 
     @staticmethod
     def move_parts(db: Session, req: MovePartsRequest, current_user: Optional[User] = None) -> MovementResponse:
+
         now = datetime.now()
 
         # 1. Idempotency Check: Prevent duplicate submissions on double-click / network retry
@@ -284,7 +300,45 @@ class ProductionService:
                 )
             )
 
+        # 5b. Validate MRB Quality Gate (Option 2: Lock movement until MRB Approval)
+        # Parts cannot move to the next gate until Quality/Planner verifies and approves in MRB.
+        from app.services.mrb_service import MRBService
+        already_moved = max(from_wip.ok_qty - from_wip.onhand_qty, 0) if from_wip else 0
+        mrb_summary = MRBService.get_stage_mrb_summary(
+            db=db,
+            work_order_id=wo.id,
+            stage=matched_from,
+            onhand_qty=max_movable,
+            already_moved=already_moved
+        )
+
+        if mrb_summary["total_tickets"] > 0:
+            if mrb_summary["lock_status"] == "LOCKED":
+                ticket_str = ", ".join(mrb_summary["pending_tickets"][:3])
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Movement locked: Parts cannot move from stage '{matched_from}' for Work Order '{req.wo_number}' "
+                        f"until Quality/Planner verifies and approves in the Material Review Board (MRB). "
+                        f"There are {mrb_summary['pending_tickets_count']} pending ticket(s) ({ticket_str}) totaling "
+                        f"{mrb_summary['pending_qty']} pcs awaiting review. "
+                        f"Please approve in the Material Review Board (/quality/mrb) before moving."
+                    )
+                )
+
+            if req.quantity_moved > mrb_summary["approved_movable_qty"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Movement locked: Cannot move {req.quantity_moved} pieces from stage '{matched_from}'. "
+                        f"Only {mrb_summary['approved_movable_qty']} pieces have been approved by Quality/Planner in MRB "
+                        f"({mrb_summary['pending_qty']} pieces still pending review). "
+                        f"Please approve pending tickets in MRB (/quality/mrb) before moving."
+                    )
+                )
+
         total_consumed = req.quantity_moved + req.rejected_quantity
+
         if total_consumed > from_wip.available_wip:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

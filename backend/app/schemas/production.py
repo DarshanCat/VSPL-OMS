@@ -109,6 +109,11 @@ class StageDashboard(BaseModel):
     wip_qty: int  # inproc + onhand
     yet_to_produce: int  # max(target - total_produced, 0) -- NOT part of WIP
     remaining_movable_qty: int  # onhand_qty -- completed good available to move downstream
+    mrb_lock_status: str = "UNLOCKED"  # UNLOCKED, LOCKED, PARTIAL
+    mrb_approved_movable_qty: int = 0
+    mrb_pending_qty: int = 0
+    pending_mrb_tickets: List[str] = []
+
 
 class StageWIPDetail(BaseModel):
     stage: str
