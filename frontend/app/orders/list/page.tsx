@@ -198,6 +198,7 @@ export default function OarWoListPage() {
   const [editModalOar, setEditModalOar] = useState<OARListItem | null>(null);
   const [editCommitmentDate, setEditCommitmentDate] = useState("");
   const [editDeliveryDate, setEditDeliveryDate] = useState("");
+  const [editCustomerPartNumber, setEditCustomerPartNumber] = useState("");
   const [editStatus, setEditStatus] = useState("accept");
   const [editRemarks, setEditRemarks] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -208,6 +209,7 @@ export default function OarWoListPage() {
     setEditModalOar(oar);
     setEditCommitmentDate(oar.commitment_date ? String(oar.commitment_date).substring(0, 10) : "");
     setEditDeliveryDate(oar.delivery_date ? String(oar.delivery_date).substring(0, 10) : "");
+    setEditCustomerPartNumber(oar.customer_part_number || "");
     setEditStatus(oar.status?.toLowerCase() || "accept");
     setEditRemarks("");
     setEditError("");
@@ -224,10 +226,11 @@ export default function OarWoListPage() {
       const updated = await updateOAR(editModalOar.oar_number, {
         commitment_date: editCommitmentDate || null,
         delivery_date: editDeliveryDate || null,
+        customer_part_number: editCustomerPartNumber.trim() || null,
         status: editStatus,
         remarks: editRemarks || undefined,
       });
-      setEditSuccess(`OAR ${updated.oar_number} updated with Commitment Date: ${formatDate(updated.commitment_date)}`);
+      setEditSuccess(`OAR ${updated.oar_number} updated successfully.`);
       // Update local state in-place and reload
       setOars((prev) =>
         prev.map((o) => (o.oar_number === updated.oar_number ? { ...o, ...updated } : o))
@@ -402,7 +405,7 @@ export default function OarWoListPage() {
                   <th className="py-2.5 px-3 w-8"></th>
                   <th className="py-2.5 px-3">OAR ID</th>
                   <th className="py-2.5 px-3">Customer</th>
-                  <th className="py-2.5 px-3">PO &amp; Part</th>
+                  <th className="py-2.5 px-3">PO &amp; Customer Part</th>
                   <th className="py-2.5 px-3 text-right">OAR Qty</th>
                   <th className="py-2.5 px-3 text-right">Fulfilled</th>
                   <th className="py-2.5 px-3 text-right">Shortfall</th>
@@ -453,7 +456,22 @@ export default function OarWoListPage() {
                         <div className="mb-1">
                           <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
                         </div>
-                        <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">{oar.part_number}</div>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="font-bold text-xs text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono">{oar.customer_part_number || oar.part_number}</span>
+                            {oar.customer_part_number && oar.customer_part_number !== oar.part_number && (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700/80"
+                                title="VSPL Internal Part Code"
+                              >
+                                Internal: {oar.part_number}
+                              </span>
+                            )}
+                          </div>
+                          {oar.part_name && (
+                            <div className="text-[10px] text-zinc-400 truncate max-w-xs">{oar.part_name}</div>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
                           <span>OAR Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.oar_date || oar.created_at)}</strong></span>
                           {oar.commitment_date && (
@@ -592,6 +610,14 @@ export default function OarWoListPage() {
                                     ({oar.work_orders.length} Work Order{oar.work_orders.length === 1 ? "" : "s"} linked to {oar.oar_number})
                                   </span>
                                   <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    Customer Part: {oar.customer_part_number || oar.part_number}
+                                  </span>
+                                  {oar.customer_part_number && oar.customer_part_number !== oar.part_number && (
+                                    <span className="text-[10px] text-zinc-400 font-mono">
+                                      (Internal: {oar.part_number})
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center gap-2">
@@ -1024,8 +1050,13 @@ export default function OarWoListPage() {
                       <p className="font-semibold text-zinc-800 dark:text-zinc-200">{editModalOar.customer_po}</p>
                     </div>
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-zinc-400">Part Number</span>
-                      <p className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">{editModalOar.part_number}</p>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400">Customer Part Number</span>
+                      <p className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">
+                        {editModalOar.customer_part_number || editModalOar.part_number}
+                      </p>
+                      {editModalOar.customer_part_number && editModalOar.customer_part_number !== editModalOar.part_number && (
+                        <p className="text-[10px] text-zinc-400 font-mono">Internal: {editModalOar.part_number}</p>
+                      )}
                     </div>
                     <div>
                       <span className="text-[10px] uppercase font-bold text-zinc-400">Order Quantity</span>
@@ -1038,6 +1069,21 @@ export default function OarWoListPage() {
                   </div>
 
                   <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Customer Part Number
+                      </label>
+                      <input
+                        type="text"
+                        value={editCustomerPartNumber}
+                        onChange={(e) => setEditCustomerPartNumber(e.target.value)}
+                        placeholder={editModalOar.part_number}
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none font-mono"
+                      />
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        Customer drawing or catalog part number printed on customer PO.
+                      </p>
+                    </div>
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                         Commitment Date <span className="text-blue-500">*</span>

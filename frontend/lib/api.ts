@@ -340,6 +340,7 @@ export interface WorkOrderListItem {
   source_type?: string;
   po_coverage_status?: "SCHEDULED_AWAITING_PO" | "COMMERCIAL_PO_PENDING" | "PO_MATCHED" | "UNCONFIRMED" | string;
   part_number: string;
+  customer_part_number?: string | null;
   part_name?: string | null;
   grade?: string | null;
   order_qty: number;
@@ -607,6 +608,7 @@ export async function createOrderIntake(payload: {
   customer_name: string;
   customer_po: string;
   part_number: string;
+  customer_part_number?: string;
   grade?: string;
   part_description?: string;
   po_quantity: number;
@@ -985,6 +987,8 @@ export interface OARListItem {
   po_matched?: boolean;
   po_coverage_status?: "SCHEDULED_AWAITING_PO" | "COMMERCIAL_PO_PENDING" | "PO_MATCHED" | "UNCONFIRMED" | string;
   part_number: string;
+  customer_part_number?: string | null;
+  part_name?: string | null;
   oar_qty: number;
   allocated_qty: number;
   remaining_qty: number;
@@ -1036,6 +1040,7 @@ export async function updateOAR(
   payload: {
     commitment_date?: string | null;
     delivery_date?: string | null;
+    customer_part_number?: string | null;
     status?: string;
     remarks?: string;
   }

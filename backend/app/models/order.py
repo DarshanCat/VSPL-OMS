@@ -67,6 +67,7 @@ class Order(Base):
     delivery_date = Column(Date)
     commitment_date = Column(Date, nullable=True)
     order_type = Column(String(50), nullable=False, default="Production")  # 'Production' | 'NPD'
+    customer_part_number = Column(String, nullable=True)
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

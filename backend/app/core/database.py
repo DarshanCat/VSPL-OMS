@@ -347,6 +347,12 @@ def auto_migrate_schema():
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS customer_part_number VARCHAR;",
         "UPDATE po_lines SET customer_part_number = (SELECT customer_part_number FROM customer_part_mappings WHERE customer_part_mappings.part_id = po_lines.part_id LIMIT 1) WHERE customer_part_number IS NULL;",
 
+        # Orders customer_part_number
+        "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_part_number VARCHAR;",
+        "UPDATE orders SET customer_part_number = (SELECT customer_part_number FROM customer_part_mappings WHERE customer_part_mappings.customer_id = orders.customer_id AND customer_part_mappings.part_id = orders.part_id LIMIT 1) WHERE customer_part_number IS NULL;",
+        "UPDATE orders SET customer_part_number = (SELECT customer_part_number FROM po_lines WHERE po_lines.id = orders.po_line_id LIMIT 1) WHERE customer_part_number IS NULL AND po_line_id IS NOT NULL;",
+        "UPDATE orders SET customer_part_number = (SELECT customer_part_no FROM customer_part_cross_references WHERE customer_part_cross_references.customer_id = orders.customer_id AND customer_part_cross_references.part_id = orders.part_id AND customer_part_cross_references.is_active = 1 LIMIT 1) WHERE customer_part_number IS NULL;",
+
         # PO Master & PO Line Pricing / Value
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS unit_price FLOAT DEFAULT 0.0;",
         "ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS line_total FLOAT DEFAULT 0.0;",

@@ -27,6 +27,7 @@ class WorkOrderListItem(BaseModel):
     source_type: Optional[str] = "po"
     po_coverage_status: Optional[str] = None
     part_number: str
+    customer_part_number: Optional[str] = None
     part_name: Optional[str] = None
     grade: Optional[str] = None
     order_qty: int
@@ -96,6 +97,7 @@ class WorkOrderTrackingDetail(BaseModel):
     source_type: Optional[str] = "po"
     po_coverage_status: Optional[str] = None
     part_number: str
+    customer_part_number: Optional[str] = None
     part_name: Optional[str] = None
     grade: Optional[str] = None
     order_qty: int
@@ -182,6 +184,8 @@ class OARListItem(BaseModel):
     order_type: Optional[str] = "Production"
     classification: Optional[str] = "Production"
     part_number: str
+    customer_part_number: Optional[str] = None
+    part_name: Optional[str] = None
     oar_qty: int
     allocated_qty: int
     remaining_qty: int

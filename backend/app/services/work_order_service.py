@@ -97,6 +97,74 @@ def compute_wo_release_status(wo: WorkOrder) -> str:
     return "AWAITING_ENG_RELEASE"
 
 
+def resolve_order_customer_part_number(db: Session, order: Optional[Order]) -> Optional[str]:
+    """Authoritative Customer Part Number resolution for an Order (OAR) or linked Part.
+    
+    Checks in priority order:
+    1. Direct customer_part_number recorded on the Order itself.
+    2. Linked POLine customer_part_number.
+    3. Authoritative CustomerPartMapping (customer_id, part_id).
+    4. CustomerPartCrossReference (customer_id, part_id, is_active=True).
+    5. CustomerPartCrossReference fallback by part_id.
+    6. CustomerPartMapping fallback by part_id.
+    """
+    if not order:
+        return None
+
+    # 1. Direct on Order
+    cpn = getattr(order, "customer_part_number", None)
+    if cpn and str(cpn).strip():
+        return str(cpn).strip()
+
+    # 2. Linked POLine
+    if getattr(order, "po_line", None) and getattr(order.po_line, "customer_part_number", None):
+        po_cpn = str(order.po_line.customer_part_number).strip()
+        if po_cpn:
+            return po_cpn
+
+    # 3. CustomerPartMapping by (customer_id, part_id)
+    if order.customer_id and order.part_id:
+        from app.models.customer_part_mapping import CustomerPartMapping
+        mapping = db.query(CustomerPartMapping).filter(
+            CustomerPartMapping.customer_id == order.customer_id,
+            CustomerPartMapping.part_id == order.part_id
+        ).first()
+        if mapping and mapping.customer_part_number and str(mapping.customer_part_number).strip():
+            return str(mapping.customer_part_number).strip()
+
+    # 4. CustomerPartCrossReference by (customer_id, part_id)
+    if order.customer_id and order.part_id:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = db.query(CustomerPartCrossReference).filter(
+            CustomerPartCrossReference.customer_id == order.customer_id,
+            CustomerPartCrossReference.part_id == order.part_id,
+            CustomerPartCrossReference.is_active == True
+        ).first()
+        if xref and xref.customer_part_no and str(xref.customer_part_no).strip():
+            return str(xref.customer_part_no).strip()
+
+    # 5. CustomerPartCrossReference fallback by part_id
+    if order.part_id:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = db.query(CustomerPartCrossReference).filter(
+            CustomerPartCrossReference.part_id == order.part_id,
+            CustomerPartCrossReference.is_active == True
+        ).first()
+        if xref and xref.customer_part_no and str(xref.customer_part_no).strip():
+            return str(xref.customer_part_no).strip()
+
+    # 6. CustomerPartMapping fallback by part_id
+    if order.part_id:
+        from app.models.customer_part_mapping import CustomerPartMapping
+        m = db.query(CustomerPartMapping).filter(
+            CustomerPartMapping.part_id == order.part_id
+        ).first()
+        if m and m.customer_part_number and str(m.customer_part_number).strip():
+            return str(m.customer_part_number).strip()
+
+    return None
+
+
 class WorkOrderService:
     @staticmethod
     def list_work_orders(
@@ -317,6 +385,7 @@ class WorkOrderService:
                 source_type=src_type,
                 po_coverage_status=po_cov_status,
                 part_number=order.part.part_number if (order and order.part) else "N/A",
+                customer_part_number=resolve_order_customer_part_number(db, order),
                 part_name=order.part.description if (order and order.part) else None,
                 grade=order.part.grade if (order and order.part) else None,
                 order_qty=order.po_qty if order else wo.physical_wo_qty,
@@ -500,6 +569,7 @@ class WorkOrderService:
             source_type=src_type,
             po_coverage_status=po_cov_status,
             part_number=order.part.part_number if (order and order.part) else "N/A",
+            customer_part_number=resolve_order_customer_part_number(db, order),
             part_name=order.part.description if (order and order.part) else None,
             grade=order.part.grade if (order and order.part) else None,
             order_qty=order.po_qty if order else wo.physical_wo_qty,
@@ -592,6 +662,7 @@ class WorkOrderService:
                 or_(
                     Order.oar_number.ilike(s),
                     Order.customer_po.ilike(s),
+                    Order.customer_part_number.ilike(s),
                     Customer.customer_code.ilike(s),
                     Customer.name.ilike(s),
                     Part.part_number.ilike(s),
@@ -747,6 +818,7 @@ class WorkOrderService:
                 po_date = po_rec.po_date or (po_rec.created_at.date() if po_rec.created_at else None)
 
         order_classification = getattr(order, "order_type", None) or "Production"
+        cust_part_no = resolve_order_customer_part_number(db, order)
 
         return OARListItem(
             oar_number=order.oar_number or "—",
@@ -761,6 +833,8 @@ class WorkOrderService:
             order_type=order_classification,
             classification=order_classification,
             part_number=order.part.part_number if order.part else "N/A",
+            customer_part_number=cust_part_no,
+            part_name=order.part.description if order.part else None,
             oar_qty=order.po_qty,
             allocated_qty=allocated_total,
             remaining_qty=order.po_qty - allocated_total,

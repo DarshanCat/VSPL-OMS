@@ -8,6 +8,7 @@ class OrderIntakeCreate(BaseModel):
     customer_name: str = Field(..., max_length=300)
     customer_po: str = Field(..., max_length=200)
     part_number: str = Field(..., max_length=100)
+    customer_part_number: Optional[str] = Field(None, max_length=200)
     grade: Optional[str] = Field("Standard", max_length=100)
     part_description: Optional[str] = Field("", max_length=1000)
     po_quantity: int = Field(..., gt=0, le=1_000_000)
@@ -51,6 +52,7 @@ class OrderIntakeResponse(BaseModel):
 class OARUpdate(BaseModel):
     commitment_date: Optional[date] = None
     delivery_date: Optional[date] = None
+    customer_part_number: Optional[str] = None
     status: Optional[str] = Field(None, description="'accept', 'hold', or 'reject'")
     order_type: Optional[str] = Field(None, description="'Production' or 'NPD'")
     remarks: Optional[str] = Field(None, max_length=2000)

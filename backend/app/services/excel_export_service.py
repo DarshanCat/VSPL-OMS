@@ -22,7 +22,7 @@ from app.models.work_order import WorkOrder, WORoute, WOStatus
 from app.models.production_movement import StageWIP, ProductionMovement
 from app.models.production import ProductionUpdate
 from app.models.master_data import POMaster
-from app.services.work_order_service import STANDARD_STAGES, compute_wo_release_status, calculate_delivery_risk
+from app.services.work_order_service import STANDARD_STAGES, compute_wo_release_status, calculate_delivery_risk, resolve_order_customer_part_number
 
 
 def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optional[str] = None) -> openpyxl.Workbook:
@@ -77,7 +77,7 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
 
     oar_headers = [
         "OAR Number", "Classification", "Customer Code", "Customer Name", "Customer PO",
-        "PO Date", "Part Number", "Part Description", "Grade", "PO Qty",
+        "PO Date", "Customer Part Number", "Internal Part Number", "Part Description", "Grade", "PO Qty",
         "Allocated WO Qty", "Balance to Plan", "Produced Good Qty", "Dispatched Qty",
         "Rejection Qty", "Delivery Date", "OAR Status"
     ]
@@ -125,6 +125,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
                 po_date_str = po_rec.po_date.strftime("%Y-%m-%d")
 
         deliv_date_str = order.delivery_date.strftime("%Y-%m-%d") if order.delivery_date else ""
+        cust_pn = resolve_order_customer_part_number(db, order) or (order.part.part_number if order.part else "N/A")
+        internal_pn = order.part.part_number if order.part else "N/A"
 
         row_data = [
             order.oar_number or "N/A",
@@ -133,7 +135,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
             order.customer.name if order.customer else "N/A",
             order.customer_po or "",
             po_date_str,
-            order.part.part_number if order.part else "N/A",
+            cust_pn,
+            internal_pn,
             order.part.description if order.part else "",
             order.part.grade if order.part else "",
             order.po_qty or 0,
@@ -188,7 +191,7 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
     ws_wos["A2"].alignment = left_align
 
     wo_headers = [
-        "WO Number", "OAR Number", "Classification", "Customer Code", "Part Number",
+        "WO Number", "OAR Number", "Classification", "Customer Code", "Customer Part Number", "Internal Part Number",
         "Grade", "WO Plan Qty", "Current Stage", "Available Stage WIP", "Produced OK",
         "Stage Rejections", "Heat / Melt Number", "WO Status", "Release Status",
         "Delivery Risk", "Target Date", "WO Created At"
@@ -235,13 +238,16 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
 
         target_date_str = order.delivery_date.strftime("%Y-%m-%d") if (order and order.delivery_date) else ""
         wo_created_str = wo.created_at.strftime("%Y-%m-%d") if wo.created_at else ""
+        wo_cust_pn = resolve_order_customer_part_number(db, order) or (order.part.part_number if (order and order.part) else "N/A")
+        wo_internal_pn = order.part.part_number if (order and order.part) else "N/A"
 
         row_data = [
             wo.wo_number,
             order.oar_number if order else "N/A",
             classification,
             order.customer.customer_code if (order and order.customer) else "N/A",
-            order.part.part_number if (order and order.part) else "N/A",
+            wo_cust_pn,
+            wo_internal_pn,
             order.part.grade if (order and order.part) else "",
             wo.physical_wo_qty,
             cur_stage,
@@ -298,7 +304,7 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
     ws_trace["A2"].alignment = left_align
 
     trace_headers = [
-        "Classification", "OAR Number", "Customer", "Customer PO", "Part Number",
+        "Classification", "OAR Number", "Customer", "Customer PO", "Customer Part Number", "Internal Part Number",
         "PO Qty", "WO Number", "WO Qty", "Current Stage", "Stage Available WIP",
         "Heat / Heat Code", "WO Status", "Fulfillment Status"
     ]
@@ -314,6 +320,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
     current_row = 5
     for order in orders:
         classification = getattr(order, "order_type", None) or "Production"
+        order_cust_pn = resolve_order_customer_part_number(db, order) or (order.part.part_number if order.part else "N/A")
+        order_internal_pn = order.part.part_number if order.part else "N/A"
         order_wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.wo_number.asc()).all()
 
         if not order_wos:
@@ -323,7 +331,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
                 order.oar_number,
                 order.customer.customer_code if order.customer else "N/A",
                 order.customer_po or "",
-                order.part.part_number if order.part else "N/A",
+                order_cust_pn,
+                order_internal_pn,
                 order.po_qty or 0,
                 "[NO WORK ORDERS YET]",
                 0,
@@ -337,7 +346,7 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
                 cell = ws_trace.cell(row=current_row, column=col_idx, value=val)
                 cell.font = data_font
                 cell.border = thin_border
-                cell.alignment = center_align if col_idx in [1, 2, 3, 4, 5, 7, 9, 11, 12, 13] else (right_align if col_idx in [6, 8, 10] else left_align)
+                cell.alignment = center_align if col_idx in [1, 2, 3, 4, 5, 6, 8, 10, 12, 13, 14] else (right_align if col_idx in [7, 9, 11] else left_align)
                 if col_idx == 1:
                     cell.fill = npd_fill if classification.upper() == "NPD" else prod_fill
                     cell.font = npd_font if classification.upper() == "NPD" else prod_font
@@ -353,7 +362,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
                     order.oar_number,
                     order.customer.customer_code if order.customer else "N/A",
                     order.customer_po or "",
-                    order.part.part_number if order.part else "N/A",
+                    order_cust_pn,
+                    order_internal_pn,
                     order.po_qty or 0,
                     wo.wo_number,
                     wo.physical_wo_qty,
@@ -367,7 +377,7 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
                     cell = ws_trace.cell(row=current_row, column=col_idx, value=val)
                     cell.font = data_font
                     cell.border = thin_border
-                    cell.alignment = center_align if col_idx in [1, 2, 3, 4, 5, 7, 9, 11, 12, 13] else (right_align if col_idx in [6, 8, 10] else left_align)
+                    cell.alignment = center_align if col_idx in [1, 2, 3, 4, 5, 6, 8, 10, 12, 13, 14] else (right_align if col_idx in [7, 9, 11] else left_align)
                     if col_idx == 1:
                         cell.fill = npd_fill if classification.upper() == "NPD" else prod_fill
                         cell.font = npd_font if classification.upper() == "NPD" else prod_font
@@ -406,7 +416,8 @@ def build_open_orders_and_wos_workbook(db: Session, classification_filter: Optio
         ("customer_po", "OAR Header", "Text", "MANDATORY", "PO-2024-9842, SCH-OCT-24", "Customer's official purchase order number or schedule reference."),
         ("po_date", "OAR Header", "Date (YYYY-MM-DD)", "OPTIONAL", "2024-10-15", "Date when the customer placed the PO."),
         ("delivery_date", "OAR Header", "Date (YYYY-MM-DD)", "MANDATORY", "2024-11-20", "Committed customer shipment delivery date. Used to compute delivery risk score."),
-        ("part_number", "OAR & WO", "Text", "MANDATORY", "VSPL-HUB-01, BRK-440", "Must exist in Part Master. Defines drawing number, weight, and process routing."),
+        ("customer_part_number", "OAR & WO", "Text", "RECOMMENDED", "1000180955, DWG-8821-B", "Customer's official part/drawing number as printed on PO. Displayed as primary identifier."),
+        ("part_number", "OAR & WO", "Text", "INTERNAL CODE", "SMX4, WND31, BRZ-BUSH-100", "VSPL internal part code mapped to customer drawing."),
         ("po_qty", "OAR Header", "Integer (> 0)", "MANDATORY", "500, 1000", "Total pieces ordered by customer under this line."),
         ("unit_price", "OAR Header", "Decimal (>= 0)", "OPTIONAL", "145.50, 2800.00", "Per piece rate. System automatically calculates total PO value = po_qty * unit_price."),
         ("wo_number", "Work Order", "Text", "MANDATORY", "WO-00100, WO-NPD-005", "Unique Work Order code tracking the physical metal batch through the foundry."),

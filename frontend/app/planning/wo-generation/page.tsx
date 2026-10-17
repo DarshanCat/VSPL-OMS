@@ -463,8 +463,15 @@ function WOGenerationContent() {
                             PO: {o.customer_po || "—"}
                           </span>
                         </td>
-                        <td className="p-3 font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                          {o.part_number}
+                        <td className="p-3">
+                          <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 block">
+                            {o.customer_part_number || o.part_number}
+                          </span>
+                          {o.customer_part_number && o.customer_part_number !== o.part_number && (
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              Internal: {o.part_number}
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono font-bold">{o.oar_qty}</td>
                         <td className="p-3 text-right font-mono text-zinc-500">{o.allocated_qty}</td>
@@ -616,8 +623,15 @@ function WOGenerationContent() {
                   <span className="text-[10px] text-zinc-400 font-mono">{selectedOar.customer_code}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Part &amp; Grade</span>
-                  <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 block">{selectedOar.part_number}</span>
+                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Customer Part</span>
+                  <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 block">
+                    {selectedOar.customer_part_number || selectedOar.part_number}
+                  </span>
+                  {selectedOar.customer_part_number && selectedOar.customer_part_number !== selectedOar.part_number && (
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      Internal: {selectedOar.part_number}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Quantities</span>

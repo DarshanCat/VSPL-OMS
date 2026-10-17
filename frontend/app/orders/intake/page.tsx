@@ -373,6 +373,7 @@ export default function OrderIntakePage() {
         customer_name: customerName,
         customer_po: customerPO.trim(),
         part_number: partNumber,
+        customer_part_number: customerPartNo.trim() || undefined,
         grade: grade,
         part_description: partDesc,
         po_quantity: qty,

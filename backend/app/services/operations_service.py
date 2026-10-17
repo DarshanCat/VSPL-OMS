@@ -203,6 +203,31 @@ class OperationsService:
             else req.po_quantity
         )
 
+        cust_pn = req.customer_part_number.strip() if req.customer_part_number else (
+            po_line.customer_part_number if po_line and getattr(po_line, "customer_part_number", None) else None
+        )
+        if not cust_pn and customer and part:
+            from app.models.customer_part_mapping import CustomerPartMapping
+            cpm = db.query(CustomerPartMapping).filter(
+                CustomerPartMapping.customer_id == customer.id,
+                CustomerPartMapping.part_id == part.id
+            ).first()
+            if cpm and cpm.customer_part_number:
+                cust_pn = cpm.customer_part_number
+        if req.customer_part_number and customer and part:
+            from app.models.customer_part_mapping import CustomerPartMapping
+            cpm_existing = db.query(CustomerPartMapping).filter(
+                CustomerPartMapping.customer_id == customer.id,
+                CustomerPartMapping.part_id == part.id
+            ).first()
+            if not cpm_existing:
+                db.add(CustomerPartMapping(
+                    customer_id=customer.id,
+                    part_id=part.id,
+                    customer_part_number=req.customer_part_number.strip(),
+                    status="Active"
+                ))
+
         order = Order(
             oar_number=oar_num,
             customer_id=customer.id,
@@ -213,6 +238,7 @@ class OperationsService:
             delivery_date=req.delivery_date,
             commitment_date=req.commitment_date,
             order_type=req.order_type if req.order_type in ("Production", "NPD") else "Production",
+            customer_part_number=cust_pn,
             status=req.status,
             source_type=source_type,
             po_line_id=po_line.id if po_line else None,
@@ -369,11 +395,31 @@ class OperationsService:
                     order.order_type = new_type
                     for wo in order.work_orders:
                         wo.classification = new_type
+            if payload.customer_part_number is not None:
+                new_cpn = payload.customer_part_number.strip()
+                order.customer_part_number = new_cpn
+                if order.customer_id and order.part_id:
+                    from app.models.customer_part_mapping import CustomerPartMapping
+                    cpm = db.query(CustomerPartMapping).filter(
+                        CustomerPartMapping.customer_id == order.customer_id,
+                        CustomerPartMapping.part_id == order.part_id
+                    ).first()
+                    if cpm:
+                        cpm.customer_part_number = new_cpn
+                    else:
+                        db.add(CustomerPartMapping(
+                            customer_id=order.customer_id,
+                            part_id=order.part_id,
+                            customer_part_number=new_cpn,
+                            status="Active"
+                        ))
 
         if payload.commitment_date is not None:
             changes.append(f"Commitment Date: {old_commit} -> {payload.commitment_date}")
         if payload.delivery_date is not None:
             changes.append(f"Delivery Date -> {payload.delivery_date}")
+        if payload.customer_part_number is not None:
+            changes.append(f"Customer Part Number -> {payload.customer_part_number.strip()}")
         if payload.status is not None:
             changes.append(f"Status -> {payload.status}")
         if payload.order_type is not None:

@@ -249,7 +249,11 @@ function WorkOrderTrackingPageInner() {
                       )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                      Part: <strong className="text-zinc-800 dark:text-zinc-200">{woData.part_number}</strong> — {woData.part_name || "Precision Engineered Component"} ({woData.grade || "Alloy"})
+                      Part: <strong className="text-zinc-800 dark:text-zinc-200">{woData.customer_part_number || woData.part_number}</strong>
+                      {woData.customer_part_number && woData.customer_part_number !== woData.part_number && (
+                        <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono ml-1.5">(Internal: {woData.part_number})</span>
+                      )}
+                      {" "}— {woData.part_name || "Precision Engineered Component"} ({woData.grade || "Alloy"})
                     </p>
                   </div>
                 </div>
