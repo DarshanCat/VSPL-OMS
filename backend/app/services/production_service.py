@@ -625,6 +625,13 @@ class ProductionService:
             db.add(wip)
             db.flush()
 
+        # Gate completion lock: if this gate has completed processing and material moved downstream
+        if wip.ent_qty > 0 and wip.inproc_qty == 0 and (wip.ok_qty + wip.rejected_qty) > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Gate '{matched_stage}' is completely finished and locked for Work Order '{req.wo_number}'. All {wip.ok_qty + wip.rejected_qty} pieces have been produced and moved downstream."
+            )
+
         # Authoritative production ceiling: a fresh production entry can only convert
         # material that is still physically unprocessed at this stage (inproc_qty =
         # ent_qty - ok_qty - rejected_qty), never `available_wip`. available_wip also

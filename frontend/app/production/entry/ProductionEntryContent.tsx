@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   ClipboardCheck,
   AlertCircle,
-  Flame
+  Flame,
+  Lock
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -250,10 +251,11 @@ export function ProductionEntryContent() {
       setSearchTerm(tracking.wo_number);
       setHeatNumber(tracking.heat_number || "");
 
-      // Default stage: if overrideStage is specified and valid, use it; otherwise prefer selectedStage or current_stage
+      // Default stage: prefer overrideStage if valid, otherwise prefer tracking.current_stage where WIP is active
       const validStages = tracking.timeline?.map((s: any) => s.stage) || ["F1"];
-      const candidateStage = overrideStage || selectedStage;
-      const targetStage = validStages.includes(candidateStage) ? candidateStage : (tracking.current_stage || "F1");
+      const targetStage = overrideStage && validStages.includes(overrideStage)
+        ? overrideStage
+        : (tracking.current_stage && validStages.includes(tracking.current_stage) ? tracking.current_stage : validStages[0]);
       setSelectedStage(targetStage);
 
       // Fetch authoritative stage state for chosen stage
@@ -600,7 +602,7 @@ export function ProductionEntryContent() {
                   {woData.timeline && woData.timeline.map((stg: any, idx: number) => {
                     const isSelected = stg.stage === selectedStage;
                     const isCur = stg.stage === woData.current_stage;
-                    const isDone = stg.is_completed;
+                    const isDone = stg.is_completed || (stg.stage === activeStage.stage && activeStage.is_gate_locked);
                     return (
                       <React.Fragment key={stg.stage}>
                         <button
@@ -617,7 +619,8 @@ export function ProductionEntryContent() {
                           }`}
                         >
                           <span>{stg.stage}</span>
-                          {isCur && !isSelected && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+                          {isDone && <Lock className="h-3 w-3 text-zinc-400" />}
+                          {isCur && !isSelected && !isDone && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
                         </button>
                         {idx < woData.timeline.length - 1 && (
                           <ArrowRight className="h-3 w-3 text-zinc-400 shrink-0" />
@@ -643,8 +646,8 @@ export function ProductionEntryContent() {
                         {selectedStage}
                       </h3>
                     </div>
-                    <Badge variant="green" size="md">
-                      {activeStage.stage_status || "IN PROGRESS"}
+                    <Badge variant={activeStage.is_gate_locked ? "blue" : "green"} size="md">
+                      {activeStage.is_gate_locked ? "🔒 COMPLETED & LOCKED" : (activeStage.stage_status || "IN PROGRESS")}
                     </Badge>
                   </div>
 
@@ -677,31 +680,26 @@ export function ProductionEntryContent() {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-300 dark:border-blue-800">
-                      <span className="text-blue-700 dark:text-blue-400 font-bold">Moved to Next Stage:</span>
-                      <span className="font-mono font-extrabold text-blue-700 dark:text-blue-400 text-sm">
-                        {activeStage.already_moved_qty} pcs
-                      </span>
-                    </div>
+                    {(activeStage.on_hand_qty || 0) > 0 && (
+                      <div className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/20 border border-cyan-300 dark:border-cyan-800">
+                        <span className="text-cyan-700 dark:text-cyan-400 font-bold">Good On-Hand (Awaiting Movement):</span>
+                        <span className="font-mono font-extrabold text-cyan-700 dark:text-cyan-400 text-sm">
+                          {activeStage.on_hand_qty} pcs
+                        </span>
+                      </div>
+                    )}
 
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-300 dark:border-purple-800">
-                      <span className="text-purple-700 dark:text-purple-400 font-bold">In Process / Unprocessed WIP:</span>
-                      <span className="font-mono font-extrabold text-purple-700 dark:text-purple-400 text-sm">
-                        {activeStage.in_process_qty} pcs
+                    <div className={`flex items-center justify-between p-2.5 rounded-xl border ${
+                      activeStage.is_gate_locked
+                        ? "bg-zinc-100 dark:bg-zinc-900 border-zinc-300 dark:border-zinc-800 text-zinc-500"
+                        : "bg-amber-50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400"
+                    }`}>
+                      <span className="font-bold flex items-center gap-1.5">
+                        {activeStage.is_gate_locked && <Lock className="h-3.5 w-3.5" />}
+                        <span>Remaining to Produce:</span>
                       </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/20 border border-cyan-300 dark:border-cyan-800">
-                      <span className="text-cyan-700 dark:text-cyan-400 font-bold">Remaining Movable (On-Hand):</span>
-                      <span className="font-mono font-extrabold text-cyan-700 dark:text-cyan-400 text-sm">
-                        {activeStage.available_wip} pcs
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800">
-                      <span className="text-amber-700 dark:text-amber-400 font-bold">Yet to Produce:</span>
-                      <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">
-                        {activeStage.remaining_to_produce} pcs
+                      <span className="font-mono font-extrabold text-sm">
+                        {activeStage.is_gate_locked ? "0 pcs (Locked)" : `${activeStage.remaining_to_produce ?? activeStage.in_process_qty} pcs`}
                       </span>
                     </div>
                   </div>
@@ -710,14 +708,42 @@ export function ProductionEntryContent() {
                 <div className="mt-6 pt-4 border-t border-emerald-500/20 text-[11px] text-zinc-500">
                   <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold mb-1">
                     <ShieldCheck className="h-4 w-4" />
-                    <span>Target Qty is Read-Only</span>
+                    <span>Target & Ceiling Enforcement</span>
                   </div>
-                  <p>Target quantity is mathematically derived from OMS yield algorithms. "Not Yet Produced" / "Remaining to Produce" is Target minus cumulative OK Produced. The physically unprocessed material actually available to convert right now at this stage is {activeStage.in_process_qty} pcs — that is the backend-enforced ceiling for your next entry below.</p>
+                  <p>Target quantity matches the released Work Order quantity ({activeStage.target_qty} pcs). When all material is processed and moved downstream, this gate automatically locks.</p>
                 </div>
               </div>
 
-              {/* Step 6: Production Input Form */}
+              {/* Step 6: Production Input Form OR Locked State */}
               <div className="lg:col-span-2 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm">
+                {activeStage.is_gate_locked ? (
+                  <div className="py-12 px-6 flex flex-col items-center justify-center text-center space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner">
+                      <Lock className="h-8 w-8" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-extrabold text-zinc-900 dark:text-zinc-50">
+                        Gate {selectedStage} is Completed & Locked
+                      </h3>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 max-w-md mx-auto">
+                        All {activeStage.target_qty} pcs for Work Order {woData.wo_number} have been produced and moved downstream. Zero material remains at this gate.
+                      </p>
+                    </div>
+
+                    {activeStage.next_stage && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectStage(activeStage.next_stage)}
+                          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-xs font-bold text-white hover:bg-emerald-500 shadow-md transition-all cursor-pointer"
+                        >
+                          <span>Proceed to Next Gate: {activeStage.next_stage}</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
                 <form onSubmit={handleFormSubmit} className="space-y-5">
                   <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
@@ -916,6 +942,7 @@ export function ProductionEntryContent() {
                     </button>
                   </div>
                 </form>
+                )}
               </div>
             </div>
           </div>

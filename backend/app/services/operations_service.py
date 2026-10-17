@@ -826,7 +826,7 @@ class OperationsService:
                 work_order_id=wo.id,
                 stage=stg,
                 sequence=seq,
-                stage_target_qty=targets.get(stg, req.physical_wo_qty),
+                stage_target_qty=req.physical_wo_qty,
                 cumulative_ent_qty=req.physical_wo_qty if seq == 1 else 0,
                 cumulative_inproc_qty=req.physical_wo_qty if seq == 1 else 0,
                 stage_status="In-Progress" if seq == 1 else "Pending"

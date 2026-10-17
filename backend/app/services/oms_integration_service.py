@@ -188,6 +188,9 @@ class OMSIntegrationService:
             ent = wip_rec.ent_qty
             ok = wip_rec.ok_qty
             rej = wip_rec.rejected_qty
+            # If the stage target was inflated beyond the released WO quantity, cap it to physical_wo_qty
+            if wo.physical_wo_qty and wo.physical_wo_qty > 0 and r.stage_target_qty > wo.physical_wo_qty:
+                r.stage_target_qty = wo.physical_wo_qty
             tgt = r.stage_target_qty
 
             is_packing_or_final = (
@@ -227,9 +230,15 @@ class OMSIntegrationService:
             r.cumulative_rej_qty = rej
             r.cumulative_inproc_qty = net_ip
             r.cumulative_onhand_qty = on_hand
-            r.stage_status = calculate_rag_status(ok, rej, net_ip, tgt)
 
-        # 2. Furthest data-bearing stage (OMS Snapshot Rule)
+            # Gate lock status: If all entered material has been produced (net_ip == 0) and all good product moved out (on_hand == 0):
+            is_completed_gate = bool(ent > 0 and net_ip == 0 and on_hand == 0 and (ok + rej) > 0)
+            if is_completed_gate:
+                r.stage_status = "Completed"
+            else:
+                r.stage_status = calculate_rag_status(ok, rej, net_ip, tgt)
+
+        # 2. Furthest data-bearing stage & Active Stage (OMS Snapshot Rule)
         def _has_data(stg_name: str) -> bool:
             w = wip_map.get(stg_name)
             if not w:
@@ -241,7 +250,17 @@ class OMSIntegrationService:
             if _has_data(r.stage):
                 furthest = r.stage
 
-        if furthest is None:
+        # Find first stage along the route that has active WIP (inproc > 0 or onhand > 0)
+        active_stg = None
+        for r in routes:
+            w = wip_map.get(r.stage)
+            if w and (w.inproc_qty > 0 or w.onhand_qty > 0):
+                active_stg = r.stage
+                break
+
+        if active_stg:
+            cur = active_stg
+        elif furthest is None:
             cur = routes[0].stage
         elif furthest == routes[-1].stage and routes[-1].stage_status in DISPATCH_DONE:
             cur = "Completed"
@@ -356,26 +375,27 @@ class OMSIntegrationService:
             StageWIP.stage == (matched or stage_name)
         ).first()
 
-        target_qty = route_rec.stage_target_qty if route_rec else (wo.physical_wo_qty or 0)
+        # Cap target_qty to physical_wo_qty so released WO target never inflates
+        target_qty = min(route_rec.stage_target_qty, wo.physical_wo_qty) if (route_rec and wo.physical_wo_qty and wo.physical_wo_qty > 0) else (wo.physical_wo_qty if (wo.physical_wo_qty and wo.physical_wo_qty > 0) else (route_rec.stage_target_qty if route_rec else 0))
         ok_qty = wip_rec.ok_qty if wip_rec else 0
         rej_qty = wip_rec.rejected_qty if wip_rec else 0
         inproc_qty = wip_rec.inproc_qty if wip_rec else 0
         onhand_qty = wip_rec.onhand_qty if wip_rec else 0
-        avail_wip = inproc_qty + onhand_qty
-        # Good quantity that has already left this stage via movement -- the portion of
-        # cumulative OK that is no longer sitting here as on-hand WIP. Derived from the
-        # same ok_qty/onhand_qty this function already computes; not a new calculation,
-        # just exposing an existing relationship (onhand_qty = max(ok_qty - next stage's
-        # ent_qty, 0), so ok_qty - onhand_qty is exactly what has moved on).
+        avail_wip = onhand_qty
         already_moved_qty = max(ok_qty - onhand_qty, 0)
-        # Production-planning view (Target vs. cumulative OK), distinct from inproc_qty
-        # (the physical unprocessed-material ceiling above). These can legitimately
-        # differ once anything has been rejected: e.g. Target=10, 2 rejected, 5 OK ->
-        # inproc_qty = 10-5-2 = 3 pieces of raw material still physically convertible,
-        # while "Not Yet Produced" = 10-5 = 5 against the original target. Both are
-        # real, correct answers to different questions -- not an inconsistency.
-        not_yet_produced = max(target_qty - ok_qty, 0)
-        rag = route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty)
+        
+        # Remaining unprocessed pieces to produce at this stage
+        remaining_to_produce = inproc_qty
+        
+        # Gate lock status: If all entered material has been produced (inproc == 0) and all good product moved out (onhand == 0):
+        is_gate_locked = bool(
+            wip_rec
+            and wip_rec.ent_qty > 0
+            and inproc_qty == 0
+            and onhand_qty == 0
+            and (ok_qty + rej_qty) > 0
+        )
+        rag = "Completed" if is_gate_locked else (route_rec.stage_status if route_rec else calculate_rag_status(ok_qty, rej_qty, inproc_qty, target_qty))
         next_stage = OMSIntegrationService.get_next_stage(db, wo, matched or stage_name)
 
         # Check MRB summary for this stage (Option 2)
@@ -394,13 +414,15 @@ class OMSIntegrationService:
             "target_qty": target_qty,
             "ok_completed_qty": ok_qty,
             "rejected_qty": rej_qty,
+            "total_produced": ok_qty + rej_qty,
             "in_process_qty": inproc_qty,
             "on_hand_qty": onhand_qty,
-            "available_wip": avail_wip,
+            "available_wip": onhand_qty,
             "already_moved_qty": already_moved_qty,
-            "not_yet_produced": not_yet_produced,
-            "remaining_to_produce": not_yet_produced,
+            "not_yet_produced": remaining_to_produce,
+            "remaining_to_produce": remaining_to_produce,
             "stage_status": rag,
+            "is_gate_locked": is_gate_locked,
             "is_current_stage": (wo.current_stage == (matched or stage_name)),
             "next_stage": next_stage,
             "mrb_lock_status": mrb_summary["lock_status"],
@@ -421,12 +443,11 @@ class OMSIntegrationService:
         db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete()
 
         stage_list = parse_route(route_str) if route_str else ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
-        targets = calculate_stage_targets(wo.physical_wo_qty, route=stage_list)
 
         created_routes = []
         for seq, stg in enumerate(stage_list, start=1):
             is_first = (seq == 1)
-            tgt = targets.get(stg, wo.physical_wo_qty)
+            tgt = wo.physical_wo_qty
             r = WORoute(
                 work_order_id=wo.id,
                 stage=stg,
