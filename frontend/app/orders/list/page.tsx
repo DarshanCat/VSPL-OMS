@@ -112,7 +112,8 @@ export default function OarWoListPage() {
       if (searchTerm.trim()) {
         const nextExpanded: Record<string, boolean> = {};
         items.forEach((item) => {
-          nextExpanded[item.oar_number] = true;
+          const k = item.order_id || `${item.oar_number}-${item.part_number}`;
+          nextExpanded[k] = true;
         });
         setExpanded(nextExpanded);
       }
@@ -139,8 +140,8 @@ export default function OarWoListPage() {
     }
   };
 
-  const toggleExpand = (oarNumber: string) => {
-    setExpanded((prev) => ({ ...prev, [oarNumber]: !prev[oarNumber] }));
+  const toggleExpand = (rowKey: string) => {
+    setExpanded((prev) => ({ ...prev, [rowKey]: !prev[rowKey] }));
   };
 
   const handleOpenPatchModal = (oar: OARListItem) => {
@@ -417,21 +418,23 @@ export default function OarWoListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
-                {oars.map((oar) => (
-                  <React.Fragment key={oar.oar_number}>
-                    <tr
-                      onClick={() => toggleExpand(oar.oar_number)}
-                      className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40 cursor-pointer ${
-                        oar.classification?.toUpperCase() === "NPD" ? "bg-rose-50/20 dark:bg-rose-950/10" : ""
-                      }`}
-                    >
-                      <td className="py-3 px-3 text-zinc-400">
-                        {expanded[oar.oar_number] ? (
-                          <ChevronDown className="h-3.5 w-3.5 text-blue-600" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        )}
-                      </td>
+                {oars.map((oar) => {
+                  const rowKey = oar.order_id || `${oar.oar_number}-${oar.part_number}`;
+                  return (
+                    <React.Fragment key={rowKey}>
+                      <tr
+                        onClick={() => toggleExpand(rowKey)}
+                        className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40 cursor-pointer ${
+                          oar.classification?.toUpperCase() === "NPD" ? "bg-rose-50/20 dark:bg-rose-950/10" : ""
+                        }`}
+                      >
+                        <td className="py-3 px-3 text-zinc-400">
+                          {expanded[rowKey] ? (
+                            <ChevronDown className="h-3.5 w-3.5 text-blue-600" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          )}
+                        </td>
                       <td className="py-3 px-3">
                         <div className="font-mono font-bold text-zinc-900 dark:text-zinc-100">
                           {oar.oar_number}
@@ -529,7 +532,7 @@ export default function OarWoListPage() {
                       </td>
                     </tr>
 
-                    {expanded[oar.oar_number] && (
+                    {expanded[rowKey] && (
                       <tr>
                         <td colSpan={13} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
                           <div className="p-4 space-y-4">
@@ -673,7 +676,7 @@ export default function OarWoListPage() {
                                     </thead>
                                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
                                       {oar.work_orders.map((wo) => (
-                                        <tr key={wo.wo_number} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
+                                        <tr key={wo.wo_id || wo.wo_number} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
                                           <td className="py-2 px-2.5 font-mono font-bold text-zinc-900 dark:text-zinc-100">
                                             <div className="flex items-center gap-1.5">
                                               <span>{wo.wo_number}</span>
@@ -786,7 +789,8 @@ export default function OarWoListPage() {
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
+                  );
+                })}
 
                 {oars.length === 0 && !loading && (
                   <tr>
