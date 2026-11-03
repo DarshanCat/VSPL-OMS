@@ -22,13 +22,12 @@ def _login(client, role="ADMIN"):
 def _auth(token):
     return {"Authorization": f"Bearer {token}"}
 
-def test_multi_part_same_po_shares_one_oar(client):
-    """Real customer POs have multiple parts. All parts for the same Customer PO share ONE OAR."""
+def test_multi_part_same_po_unique_oar_numbers(client):
+    """Real customer POs have multiple parts. Each part receives its own unique sequential OAR number (Option A)."""
     headers = _auth(_login(client))
     po_num = f"PO-MULTI-{uuid.uuid4().hex[:6].upper()}"
-    oar_num = f"OAR-M-{uuid.uuid4().hex[:6].upper()}"
 
-    # Line 1: Part 1
+    # Line 1: Part 1 - auto-generated OAR
     resp1 = client.post(
         "/api/v1/operations/intake",
         headers=headers,
@@ -39,15 +38,13 @@ def test_multi_part_same_po_shares_one_oar(client):
             "part_number": "BRZ-BUSH-100",
             "po_quantity": 50,
             "commitment_date": "2026-10-30",
-            "oar_number": oar_num,
             "create_wos": False,
         },
     )
     assert resp1.status_code == 200, resp1.text
-    body1 = resp1.json()
-    assert body1["oar_number"] == oar_num
+    oar1 = resp1.json()["oar_number"]
 
-    # Line 2: Part 2 under the SAME PO using the SAME OAR number
+    # Line 2: Part 2 under the SAME PO - must receive a distinct unique OAR number
     resp2 = client.post(
         "/api/v1/operations/intake",
         headers=headers,
@@ -58,38 +55,28 @@ def test_multi_part_same_po_shares_one_oar(client):
             "part_number": "BRZ-RING-250",
             "po_quantity": 75,
             "commitment_date": "2026-11-15",
-            "oar_number": oar_num,
             "create_wos": False,
         },
     )
     assert resp2.status_code == 200, resp2.text
-    body2 = resp2.json()
-    assert body2["oar_number"] == oar_num
+    oar2 = resp2.json()["oar_number"]
 
-    # Verify both orders in DB have the same OAR and their commitment dates
-    db = SessionLocal()
-    try:
-        orders = db.query(Order).filter(Order.oar_number == oar_num).all()
-        assert len(orders) == 2
-        pns = {o.part.part_number for o in orders}
-        assert "BRZ-BUSH-100" in pns
-        assert "BRZ-RING-250" in pns
-        for o in orders:
-            assert o.commitment_date is not None
-    finally:
-        db.close()
+    # Assert distinct OAR numbers
+    assert oar1 != oar2
+    assert oar1.startswith("OAR-")
+    assert oar2.startswith("OAR-")
 
-    # Line 3: Another PO trying to reuse this OAR number MUST fail with 400
+    # Trying to reuse an already existing OAR number must fail with 400
     resp3 = client.post(
         "/api/v1/operations/intake",
         headers=headers,
         json={
             "customer_code": "CUST-VALVE",
             "customer_name": "Flowserve Controls Ltd",
-            "customer_po": f"PO-DIFFERENT-{uuid.uuid4().hex[:6]}",
+            "customer_po": po_num,
             "part_number": "BRZ-SLV-400",
             "po_quantity": 30,
-            "oar_number": oar_num,
+            "oar_number": oar1,
             "create_wos": False,
         },
     )
@@ -119,7 +106,6 @@ def test_auto_link_po_line_and_allocated_qty(client):
     )
     assert po_resp.status_code == 200, po_resp.text
     po_data = po_resp.json()
-    line1_id = po_data["lines"][0]["id"]
 
     # Intake for line 1 WITHOUT explicitly providing po_line_id
     sales_headers = _auth(_login(client, "SALES"))

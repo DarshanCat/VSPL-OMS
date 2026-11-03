@@ -156,8 +156,8 @@ class OperationsService:
             schedule.po_status = ScheduleStatus.AWAITING_PO
 
         # 3. Order (OAR) - user manual number or collision-free sequential generation
-        # Real-world Customer POs contain multiple parts/line items.
-        # All parts for the SAME Customer PO belong to ONE OAR reference.
+        # Each part line item receives a distinct, unique OAR number to prevent repeating
+        # OAR numbers and ensure independent planning, work order generation, and tracking.
         if req.oar_number and req.oar_number.strip():
             candidate_oar = _normalize_oar_code(req.oar_number.strip())
             existing = db.query(Order).filter(
@@ -167,35 +167,13 @@ class OperationsService:
                 )
             ).first()
             if existing:
-                # If this existing OAR belongs to the SAME Customer PO, allow adding this part line to the SAME OAR!
-                if (
-                    existing.customer_id == customer.id
-                    and existing.customer_po.strip().lower() == req.customer_po.strip().lower()
-                ):
-                    oar_num = existing.oar_number
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"OAR Number '{candidate_oar}' already exists for Customer PO '{existing.customer_po}'."
-                    )
-            else:
-                oar_num = candidate_oar
-        else:
-            # Check if an OAR already exists for this Customer PO (for multi-part POs)
-            existing_for_po = (
-                db.query(Order)
-                .filter(
-                    Order.customer_id == customer.id,
-                    func.lower(Order.customer_po) == func.lower(req.customer_po.strip()),
-                    Order.oar_number.isnot(None),
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"OAR Number '{candidate_oar}' already exists in the system."
                 )
-                .order_by(Order.created_at.desc())
-                .first()
-            )
-            if existing_for_po and existing_for_po.oar_number:
-                oar_num = existing_for_po.oar_number
-            else:
-                oar_num = next_oar_sequence(db)
+            oar_num = candidate_oar
+        else:
+            oar_num = next_oar_sequence(db)
 
         effective_batch_size = (
             req.max_batch_size
