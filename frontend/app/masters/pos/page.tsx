@@ -898,7 +898,7 @@ export default function POMasterPage() {
         {/* Edit PO Modal */}
         {editingPO && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4">
+            <div className="max-h-[90vh] w-full max-w-5xl xl:max-w-6xl overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
                 <div className="flex items-center gap-2">
                   <Edit3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -1013,129 +1013,120 @@ export default function POMasterPage() {
                     </span>
                   </div>
 
-                  <div className="hidden md:grid md:grid-cols-12 gap-2 px-2 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                    <div className="col-span-3">Customer Part No</div>
-                    <div className="col-span-2">Internal Part No</div>
-                    <div className="col-span-1 text-right">PO Qty</div>
-                    <div className="col-span-2 text-right">Value / Pc (₹)</div>
-                    <div className="col-span-1 text-right">Line Total</div>
-                    <div className="col-span-1 text-center">Alloc / Avail</div>
-                    <div className="col-span-1">Req. Date</div>
-                    <div className="col-span-1 text-right">Action</div>
-                  </div>
+<div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+                    <table className="w-full text-xs text-left border-collapse min-w-[880px]">
+                      <thead>
+                        <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/50 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                          <th className="py-2.5 px-3 min-w-[200px]">Customer Part No</th>
+                          <th className="py-2.5 px-3 min-w-[130px]">Internal Part No</th>
+                          <th className="py-2.5 px-3 w-28 min-w-[95px] text-right">PO Qty</th>
+                          <th className="py-2.5 px-3 w-28 min-w-[110px] text-right">Value / Pc (₹)</th>
+                          <th className="py-2.5 px-3 w-32 min-w-[125px] text-right">Line Total</th>
+                          <th className="py-2.5 px-3 w-28 min-w-[110px] text-center">Alloc / Avail</th>
+                          <th className="py-2.5 px-3 w-36 min-w-[140px]">Req. Date</th>
+                          <th className="py-2.5 px-3 w-14 min-w-[50px] text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {editLines.map((l, idx) => {
+                          const isAllocated = (l.allocated_qty || 0) > 0;
+                          const qty = Number(l.po_qty) || 0;
+                          const unitPrice = Number(l.unit_price) || 0;
+                          const lineTotal = l.line_total !== undefined ? l.line_total : Math.round(qty * unitPrice * 100) / 100;
+                          const avail = l.available_qty !== undefined ? l.available_qty : Math.max(0, qty - (l.allocated_qty || 0));
 
-                  <div className="space-y-2">
-                    {editLines.map((l, idx) => {
-                      const isAllocated = (l.allocated_qty || 0) > 0;
-                      const qty = Number(l.po_qty) || 0;
-                      const unitPrice = Number(l.unit_price) || 0;
-                      const lineTotal = l.line_total !== undefined ? l.line_total : Math.round(qty * unitPrice * 100) / 100;
-                      const avail = l.available_qty !== undefined ? l.available_qty : Math.max(0, qty - (l.allocated_qty || 0));
-
-                      return (
-                        <div
-                          key={idx}
-                          className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center rounded-lg border border-zinc-100 dark:border-zinc-800 p-2 bg-zinc-50/50 dark:bg-zinc-800/30 text-xs"
-                        >
-                          <div className="md:col-span-3">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Customer Part</label>
-                            <input
-                              type="text"
-                              disabled={Boolean(l.id && isAllocated)}
-                              placeholder="Customer Part No"
-                              value={l.customer_part_number || ""}
-                              onChange={(e) => updateEditLine(idx, "customer_part_number", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs font-medium disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
-                            />
-                          </div>
-
-                          <div className="md:col-span-2">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Internal Part</label>
-                            <input
-                              type="text"
-                              disabled={Boolean(l.id && isAllocated)}
-                              placeholder="Internal Part No"
-                              value={l.part_number}
-                              onChange={(e) => updateEditLine(idx, "part_number", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
-                            />
-                          </div>
-
-                          <div className="md:col-span-1">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">PO Qty</label>
-                            <input
-                              type="number"
-                              required
-                              min={l.allocated_qty || 1}
-                              placeholder="PO Qty"
-                              value={l.po_qty}
-                              onChange={(e) => updateEditLine(idx, "po_qty", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right"
-                            />
-                          </div>
-
-                          <div className="md:col-span-2">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Value / Pc (₹)</label>
-                            <input
-                              type="number"
-                              step="any"
-                              min={0}
-                              placeholder="0.00"
-                              value={l.unit_price}
-                              onChange={(e) => updateEditLine(idx, "unit_price", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right font-medium text-blue-600 dark:text-blue-400"
-                            />
-                          </div>
-
-                          <div className="md:col-span-1 text-right">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Line Total</label>
-                            <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 font-mono">
-                              ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
-                          </div>
-
-                          <div className="md:col-span-1 text-center">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Alloc / Avail</label>
-                            <div className="flex flex-col items-center">
-                              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
-                                {l.allocated_qty || 0} alloc
-                              </span>
-                              <span className={`text-[10px] font-semibold ${avail === 0 ? "text-zinc-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                                {avail} avail
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="md:col-span-1">
-                            <label className="text-[10px] text-zinc-400 block md:hidden">Req Date</label>
-                            <input
-                              type="date"
-                              value={l.required_date}
-                              onChange={(e) => updateEditLine(idx, "required_date", e.target.value)}
-                              className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs"
-                            />
-                          </div>
-
-                          <div className="md:col-span-1 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => setEditLines((prev) => prev.filter((_, i) => i !== idx))}
-                              disabled={Boolean(l.id && isAllocated) || editLines.length === 1}
-                              title={
-                                l.id && isAllocated
-                                  ? "Cannot delete line with allocated orders"
-                                  : editLines.length === 1
-                                  ? "PO must have at least one line"
-                                  : "Remove line"
-                              }
-                              className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 disabled:opacity-30 disabled:pointer-events-none"
+                          return (
+                            <tr
+                              key={idx}
+                              className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors"
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                              <td className="py-2 px-3 align-middle">
+                                <input
+                                  type="text"
+                                  disabled={Boolean(l.id && isAllocated)}
+                                  placeholder="Customer Part No"
+                                  value={l.customer_part_number || ""}
+                                  onChange={(e) => updateEditLine(idx, "customer_part_number", e.target.value)}
+                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs font-medium disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
+                                />
+                              </td>
+                              <td className="py-2 px-3 align-middle">
+                                <input
+                                  type="text"
+                                  disabled={Boolean(l.id && isAllocated)}
+                                  placeholder="Internal Part No"
+                                  value={l.part_number}
+                                  onChange={(e) => updateEditLine(idx, "part_number", e.target.value)}
+                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
+                                />
+                              </td>
+                              <td className="py-2 px-3 align-middle text-right">
+                                <input
+                                  type="number"
+                                  required
+                                  min={1}
+                                  placeholder="PO Qty"
+                                  value={l.po_qty}
+                                  onChange={(e) => updateEditLine(idx, "po_qty", e.target.value)}
+                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right font-medium"
+                                />
+                              </td>
+                              <td className="py-2 px-3 align-middle text-right">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min={0}
+                                  placeholder="0.00"
+                                  value={l.unit_price}
+                                  onChange={(e) => updateEditLine(idx, "unit_price", e.target.value)}
+                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs text-right font-medium text-blue-600 dark:text-blue-400"
+                                />
+                              </td>
+                              <td className="py-2 px-3 align-middle text-right whitespace-nowrap">
+                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 font-mono">
+                                  ₹{lineTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 align-middle text-center whitespace-nowrap">
+                                <div className="flex flex-col items-center">
+                                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                    {l.allocated_qty || 0} alloc
+                                  </span>
+                                  <span className={`text-[10px] font-semibold ${avail === 0 ? "text-zinc-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                                    {avail} avail
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="py-2 px-3 align-middle">
+                                <input
+                                  type="date"
+                                  value={l.required_date}
+                                  onChange={(e) => updateEditLine(idx, "required_date", e.target.value)}
+                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs"
+                                />
+                              </td>
+                              <td className="py-2 px-3 align-middle text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditLines((prev) => prev.filter((_, i) => i !== idx))}
+                                  disabled={Boolean(l.id && isAllocated) || editLines.length === 1}
+                                  title={
+                                    l.id && isAllocated
+                                      ? "Cannot delete line with allocated orders"
+                                      : editLines.length === 1
+                                      ? "PO must have at least one line"
+                                      : "Remove line"
+                                  }
+                                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
 
                   {/* Calculated Summary Bar for Edit PO */}

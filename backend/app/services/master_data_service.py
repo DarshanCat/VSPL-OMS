@@ -588,13 +588,30 @@ class POMasterService:
 
                     allocated = sum(o.po_qty for o in line.orders)
                     if line_req.po_qty < allocated:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=(
-                                f"PO line quantity ({line_req.po_qty}) for part '{line.part.part_number}' "
-                                f"cannot be reduced below the already allocated quantity ({allocated})."
-                            ),
-                        )
+                        from app.models.work_order import WorkOrder
+                        from app.models.dispatch import Dispatch
+
+                        order_ids = [o.id for o in line.orders]
+                        dispatches_count = db.query(Dispatch).filter(Dispatch.work_order_id.in_(
+                            db.query(WorkOrder.id).filter(WorkOrder.order_id.in_(order_ids))
+                        )).count() if order_ids else 0
+
+                        if dispatches_count == 0 and len(line.orders) == 1:
+                            single_order = line.orders[0]
+                            changes.append(
+                                f"line[{line.id}] auto-adjusted linked order {single_order.oar_number} po_qty: {single_order.po_qty} -> {line_req.po_qty}"
+                            )
+                            single_order.po_qty = line_req.po_qty
+                            allocated = line_req.po_qty
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=(
+                                    f"PO line quantity ({line_req.po_qty}) for part '{line.part.part_number}' "
+                                    f"cannot be reduced below the already allocated quantity ({allocated}). "
+                                    f"Please adjust or cancel downstream orders first."
+                                ),
+                            )
 
                     # Part change check on existing line
                     if line_req.customer_part_number or line_req.part_number:
