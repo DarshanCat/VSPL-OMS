@@ -14,6 +14,8 @@ import {
   RefreshCw,
   ClipboardList,
   Calendar,
+  Search,
+  X,
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
@@ -71,8 +73,34 @@ export default function OrderIntakePage() {
   // OAR Number (manual or auto-generated next sequence)
   const [oarNumber, setOarNumber] = useState("");
   const [allPendingPOs, setAllPendingPOs] = useState<any[]>([]);
+  const [pendingSearch, setPendingSearch] = useState("");
   const [allPendingSchedules, setAllPendingSchedules] = useState<ScheduleOut[]>([]);
   const [loadingPending, setLoadingPending] = useState(false);
+
+  const filteredPendingPOs = allPendingPOs.filter((p) => {
+    if (!pendingSearch.trim()) return true;
+    const q = pendingSearch.toLowerCase().trim();
+    return (
+      (p.po_number && p.po_number.toLowerCase().includes(q)) ||
+      (p.customer_code && p.customer_code.toLowerCase().includes(q)) ||
+      (p.customer_name && p.customer_name.toLowerCase().includes(q)) ||
+      (p.part_number && p.part_number.toLowerCase().includes(q)) ||
+      (p.customer_part_number && p.customer_part_number.toLowerCase().includes(q)) ||
+      (p.material_grade && p.material_grade.toLowerCase().includes(q))
+    );
+  });
+
+  const filteredPendingSchedules = allPendingSchedules.filter((s) => {
+    if (!pendingSearch.trim()) return true;
+    const q = pendingSearch.toLowerCase().trim();
+    return (
+      (s.schedule_number && s.schedule_number.toLowerCase().includes(q)) ||
+      (s.customer_code && s.customer_code.toLowerCase().includes(q)) ||
+      (s.customer_name && s.customer_name.toLowerCase().includes(q)) ||
+      (s.part_number && s.part_number.toLowerCase().includes(q)) ||
+      (s.customer_schedule_ref && s.customer_schedule_ref.toLowerCase().includes(q))
+    );
+  });
 
   // Demand source -- PO (confirmed) vs Schedule (forecast, not yet a confirmed PO).
   const [sourceType, setSourceType] = useState<"po" | "schedule">("po");
@@ -446,7 +474,28 @@ export default function OrderIntakePage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Search Bar */}
+              <div className="relative min-w-[200px] sm:min-w-[260px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder={sourceType === "po" ? "Search PO, Customer, Part #..." : "Search Schedule, Customer, Part #..."}
+                  value={pendingSearch}
+                  onChange={(e) => setPendingSearch(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pl-8 pr-7 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {pendingSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
               {/* Queue Switcher Tab: PO vs Schedule */}
               <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-0.5 shadow-sm">
                 <button
@@ -458,7 +507,7 @@ export default function OrderIntakePage() {
                       : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
                   }`}
                 >
-                  Pending POs ({allPendingPOs.length})
+                  Pending POs ({filteredPendingPOs.length !== allPendingPOs.length ? `${filteredPendingPOs.length}/${allPendingPOs.length}` : allPendingPOs.length})
                 </button>
                 <button
                   type="button"
@@ -469,7 +518,7 @@ export default function OrderIntakePage() {
                       : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
                   }`}
                 >
-                  Pending Schedules ({allPendingSchedules.length})
+                  Pending Schedules ({filteredPendingSchedules.length !== allPendingSchedules.length ? `${filteredPendingSchedules.length}/${allPendingSchedules.length}` : allPendingSchedules.length})
                 </button>
               </div>
 
@@ -490,9 +539,20 @@ export default function OrderIntakePage() {
               Loading pending {sourceType === "po" ? "purchase orders" : "schedules"}...
             </p>
           ) : sourceType === "po" ? (
-            allPendingPOs.length === 0 ? (
+            filteredPendingPOs.length === 0 ? (
               <p className="text-xs text-zinc-500 py-2 italic">
-                No pending PO lines awaiting OAR. All confirmed POs have had OARs generated, or you can manually create an OAR below.
+                {allPendingPOs.length === 0
+                  ? "No pending PO lines awaiting OAR. All confirmed POs have had OARs generated, or you can manually create an OAR below."
+                  : `No pending PO lines matching "${pendingSearch}".`}
+                {pendingSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingSearch("")}
+                    className="ml-2 text-blue-600 underline text-xs not-italic cursor-pointer"
+                  >
+                    Clear search
+                  </button>
+                )}
               </p>
             ) : (
               <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
@@ -508,7 +568,7 @@ export default function OrderIntakePage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {allPendingPOs.map((p, idx) => (
+                    {filteredPendingPOs.map((p, idx) => (
                       <tr key={`${p.po_id}-${p.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                         <td className="p-2.5">
                           <span className="font-mono font-bold text-blue-600 block">{p.po_number}</span>
@@ -543,9 +603,20 @@ export default function OrderIntakePage() {
               </div>
             )
           ) : (
-            allPendingSchedules.length === 0 ? (
+            filteredPendingSchedules.length === 0 ? (
               <p className="text-xs text-zinc-500 py-2 italic">
-                No pending schedules awaiting OAR. All customer schedules have had OARs generated, or you can switch to PO above.
+                {allPendingSchedules.length === 0
+                  ? "No pending schedules awaiting OAR. All customer schedules have had OARs generated, or you can switch to PO above."
+                  : `No pending schedules matching "${pendingSearch}".`}
+                {pendingSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingSearch("")}
+                    className="ml-2 text-blue-600 underline text-xs not-italic cursor-pointer"
+                  >
+                    Clear search
+                  </button>
+                )}
               </p>
             ) : (
               <div className="overflow-x-auto max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900">
@@ -561,7 +632,7 @@ export default function OrderIntakePage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                    {allPendingSchedules.map((s, idx) => (
+                    {filteredPendingSchedules.map((s, idx) => (
                       <tr key={`${s.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                         <td className="p-2.5">
                           <span className="font-mono font-bold text-blue-600 block">{s.schedule_number}</span>
@@ -597,7 +668,7 @@ export default function OrderIntakePage() {
           )}
         </div>
 
-        {error && (
+                {error && (
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-500 font-semibold">
             {error}
           </div>

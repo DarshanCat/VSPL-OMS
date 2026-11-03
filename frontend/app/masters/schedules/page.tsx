@@ -10,7 +10,7 @@ import {
   MasterCustomer,
   ScheduleOut,
 } from "@/lib/api";
-import { CalendarClock, AlertTriangle, FileSpreadsheet, Edit3, Trash2, X, Check, DollarSign } from "lucide-react";
+import { CalendarClock, AlertTriangle, FileSpreadsheet, Edit3, Trash2, X, Check, DollarSign, Search } from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
@@ -29,6 +29,8 @@ export default function ScheduleMasterPage() {
   const [schedules, setSchedules] = useState<ScheduleOut[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const [customerCode, setCustomerCode] = useState("");
   const [partNumber, setPartNumber] = useState("");
@@ -137,8 +139,22 @@ export default function ScheduleMasterPage() {
     }
   }
 
-  const totalQuantity = schedules.reduce((acc, s) => acc + (s.scheduled_qty || 0), 0);
-  const totalScheduledValue = schedules.reduce(
+  const filteredSchedules = schedules.filter((s) => {
+    if (statusFilter !== "all" && s.po_status !== statusFilter) return false;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase().trim();
+    return (
+      (s.schedule_number && s.schedule_number.toLowerCase().includes(q)) ||
+      (s.customer_code && s.customer_code.toLowerCase().includes(q)) ||
+      (s.customer_name && s.customer_name.toLowerCase().includes(q)) ||
+      (s.part_number && s.part_number.toLowerCase().includes(q)) ||
+      (s.customer_schedule_ref && s.customer_schedule_ref.toLowerCase().includes(q)) ||
+      (s.linked_oar_number && s.linked_oar_number.toLowerCase().includes(q))
+    );
+  });
+
+  const totalQuantity = filteredSchedules.reduce((acc, s) => acc + (s.scheduled_qty || 0), 0);
+  const totalScheduledValue = filteredSchedules.reduce(
     (acc, s) => acc + (s.total_value || ((s.scheduled_qty || 0) * (s.unit_price || 0))),
     0
   );
@@ -211,11 +227,51 @@ export default function ScheduleMasterPage() {
 
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="h-4 w-4 text-zinc-500" />
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing Schedules</h3>
-              <span className="text-xs text-zinc-400">({schedules.length})</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-zinc-500" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Existing Schedules</h3>
+                <span className="text-xs text-zinc-400">
+                  ({filteredSchedules.length !== schedules.length ? `${filteredSchedules.length} of ${schedules.length}` : schedules.length})
+                </span>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative min-w-[200px] sm:min-w-[260px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search schedule #, customer, part, ref, OAR..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 pl-8 pr-7 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Status Filter */}
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="awaiting_po">Awaiting PO</option>
+                <option value="po_received">PO Received</option>
+                <option value="matched">Matched</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
+
             <div className="flex items-center gap-4 text-xs">
               <span className="text-zinc-500">
                 Total Qty: <strong className="font-mono text-zinc-800 dark:text-zinc-200">{totalQuantity.toLocaleString()}</strong>
@@ -250,7 +306,25 @@ export default function ScheduleMasterPage() {
                 </tr>
               </thead>
               <tbody>
-                {schedules.map((s) => (
+                {filteredSchedules.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-xs text-zinc-500 italic">
+                      {schedules.length === 0
+                        ? "No schedules created yet. Use the form above to add one."
+                        : `No schedules found matching "${search || statusFilter}".`}
+                      {(search || statusFilter !== "all") && (
+                        <button
+                          type="button"
+                          onClick={() => { setSearch(""); setStatusFilter("all"); }}
+                          className="ml-2 text-blue-600 underline not-italic cursor-pointer"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSchedules.map((s) => (
                   <tr key={s.id} className="border-t border-zinc-100 dark:border-zinc-800">
                     <td className="px-4 py-2 font-mono font-medium">{s.schedule_number}</td>
                     <td className="px-4 py-2">{s.customer_code} — {s.customer_name}</td>
@@ -308,7 +382,8 @@ export default function ScheduleMasterPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )))
+              }
               </tbody>
             </table>
           )}
