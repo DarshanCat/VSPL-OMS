@@ -83,6 +83,28 @@ def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_u
     )
     cpm_map = {str(p_id): (cust_part_no, cust_name, cust_code) for p_id, cust_part_no, cust_name, cust_code in cpms if p_id}
 
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xrefs = (
+            db.query(
+                CustomerPartCrossReference.part_id,
+                CustomerPartCrossReference.customer_part_no,
+                Customer.name,
+                Customer.customer_code,
+            )
+            .join(Customer, CustomerPartCrossReference.customer_id == Customer.id)
+            .filter(CustomerPartCrossReference.is_active == True)
+            .all()
+        )
+        for p_id, cust_part_no, cust_name, cust_code in xrefs:
+            if p_id and str(p_id) not in cpm_map:
+                cpm_map[str(p_id)] = (cust_part_no, cust_name, cust_code)
+    except Exception:
+        pass
+
+    all_custs = db.query(Customer.customer_code, Customer.name).all()
+    cust_prefix_map = {c.customer_code.strip().upper(): c.name.strip() for c in all_custs if c.customer_code}
+
     res = []
     for p in parts:
         p_id_str = str(p.id)
@@ -90,6 +112,13 @@ def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_u
         cust_part_no = c_info[0] if c_info and c_info[0] else (p.description or p.part_number)
         cust_name = c_info[1] if c_info else None
         cust_code = c_info[2] if c_info else None
+        if not cust_code:
+            p_upper = (p.part_number or "").strip().upper()
+            for c_code, c_name in cust_prefix_map.items():
+                if len(c_code) >= 2 and p_upper.startswith(c_code):
+                    cust_code = c_code
+                    cust_name = c_name
+                    break
         res.append(
             PartOut(
                 id=p_id_str,

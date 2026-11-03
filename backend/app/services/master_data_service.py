@@ -183,6 +183,214 @@ def resolve_customer_part(
     return part, True, mapping
 
 
+def validate_part_for_customer(db: Session, customer: Customer, part: Part) -> None:
+    """Strictly validates whether an internal part belongs to the specified customer.
+    Rejects any internal part number that is unassociated or belongs to a different customer.
+    """
+    # 1. Check active CustomerPartCrossReference
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        xref = (
+            db.query(CustomerPartCrossReference)
+            .filter(
+                CustomerPartCrossReference.customer_id == customer.id,
+                CustomerPartCrossReference.part_id == part.id,
+                CustomerPartCrossReference.is_active == True,
+            )
+            .first()
+        )
+        if xref:
+            return
+    except Exception:
+        pass
+
+    # 2. Check CustomerPartMapping
+    mapping = (
+        db.query(CustomerPartMapping)
+        .filter(
+            CustomerPartMapping.customer_id == customer.id,
+            CustomerPartMapping.part_id == part.id,
+        )
+        .first()
+    )
+    if mapping:
+        return
+
+    # 3. Check customer code prefix (standard VSPL convention: FST13 -> FST, ASB125 -> ASB, etc.)
+    cust_code = (customer.customer_code or "").strip().upper()
+    part_code = (part.part_number or "").strip().upper()
+    if cust_code and part_code.startswith(cust_code):
+        return
+
+    # 4. Check historical PO lines or Orders under this customer
+    has_po_line = (
+        db.query(POLine)
+        .join(POMaster, POLine.po_id == POMaster.id)
+        .filter(
+            POMaster.customer_id == customer.id,
+            POLine.part_id == part.id,
+        )
+        .first()
+    )
+    if has_po_line:
+        return
+
+    has_order = (
+        db.query(Order)
+        .filter(
+            Order.customer_id == customer.id,
+            Order.part_id == part.id,
+        )
+        .first()
+    )
+    if has_order:
+        return
+
+    # If we get here, the part is NOT linked to this customer.
+    # Find which other customer it belongs to for a clear and helpful error message:
+    other_owner = None
+    try:
+        from app.models.customer_part_cross_reference import CustomerPartCrossReference
+        other_xref = (
+            db.query(CustomerPartCrossReference)
+            .join(Customer, CustomerPartCrossReference.customer_id == Customer.id)
+            .filter(
+                CustomerPartCrossReference.part_id == part.id,
+                CustomerPartCrossReference.customer_id != customer.id,
+                CustomerPartCrossReference.is_active == True,
+            )
+            .first()
+        )
+        if other_xref and other_xref.customer:
+            other_owner = f"{other_xref.customer.name} ({other_xref.customer.customer_code})"
+    except Exception:
+        pass
+
+    if not other_owner:
+        other_m = (
+            db.query(CustomerPartMapping)
+            .join(Customer, CustomerPartMapping.customer_id == Customer.id)
+            .filter(
+                CustomerPartMapping.part_id == part.id,
+                CustomerPartMapping.customer_id != customer.id,
+            )
+            .first()
+        )
+        if other_m and other_m.customer:
+            other_owner = f"{other_m.customer.name} ({other_m.customer.customer_code})"
+
+    if not other_owner:
+        all_other_custs = db.query(Customer).filter(
+            Customer.id != customer.id,
+            func.length(Customer.customer_code) >= 2,
+        ).all()
+        for oc in all_other_custs:
+            oc_code = (oc.customer_code or "").strip().upper()
+            if oc_code and part_code.startswith(oc_code):
+                other_owner = f"{oc.name} ({oc.customer_code})"
+                break
+
+    if other_owner:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Internal Part Number '{part.part_number}' does not belong to customer "
+                f"'{customer.name} ({customer.customer_code})'. It belongs to '{other_owner}'."
+            ),
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Internal Part Number '{part.part_number}' is not associated with customer "
+            f"'{customer.name} ({customer.customer_code})'. Please check the internal part code."
+        ),
+    )
+
+
+def resolve_po_line_part(
+    db: Session,
+    customer: Customer,
+    customer_part_number: Optional[str],
+    part_number: Optional[str],
+) -> Tuple[Part, str]:
+    cust_pn = (customer_part_number or "").strip()
+    pn = (part_number or "").strip()
+
+    if not cust_pn and not pn:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
+        )
+
+    if pn:
+        clean_pn = pn.upper()
+        part = db.query(Part).filter(func.upper(Part.part_number) == clean_pn).first()
+        if not part:
+            # Check if user entered a known customer part number into the internal part field
+            existing_mapping = _find_customer_part_mapping(db, customer.id, pn)
+            if existing_mapping:
+                part = db.query(Part).filter(Part.id == existing_mapping.part_id).first()
+                if not cust_pn:
+                    cust_pn = pn
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Internal Part Number '{pn}' does not exist in Part Master. It cannot be accepted for customer '{customer.name}'."
+                )
+
+        # Validate that the part strictly belongs to this customer!
+        validate_part_for_customer(db, customer, part)
+
+        # If customer_part_number was also entered, ensure no conflict
+        if cust_pn:
+            existing_for_cust = _find_customer_part_mapping(db, customer.id, cust_pn)
+            if existing_for_cust and existing_for_cust.part_id != part.id:
+                mapped_p = db.query(Part).filter(Part.id == existing_for_cust.part_id).first()
+                mapped_pn = mapped_p.part_number if mapped_p else "unknown"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Customer Part Number '{cust_pn}' is already mapped to internal part '{mapped_pn}', "
+                        f"which does not match entered internal part '{part.part_number}'."
+                    ),
+                )
+            elif not existing_for_cust:
+                mapping = CustomerPartMapping(
+                    customer_id=customer.id,
+                    part_id=part.id,
+                    customer_part_number=cust_pn,
+                    status="Active",
+                )
+                db.add(mapping)
+                try:
+                    from app.models.customer_part_cross_reference import CustomerPartCrossReference
+                    xref = CustomerPartCrossReference(
+                        customer_id=customer.id,
+                        customer_part_no=cust_pn,
+                        part_id=part.id,
+                        source="PO Line Entry",
+                        is_active=True,
+                    )
+                    db.add(xref)
+                except Exception:
+                    pass
+                db.flush()
+        else:
+            m = db.query(CustomerPartMapping).filter(
+                CustomerPartMapping.customer_id == customer.id,
+                CustomerPartMapping.part_id == part.id,
+            ).first()
+            if m:
+                cust_pn = m.customer_part_number
+
+        return part, cust_pn
+
+    # ONLY Customer Part Number was entered:
+    part, _is_new, _mapping = resolve_customer_part(db, customer, cust_pn, create_if_missing=True)
+    return part, cust_pn
+
+
 def resolve_customer_part_preview(db: Session, customer_code: str, customer_part_number: str) -> ResolveCustomerPartResponse:
     """Read-only preview for the PO UI -- never creates anything. Reuses
     resolve_customer_part() with create_if_missing=False so the preview can
@@ -389,31 +597,9 @@ class POMasterService:
 
             po_total_value = 0.0
             for line_req in req.lines:
-                cust_pn = (line_req.customer_part_number or "").strip()
-                pn = (line_req.part_number or "").strip()
-                if cust_pn:
-                    part, _is_new, _mapping = resolve_customer_part(
-                        db, customer, cust_pn, create_if_missing=True
-                    )
-                elif pn:
-                    clean_pn = pn.upper()
-                    existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
-                    if existing_part:
-                        part = existing_part
-                        mapping = _find_customer_part_mapping(db, customer.id, pn)
-                        if mapping:
-                            cust_pn = mapping.customer_part_number
-                    else:
-                        # User entered customer part number in the part_number field
-                        part, _is_new, _mapping = resolve_customer_part(
-                            db, customer, pn, create_if_missing=True
-                        )
-                        cust_pn = pn
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
-                    )
+                part, cust_pn = resolve_po_line_part(
+                    db, customer, line_req.customer_part_number, line_req.part_number
+                )
 
                 u_price = round(float(line_req.unit_price or 0.0), 2)
                 l_total = round(float(line_req.po_qty * u_price), 2)
@@ -615,26 +801,9 @@ class POMasterService:
 
                     # Part change check on existing line
                     if line_req.customer_part_number or line_req.part_number:
-                        cust_pn = (line_req.customer_part_number or "").strip()
-                        pn = (line_req.part_number or "").strip()
-                        if cust_pn:
-                            part, _, _ = resolve_customer_part(
-                                db, po.customer, cust_pn, create_if_missing=True
-                            )
-                        else:
-                            clean_pn = pn.upper()
-                            existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
-                            if existing_part:
-                                part = existing_part
-                                mapping = _find_customer_part_mapping(db, po.customer.id, pn)
-                                if mapping:
-                                    cust_pn = mapping.customer_part_number
-                            else:
-                                part, _, _ = resolve_customer_part(
-                                    db, po.customer, pn, create_if_missing=True
-                                )
-                                cust_pn = pn
-
+                        part, cust_pn = resolve_po_line_part(
+                            db, po.customer, line_req.customer_part_number, line_req.part_number
+                        )
                         if part.id != line.part_id:
                             if allocated > 0 or len(line.orders) > 0:
                                 raise HTTPException(
@@ -664,30 +833,9 @@ class POMasterService:
 
                 else:
                     # New line addition
-                    cust_pn = (line_req.customer_part_number or "").strip()
-                    pn = (line_req.part_number or "").strip()
-                    if cust_pn:
-                        part, _, _ = resolve_customer_part(
-                            db, po.customer, cust_pn, create_if_missing=True
-                        )
-                    elif pn:
-                        clean_pn = pn.upper()
-                        existing_part = db.query(Part).filter(Part.part_number == clean_pn).first()
-                        if existing_part:
-                            part = existing_part
-                            mapping = _find_customer_part_mapping(db, po.customer.id, pn)
-                            if mapping:
-                                cust_pn = mapping.customer_part_number
-                        else:
-                            part, _, _ = resolve_customer_part(
-                                db, po.customer, pn, create_if_missing=True
-                            )
-                            cust_pn = pn
-                    else:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Each PO line must supply either a Customer Part Number or an Internal Part Number.",
-                        )
+                    part, cust_pn = resolve_po_line_part(
+                        db, po.customer, line_req.customer_part_number, line_req.part_number
+                    )
 
                     u_price = round(float(line_req.unit_price or 0.0), 2)
                     l_total = round(float(line_req.po_qty * u_price), 2)
@@ -850,6 +998,7 @@ class ScheduleMasterService:
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{req.customer_code}' not found.")
         part = _get_part(db, req.part_number)
+        validate_part_for_customer(db, customer, part)
 
         count = db.query(ScheduleMaster).count()
         schedule_number = f"SCH-{count + 1:05d}"

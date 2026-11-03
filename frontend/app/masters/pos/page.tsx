@@ -7,6 +7,8 @@ import {
   createPOMaster,
   updatePOMaster,
   deletePOMaster,
+  getParts,
+  AdminPart,
   MasterCustomer,
   POMasterOut,
   POLineOut,
@@ -103,6 +105,41 @@ function emptyLine(): LineDraft {
 export default function POMasterPage() {
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
   const [pos, setPOs] = useState<POMasterOut[]>([]);
+  const [masterParts, setMasterParts] = useState<AdminPart[]>([]);
+
+  const getPartValidationError = (partNum: string, custCode: string): string | null => {
+    if (!partNum || !partNum.trim() || !custCode || !custCode.trim()) return null;
+    const cleanPn = partNum.trim().toUpperCase();
+    const cleanCust = custCode.trim().toUpperCase();
+
+    // 1. Matches customer code prefix (e.g. FST13 for FST, ASB125 for ASB)
+    if (cleanPn.startsWith(cleanCust)) return null;
+
+    // 2. Check if part in masterParts is mapped to this customer
+    const found = masterParts.find((p) => p.part_number.toUpperCase() === cleanPn);
+    if (found) {
+      if (found.customer_code && found.customer_code.toUpperCase() === cleanCust) {
+        return null;
+      }
+      if (found.customer_code) {
+        return `Belongs to ${found.customer_name || found.customer_code} (${found.customer_code})`;
+      }
+    }
+
+    // 3. Check if it matches any other customer prefix
+    const otherCust = customers.find(
+      (c) => c.customer_code.toUpperCase() !== cleanCust && cleanPn.startsWith(c.customer_code.toUpperCase())
+    );
+    if (otherCust) {
+      return `Belongs to ${otherCust.name} (${otherCust.customer_code})`;
+    }
+
+    if (!found && masterParts.length > 0) {
+      return "Not in Part Master";
+    }
+
+    return null;
+  };
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
 
@@ -212,9 +249,14 @@ export default function POMasterPage() {
     setLoading(true);
     setListError("");
     try {
-      const [c, p] = await Promise.all([getMasterCustomers(), getPOMasters()]);
+      const [c, p, pts] = await Promise.all([
+        getMasterCustomers(),
+        getPOMasters(),
+        getParts().catch(() => [] as AdminPart[]),
+      ]);
       setCustomers(c);
       setPOs(p);
+      setMasterParts(pts);
       if (!customerCode && c.length) setCustomerCode(c[0].customer_code);
     } catch (err: any) {
       setListError(err?.response?.data?.detail || "Could not load PO data.");
@@ -305,6 +347,16 @@ export default function POMasterPage() {
         throw new Error("PO must have at least one valid line with positive quantity.");
       }
 
+      for (let i = 0; i < validLines.length; i++) {
+        const l = validLines[i];
+        if (l.part_number?.trim()) {
+          const err = getPartValidationError(l.part_number, customerCode);
+          if (err) {
+            throw new Error(`Line ${i + 1}: Internal Part '${l.part_number}' is invalid for customer '${customerCode}'. (${err})`);
+          }
+        }
+      }
+
       await createPOMaster({
         po_number: poNumber,
         customer_code: customerCode,
@@ -348,6 +400,16 @@ export default function POMasterPage() {
       );
       if (validLines.length === 0) {
         throw new Error("PO must have at least one valid line with positive quantity.");
+      }
+
+      for (let i = 0; i < validLines.length; i++) {
+        const l = validLines[i];
+        if (l.part_number?.trim()) {
+          const err = getPartValidationError(l.part_number, editingPO.customer_code);
+          if (err) {
+            throw new Error(`Line ${i + 1}: Internal Part '${l.part_number}' is invalid for customer '${editingPO.customer_code}'. (${err})`);
+          }
+        }
       }
 
       await updatePOMaster(editingPO.id, {
@@ -508,10 +570,20 @@ export default function POMasterPage() {
                       <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">Internal Part No (Optional)</label>
                       <input
                         placeholder="e.g. 54400902"
+                        list="new-po-parts"
                         value={l.part_number}
                         onChange={(e) => updateLine(idx, "part_number", e.target.value)}
-                        className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-1.5 text-xs font-mono"
+                        className={`w-full rounded-lg border bg-transparent px-3 py-1.5 text-xs font-mono ${
+                          getPartValidationError(l.part_number, customerCode)
+                            ? "border-rose-500 text-rose-600 bg-rose-500/10 focus:border-rose-600"
+                            : "border-zinc-200 dark:border-zinc-700"
+                        }`}
                       />
+                      {getPartValidationError(l.part_number, customerCode) && (
+                        <span className="text-[10px] text-rose-500 font-semibold block mt-0.5 leading-tight">
+                          ⚠️ {getPartValidationError(l.part_number, customerCode)}
+                        </span>
+                      )}
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-[10px] text-zinc-400 block md:hidden mb-0.5">PO Qty *</label>
@@ -1055,10 +1127,20 @@ export default function POMasterPage() {
                                   type="text"
                                   disabled={Boolean(l.id && isAllocated)}
                                   placeholder="Internal Part No"
+                                  list="edit-po-parts"
                                   value={l.part_number}
                                   onChange={(e) => updateEditLine(idx, "part_number", e.target.value)}
-                                  className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-transparent px-2.5 py-1.5 font-mono text-xs disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400"
+                                  className={`w-full rounded-md border bg-transparent px-2.5 py-1.5 font-mono text-xs disabled:bg-zinc-100 dark:disabled:bg-zinc-800 disabled:text-zinc-400 ${
+                                    getPartValidationError(l.part_number, editingPO?.customer_code || "")
+                                      ? "border-rose-500 text-rose-600 bg-rose-500/10 focus:border-rose-600"
+                                      : "border-zinc-200 dark:border-zinc-700"
+                                  }`}
                                 />
+                                {getPartValidationError(l.part_number, editingPO?.customer_code || "") && (
+                                  <span className="text-[10px] text-rose-500 font-semibold block mt-0.5 leading-tight">
+                                    ⚠️ {getPartValidationError(l.part_number, editingPO?.customer_code || "")}
+                                  </span>
+                                )}
                               </td>
                               <td className="py-2 px-3 align-middle text-right">
                                 <input
@@ -1293,6 +1375,28 @@ export default function POMasterPage() {
             </div>
           </div>
         )}
+        {/* Customer Parts Suggestion Datalists */}
+        <datalist id="new-po-parts">
+          {masterParts
+            .filter((p) => customerCode && (p.part_number.toUpperCase().startsWith(customerCode.toUpperCase()) || p.customer_code?.toUpperCase() === customerCode.toUpperCase()))
+            .slice(0, 100)
+            .map((p) => (
+              <option key={p.part_number} value={p.part_number}>
+                {p.description || p.customer_part_number || p.part_number}
+              </option>
+            ))}
+        </datalist>
+
+        <datalist id="edit-po-parts">
+          {masterParts
+            .filter((p) => editingPO?.customer_code && (p.part_number.toUpperCase().startsWith(editingPO.customer_code.toUpperCase()) || p.customer_code?.toUpperCase() === editingPO.customer_code.toUpperCase()))
+            .slice(0, 100)
+            .map((p) => (
+              <option key={p.part_number} value={p.part_number}>
+                {p.description || p.customer_part_number || p.part_number}
+              </option>
+            ))}
+        </datalist>
       </div>
     </AppShell>
   );
