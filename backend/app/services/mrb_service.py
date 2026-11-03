@@ -476,3 +476,33 @@ class MRBService:
             db.commit()
         return len(pending_reviews)
 
+    @classmethod
+    def bulk_approve_pending_reviews(
+        cls,
+        db: Session,
+        stage: Optional[str],
+        current_user: User,
+        notes: Optional[str] = None
+    ) -> int:
+        """Batch approve all PENDING MRB reviews, optionally filtered by stage."""
+        query = db.query(MRBReview).filter(MRBReview.status == "PENDING")
+        if stage and stage.strip().upper() != "ALL":
+            query = query.filter(MRBReview.stage == stage.strip().upper())
+
+        pending = query.all()
+        now = datetime.now()
+        for rev in pending:
+            rev.status = "APPROVED"
+            rev.verified_ok_qty = rev.reported_ok_qty
+            rev.verified_reject_qty = rev.reported_reject_qty
+            rev.verified_defect_code = rev.reported_defect_code
+            rev.disposition = "SCRAP" if (rev.reported_reject_qty and rev.reported_reject_qty > 0) else "VERIFIED_OK"
+            rev.reviewed_by_id = current_user.id
+            rev.reviewed_by_name = current_user.full_name
+            rev.reviewed_at = now
+            rev.review_notes = notes or "Bulk approved via Quality MRB Board."
+
+        if pending:
+            db.commit()
+        return len(pending)
+

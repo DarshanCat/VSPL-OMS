@@ -198,6 +198,8 @@ export default function OarWoListPage() {
   // Edit OAR Commitment Date & Details modal state
   const [editModalOar, setEditModalOar] = useState<OARListItem | null>(null);
   const [editCommitmentDate, setEditCommitmentDate] = useState("");
+  const [editRevisedCommitmentDate, setEditRevisedCommitmentDate] = useState("");
+  const [editRevisionReason, setEditRevisionReason] = useState("");
   const [editDeliveryDate, setEditDeliveryDate] = useState("");
   const [editCustomerPartNumber, setEditCustomerPartNumber] = useState("");
   const [editStatus, setEditStatus] = useState("accept");
@@ -208,7 +210,11 @@ export default function OarWoListPage() {
 
   const handleOpenEditOar = (oar: OARListItem) => {
     setEditModalOar(oar);
-    setEditCommitmentDate(oar.commitment_date ? String(oar.commitment_date).substring(0, 10) : "");
+    const origCommit = oar.commitment_date ? String(oar.commitment_date).substring(0, 10) : "";
+    const revCommit = oar.revised_commitment_date ? String(oar.revised_commitment_date).substring(0, 10) : origCommit;
+    setEditCommitmentDate(origCommit);
+    setEditRevisedCommitmentDate(revCommit);
+    setEditRevisionReason(oar.commitment_date_revision_reason || "");
     setEditDeliveryDate(oar.delivery_date ? String(oar.delivery_date).substring(0, 10) : "");
     setEditCustomerPartNumber(oar.customer_part_number || "");
     setEditStatus(oar.status?.toLowerCase() || "accept");
@@ -224,8 +230,12 @@ export default function OarWoListPage() {
     setEditError("");
     setEditSuccess("");
     try {
+      const origDateStr = editModalOar.commitment_date ? String(editModalOar.commitment_date).substring(0, 10) : "";
+      const isDateRevised = Boolean(origDateStr && editRevisedCommitmentDate && editRevisedCommitmentDate !== origDateStr);
       const updated = await updateOAR(editModalOar.oar_number, {
         commitment_date: editCommitmentDate || null,
+        revised_commitment_date: isDateRevised ? editRevisedCommitmentDate : (editModalOar.revised_commitment_date ? editRevisedCommitmentDate : null),
+        revision_reason: editRevisionReason.trim() || editRemarks.trim() || undefined,
         delivery_date: editDeliveryDate || null,
         customer_part_number: editCustomerPartNumber.trim() || null,
         status: editStatus,
@@ -477,8 +487,28 @@ export default function OarWoListPage() {
                         </div>
                         <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-1 font-mono flex-wrap">
                           <span>OAR Date: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.oar_date || oar.created_at)}</strong></span>
-                          {oar.commitment_date && (
-                            <span className="text-blue-600 dark:text-blue-400 font-bold">• Commit: <strong>{formatDate(oar.commitment_date)}</strong></span>
+                          {oar.revised_commitment_date ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 font-bold"
+                              title={oar.commitment_date_revision_reason ? `Revised: ${oar.commitment_date_revision_reason}` : "Revised Commitment Date"}
+                            >
+                              <span>• Revised Commit: <strong>{formatDate(oar.revised_commitment_date)}</strong></span>
+                              <span className="px-1 py-0.2 rounded text-[8px] bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 font-extrabold">
+                                Rev {oar.commitment_date_revision_count || 1}
+                              </span>
+                              {oar.commitment_date && (
+                                <span className="text-[9px] text-zinc-400 font-normal line-through">({formatDate(oar.commitment_date)})</span>
+                              )}
+                            </span>
+                          ) : oar.commitment_date ? (
+                            <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-bold">
+                              <span>• Commit: <strong>{formatDate(oar.commitment_date)}</strong></span>
+                              <span className="px-1 py-0.2 rounded text-[8px] bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 font-semibold">
+                                Target
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">• Commit: <em>Not set</em></span>
                           )}
                           {oar.delivery_date && (
                             <span>• Delivery: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.delivery_date)}</strong></span>
@@ -659,6 +689,7 @@ export default function OarWoListPage() {
                                       <tr>
                                         <th className="py-2 px-2.5">WO ID</th>
                                         <th className="py-2 px-2.5">WO Gen Date</th>
+                                        <th className="py-2 px-2.5">Commitment Date</th>
                                         <th className="py-2 px-2.5">Type</th>
                                         <th className="py-2 px-2.5">Source WO</th>
                                         <th className="py-2 px-2.5 text-right">Repl Qty</th>
@@ -689,6 +720,24 @@ export default function OarWoListPage() {
                                           </td>
                                           <td className="py-2 px-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
                                             {formatDate(wo.wo_date || wo.created_at)}
+                                          </td>
+                                          <td className="py-2 px-2.5 font-mono text-[10px] whitespace-nowrap">
+                                            {wo.revised_commitment_date || oar.revised_commitment_date ? (
+                                              <div className="flex items-center gap-1">
+                                                <span className="font-bold text-amber-700 dark:text-amber-300">
+                                                  {formatDate(wo.revised_commitment_date || oar.revised_commitment_date)}
+                                                </span>
+                                                <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                                                  Rev {wo.commitment_date_revision_count || oar.commitment_date_revision_count || 1}
+                                                </span>
+                                              </div>
+                                            ) : (wo.commitment_date || oar.commitment_date) ? (
+                                              <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                                {formatDate(wo.commitment_date || oar.commitment_date)}
+                                              </span>
+                                            ) : (
+                                              <span className="text-zinc-400">--</span>
+                                            )}
                                           </td>
                                           <td className="py-2 px-2.5">
                                             <span
@@ -1088,20 +1137,52 @@ export default function OarWoListPage() {
                         Customer drawing or catalog part number printed on customer PO.
                       </p>
                     </div>
+                    <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-800/60">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                            Original Commitment Date
+                          </label>
+                        </div>
+                        <input
+                          type="date"
+                          value={editCommitmentDate}
+                          onChange={(e) => setEditCommitmentDate(e.target.value)}
+                          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                        />
+                        <p className="text-[10px] text-zinc-400 mt-0.5">Baseline date accepted on OAR creation.</p>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider">
+                            Revised Commitment Date
+                          </label>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100">
+                            {editModalOar.commitment_date_revision_count ? `${editModalOar.commitment_date_revision_count} Rev(s)` : "Initial"}
+                          </span>
+                        </div>
+                        <input
+                          type="date"
+                          value={editRevisedCommitmentDate}
+                          onChange={(e) => setEditRevisedCommitmentDate(e.target.value)}
+                          className="w-full rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-amber-900 dark:text-amber-100 focus:border-amber-500 focus:outline-none"
+                        />
+                        <p className="text-[10px] text-zinc-400 mt-0.5">Changing this updates revision count & logs history.</p>
+                      </div>
+                    </div>
+
                     <div>
                       <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
-                        Commitment Date <span className="text-blue-500">*</span>
+                        Revision Reason
                       </label>
                       <input
-                        type="date"
-                        value={editCommitmentDate}
-                        onChange={(e) => setEditCommitmentDate(e.target.value)}
-                        required
-                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
+                        type="text"
+                        value={editRevisionReason}
+                        onChange={(e) => setEditRevisionReason(e.target.value)}
+                        placeholder="e.g. Customer delayed approval / Material shortage / Machine maintenance"
+                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:border-blue-500 focus:outline-none"
                       />
-                      <p className="text-[10px] text-zinc-400 mt-0.5">
-                        Target commitment date promised to the customer. Update here if delivery schedule was revised.
-                      </p>
                     </div>
 
                     <div>

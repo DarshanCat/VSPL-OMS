@@ -409,6 +409,9 @@ class ProductionService:
             to_stage=matched_to,
             quantity_moved=req.quantity_moved,
             rejected_quantity=req.rejected_quantity,
+            production_type=req.production_type or "IN_HOUSE",
+            vendor_name=req.vendor_name.strip() if req.vendor_name and req.vendor_name.strip() else None,
+            dc_number=req.dc_number.strip() if req.dc_number and req.dc_number.strip() else None,
             machine_id=req.machine_id,
             # operator_id is always the authenticated caller, never client-supplied: it is
             # a foreign key to users.id, and trusting a client-sent value would let any
@@ -565,6 +568,10 @@ class ProductionService:
                     stage_rejection_total=wip_existing.rejected_qty if wip_existing else existing_entry.reject_qty,
                     stage_onhand_available=wip_existing.onhand_qty if wip_existing else 0,
                     stage_inproc_remaining=wip_existing.inproc_qty if wip_existing else 0,
+                    heat_number=existing_entry.heat_number,
+                    production_type=existing_entry.production_type or "IN_HOUSE",
+                    vendor_name=existing_entry.vendor_name,
+                    dc_number=existing_entry.dc_number,
                     timestamp=existing_entry.created_at or now,
                     message=f"Duplicate production entry detected with token '{req.client_request_id}'. Returning original transaction."
                 )
@@ -659,6 +666,9 @@ class ProductionService:
             operator_id=current_user.id if current_user else None,
             operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
             shift=req.shift or "Shift A",
+            production_type=req.production_type or "IN_HOUSE",
+            vendor_name=req.vendor_name.strip() if req.vendor_name and req.vendor_name.strip() else None,
+            dc_number=req.dc_number.strip() if req.dc_number and req.dc_number.strip() else None,
             good_qty=req.good_qty,
             reject_qty=req.rejected_quantity,
             status=ProductionStatus.COMPLETED,
@@ -753,6 +763,9 @@ class ProductionService:
                 stage_onhand_available=wip_existing.onhand_qty if wip_existing else 0,
                 stage_inproc_remaining=wip_existing.inproc_qty if wip_existing else 0,
                 heat_number=existing_entry.heat_number,
+                production_type=existing_entry.production_type or "IN_HOUSE",
+                vendor_name=existing_entry.vendor_name,
+                dc_number=existing_entry.dc_number,
                 timestamp=existing_entry.created_at or now,
                 message=f"Duplicate production entry detected with token '{req.client_request_id}'. Returning original transaction."
             )
@@ -772,6 +785,9 @@ class ProductionService:
             stage_onhand_available=wip.onhand_qty,
             stage_inproc_remaining=wip.inproc_qty,
             heat_number=entry.heat_number,
+            production_type=entry.production_type or "IN_HOUSE",
+            vendor_name=entry.vendor_name,
+            dc_number=entry.dc_number,
             timestamp=now,
             message=f"Successfully recorded stage production for {wo.wo_number} at {matched_stage}: {req.good_qty} Good, {req.rejected_quantity} Rejected."
         )

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   Factory,
+  Building2,
+  Truck,
   Search,
   CheckCircle2,
   AlertTriangle,
@@ -100,6 +102,9 @@ export function ProductionEntryContent() {
   const [defectCode, setDefectCode] = useState("DEF-POROSITY");
   const [heatNumber, setHeatNumber] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [productionType, setProductionType] = useState<"IN_HOUSE" | "VENDOR">("IN_HOUSE");
+  const [vendorName, setVendorName] = useState("");
+  const [dcNumber, setDcNumber] = useState("");
   const [rejectionTypes, setRejectionTypes] = useState<MasterRejectionType[]>([]);
   const [machinesList, setMachinesList] = useState<MasterMachine[]>([]);
   const [operatorsList, setOperatorsList] = useState<MasterOperator[]>([]);
@@ -370,6 +375,17 @@ export function ProductionEntryContent() {
       return;
     }
 
+    if (selectedStage === "F2" && productionType === "VENDOR") {
+      if (!vendorName.trim()) {
+        setFormError("Vendor Name is mandatory when recording F2 Vendor production.");
+        return;
+      }
+      if (!dcNumber.trim()) {
+        setFormError("Delivery Challan (DC #) is mandatory when recording F2 Vendor production.");
+        return;
+      }
+    }
+
     // The ceiling for a NEW production transaction is the unprocessed material still
     // remaining at this stage (in_process_qty), never available_wip -- available_wip
     // also includes onhand_qty (already-completed material awaiting movement), and
@@ -396,13 +412,16 @@ export function ProductionEntryContent() {
         stage: selectedStage,
         good_qty: goodQtyNum,
         rejected_quantity: rejQtyNum,
-        machine_id: selectedMachine,
+        machine_id: selectedStage === "F2" && productionType === "VENDOR" ? undefined : selectedMachine,
         operator_name: selectedOperator,
         shift: shift,
         defect_code: rejQtyNum > 0 ? defectCode : undefined,
         remarks: remarks.trim() || undefined,
         heat_number: heatNumber.trim() || undefined,
-        client_request_id: clientReqId
+        client_request_id: clientReqId,
+        production_type: selectedStage === "F2" ? productionType : "IN_HOUSE",
+        vendor_name: selectedStage === "F2" && productionType === "VENDOR" ? vendorName.trim() : undefined,
+        dc_number: selectedStage === "F2" && productionType === "VENDOR" ? dcNumber.trim() : undefined,
       });
 
       setSuccessResult({
@@ -416,6 +435,9 @@ export function ProductionEntryContent() {
         stage_rejection_total: res.stage_rejection_total,
         stage_onhand_available: res.stage_onhand_available,
         stage_inproc_remaining: res.stage_inproc_remaining,
+        production_type: res.production_type || (selectedStage === "F2" ? productionType : "IN_HOUSE"),
+        vendor_name: res.vendor_name || (selectedStage === "F2" && productionType === "VENDOR" ? vendorName.trim() : undefined),
+        dc_number: res.dc_number || (selectedStage === "F2" && productionType === "VENDOR" ? dcNumber.trim() : undefined),
         message: res.message
       });
 
@@ -827,6 +849,91 @@ export function ProductionEntryContent() {
                     </div>
                   )}
 
+                  {/* F2 Special Routing: In-House vs At Vendor Toggle */}
+                  {selectedStage === "F2" && (
+                    <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                          <Factory className="h-4 w-4 text-indigo-600" />
+                          F2 PRODUCTION MODE / ROUTING *
+                        </label>
+                        <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/60 px-2 py-0.5 rounded-md">
+                          Stage F2 Specific
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setProductionType("IN_HOUSE")}
+                          className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            productionType === "IN_HOUSE"
+                              ? "border-indigo-600 bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/20"
+                              : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                          }`}
+                        >
+                          <Factory className="h-4 w-4" />
+                          <span>In-House Production (Shopfloor)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setProductionType("VENDOR")}
+                          className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                            productionType === "VENDOR"
+                              ? "border-purple-600 bg-purple-600 text-white shadow-sm ring-2 ring-purple-500/20"
+                              : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                          }`}
+                        >
+                          <Building2 className="h-4 w-4" />
+                          <span>At Vendor (External DC)</span>
+                        </button>
+                      </div>
+
+                      {productionType === "VENDOR" && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-indigo-200/60 dark:border-indigo-900/40">
+                          <div>
+                            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                              <Building2 className="h-3.5 w-3.5 text-purple-600" />
+                              VENDOR NAME <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              list="vendor-suggestions"
+                              value={vendorName}
+                              onChange={(e) => setVendorName(e.target.value)}
+                              placeholder="e.g. Sharada Engineering, Lakshmi CNC..."
+                              className="w-full rounded-xl border border-purple-300 dark:border-purple-800 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                              required={productionType === "VENDOR"}
+                            />
+                            <datalist id="vendor-suggestions">
+                              <option value="Sharada Engineering" />
+                              <option value="Lakshmi CNC Machining" />
+                              <option value="Super Tech Precision Works" />
+                              <option value="Standard Machining Works" />
+                              <option value="A-One Engineering Works" />
+                            </datalist>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center gap-1.5">
+                              <Truck className="h-3.5 w-3.5 text-purple-600" />
+                              DELIVERY CHALLAN NUMBER (DC #) <span className="text-rose-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={dcNumber}
+                              onChange={(e) => setDcNumber(e.target.value)}
+                              placeholder="e.g. DC-2026-0042..."
+                              className="w-full rounded-xl border border-purple-300 dark:border-purple-800 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                              required={productionType === "VENDOR"}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Machine & Operator Row */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
@@ -961,6 +1068,21 @@ export function ProductionEntryContent() {
               <p className="text-zinc-600 dark:text-zinc-300">
                 {successResult.message}
               </p>
+              {successResult.stage === "F2" && (
+                <div className="pt-1">
+                  {successResult.production_type === "VENDOR" ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-100 text-purple-900 dark:bg-purple-950/60 dark:text-purple-200 font-bold text-[11px] border border-purple-200 dark:border-purple-800">
+                      <Building2 className="h-3.5 w-3.5 text-purple-600" />
+                      <span>Production at Vendor: <strong>{successResult.vendor_name}</strong> (DC #{successResult.dc_number})</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-200 font-bold text-[11px] border border-indigo-200 dark:border-indigo-800">
+                      <Factory className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>In-House Production ({selectedMachine})</span>
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="flex flex-wrap gap-4 pt-1 font-mono font-bold text-zinc-800 dark:text-zinc-200">
                 <span>Stage OK Total: <strong className="text-emerald-600">{successResult.stage_ok_total}</strong></span>
                 <span>Stage Rejection Total: <strong className="text-rose-600">{successResult.stage_rejection_total}</strong></span>

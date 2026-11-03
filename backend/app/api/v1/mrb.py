@@ -148,3 +148,23 @@ def batch_approve_stage(
         "message": f"Successfully approved {count} pending MRB ticket(s) for {wo_number} at {stage}."
     }
 
+@router.post("/bulk-approve")
+def bulk_approve_reviews(
+    stage: Optional[str] = Query(None, description="Optional stage code filter e.g. F1, F2 or ALL"),
+    notes: Optional[str] = Query(None, description="Optional approval notes"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*MRB_ROLES))
+):
+    """Bulk approve all PENDING MRB reviews across the plant or for a specific stage."""
+    count = MRBService.bulk_approve_pending_reviews(
+        db=db,
+        stage=stage,
+        current_user=user,
+        notes=notes
+    )
+    return {
+        "success": True,
+        "approved_count": count,
+        "message": f"Successfully bulk approved {count} pending MRB review(s)."
+    }
+

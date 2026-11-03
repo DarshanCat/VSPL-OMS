@@ -27,6 +27,7 @@ import {
   submitMRBDecision,
   approveMRBReview,
   adjustMRBReview,
+  bulkApproveMRBReviews,
   MRBReviewItem,
   MRBListResponse,
   MRBReviewDecisionRequest
@@ -155,6 +156,29 @@ export default function MRBReviewBoardPage() {
     }
   };
 
+    const handleBulkApprove = async () => {
+    const stageLabel = selectedStage === "ALL" ? "ALL stages" : `stage ${selectedStage}`;
+    const pendingCount = data?.pending_count ?? 0;
+    if (pendingCount === 0) {
+      alert("No pending tickets to approve.");
+      return;
+    }
+    if (!confirm(`Are you sure you want to bulk approve all pending MRB reviews for ${stageLabel}? This will immediately unlock material movement for these Work Orders.`)) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await bulkApproveMRBReviews(selectedStage);
+      setSuccessMsg(`Successfully bulk approved ${res.approved_count} ticket(s). Material movement unlocked!`);
+      setTimeout(() => setSuccessMsg(""), 5000);
+      await fetchTickets();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Bulk approval failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const deltaOk = selectedTicket ? Number(verifiedOkQty) - selectedTicket.reported_ok_qty : 0;
   const deltaRej = selectedTicket ? Number(verifiedRejectQty) - selectedTicket.reported_reject_qty : 0;
 
@@ -174,14 +198,26 @@ export default function MRBReviewBoardPage() {
               Quality, Planner & Admin verification board for shop floor production gates, OK quantities, and rejection review.
             </p>
           </div>
-          <button
-            onClick={() => fetchTickets()}
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {(data?.pending_count ?? 0) > 0 && (
+              <button
+                onClick={handleBulkApprove}
+                disabled={loading}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer"
+              >
+                <Check className="h-4 w-4" />
+                Bulk Approve All Pending ({data?.pending_count})
+              </button>
+            )}
+            <button
+              onClick={() => fetchTickets()}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition cursor-pointer"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* Alerts */}

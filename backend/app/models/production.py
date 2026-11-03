@@ -24,6 +24,9 @@ class ProductionUpdate(Base):
     reject_qty = Column(Integer, default=0)
     status = Column(Enum(ProductionStatus), nullable=False)
     heat_number = Column(String(100), nullable=True, index=True)
+    production_type = Column(String(50), nullable=True, default='IN_HOUSE')
+    vendor_name = Column(String(200), nullable=True)
+    dc_number = Column(String(100), nullable=True)
     remarks = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

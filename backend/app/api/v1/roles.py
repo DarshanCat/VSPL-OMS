@@ -68,9 +68,14 @@ _ROLES: List[RoleInfo] = [
         allowed_modules=["Dashboard", "Reports", "Reconciliation"],
     ),
     RoleInfo(
-        role="data_analyst", display_name="DATA_ANALYST", department="Analytics",
-        permissions=["Read-only reports, analytics, and tracking"],
-        allowed_modules=["Reports", "Analytics", "Dashboard"],
+        role="data_analyst", display_name="DATA_ANALYST (VIEW-ONLY)", department="Analytics & Oversight",
+        permissions=[
+            "Read-only visibility across plant dashboards, live WIP matrix, and timelines",
+            "Manufacturing reports, scrap trends, and batch intelligence CSV exports",
+            "Continuous casting inventory and heat genealogy traceability",
+            "Strictly zero operational mutations (cannot move material, create orders, or approve dispositions)",
+        ],
+        allowed_modules=["Dashboard", "WIP Matrix", "WO Tracking", "Movement History", "Reports", "Continuous Casting Traceability", "Work Instructions"],
     ),
 ]
 

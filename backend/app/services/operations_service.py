@@ -375,8 +375,23 @@ class OperationsService:
         old_commit = orders[0].commitment_date
 
         for order in orders:
-            if payload.commitment_date is not None:
-                order.commitment_date = payload.commitment_date
+            if payload.revised_commitment_date is not None:
+                order.revised_commitment_date = payload.revised_commitment_date
+                if not order.commitment_date:
+                    order.commitment_date = old_commit or order.delivery_date or payload.revised_commitment_date
+                order.commitment_date_revision_count = (order.commitment_date_revision_count or 0) + 1
+                order.commitment_date_last_revised_at = datetime.now()
+                if payload.revision_reason:
+                    order.commitment_date_revision_reason = payload.revision_reason.strip()
+            elif payload.commitment_date is not None:
+                if order.commitment_date is not None and order.commitment_date != payload.commitment_date:
+                    order.revised_commitment_date = payload.commitment_date
+                    order.commitment_date_revision_count = (order.commitment_date_revision_count or 0) + 1
+                    order.commitment_date_last_revised_at = datetime.now()
+                    if payload.revision_reason:
+                        order.commitment_date_revision_reason = payload.revision_reason.strip()
+                else:
+                    order.commitment_date = payload.commitment_date
             if payload.delivery_date is not None:
                 order.delivery_date = payload.delivery_date
             if payload.status is not None:
@@ -414,7 +429,10 @@ class OperationsService:
                             status="Active"
                         ))
 
-        if payload.commitment_date is not None:
+        if payload.revised_commitment_date is not None or (payload.commitment_date is not None and old_commit and payload.commitment_date != old_commit):
+            eff_rev = payload.revised_commitment_date or payload.commitment_date
+            changes.append(f"Revised Commitment Date: {old_commit} -> {eff_rev} (Revision #{orders[0].commitment_date_revision_count}, Reason: {payload.revision_reason or payload.remarks or 'None'})")
+        elif payload.commitment_date is not None:
             changes.append(f"Commitment Date: {old_commit} -> {payload.commitment_date}")
         if payload.delivery_date is not None:
             changes.append(f"Delivery Date -> {payload.delivery_date}")

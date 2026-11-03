@@ -434,6 +434,9 @@ export async function recordStageProduction(payload: {
   heat_number?: string;
   remarks?: string;
   client_request_id?: string;
+  production_type?: "IN_HOUSE" | "VENDOR";
+  vendor_name?: string;
+  dc_number?: string;
 }) {
   const { data } = await api.post("/api/v1/production/entry", payload);
   return data;
@@ -452,6 +455,9 @@ export async function moveParts(payload: {
   heat_number?: string;
   remarks?: string;
   client_request_id?: string;
+  production_type?: "IN_HOUSE" | "VENDOR";
+  vendor_name?: string;
+  dc_number?: string;
 }) {
   const { data } = await api.post("/api/v1/production/move", payload);
   return data;
@@ -702,6 +708,16 @@ export interface MovableWorkOrderItem {
 export async function getMovableWorkOrders(limit?: number): Promise<MovableWorkOrderItem[]> {
   const { data } = await api.get("/api/v1/work-orders/movable", {
     params: limit ? { limit } : undefined,
+  });
+  return data;
+}
+
+export async function bulkApproveMRBReviews(
+  stage?: string,
+  notes?: string
+): Promise<{ success: boolean; approved_count: number; message: string }> {
+  const { data } = await api.post("/api/v1/mrb/bulk-approve", null, {
+    params: { stage: stage && stage !== "ALL" ? stage : undefined, notes },
   });
   return data;
 }
@@ -994,6 +1010,10 @@ export interface OARWorkOrderSummary {
   is_released?: boolean;
   ready_for_production?: boolean;
   classification?: string | null;
+  commitment_date?: string | null;
+  revised_commitment_date?: string | null;
+  effective_commitment_date?: string | null;
+  commitment_date_revision_count?: number;
 }
 
 export interface OARListItem {
@@ -1023,6 +1043,11 @@ export interface OARListItem {
   status: string;
   delivery_date?: string | null;
   commitment_date?: string | null;
+  revised_commitment_date?: string | null;
+  effective_commitment_date?: string | null;
+  commitment_date_revision_count?: number;
+  commitment_date_last_revised_at?: string | null;
+  commitment_date_revision_reason?: string | null;
   created_at: string;
   po_date?: string | null;
   oar_date?: string | null;
@@ -1059,6 +1084,8 @@ export async function updateOAR(
   oarNumber: string,
   payload: {
     commitment_date?: string | null;
+    revised_commitment_date?: string | null;
+    revision_reason?: string | null;
     delivery_date?: string | null;
     customer_part_number?: string | null;
     status?: string;
@@ -1300,6 +1327,9 @@ export interface AdminPart {
   part_number: string;
   grade?: string | null;
   description?: string | null;
+  customer_part_number?: string | null;
+  customer_name?: string | null;
+  customer_code?: string | null;
 }
 
 export async function getParts(): Promise<AdminPart[]> {

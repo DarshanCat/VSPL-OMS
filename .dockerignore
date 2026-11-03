@@ -8,11 +8,15 @@ backend/__pycache__
 backend/**/*.pyc
 backend/.pytest_cache
 backend/data
+backend/*.db
 *.xlsx
 *.xls
 *.db
 .env
 .env.*
 !.env.example
-Dockerfile
-cloudbuild.yaml
+.claude
+.agents
+.cursor
+.jetro
+projects

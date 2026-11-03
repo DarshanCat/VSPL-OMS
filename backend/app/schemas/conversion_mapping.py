@@ -25,3 +25,7 @@ class ConversionMappingOut(BaseModel):
     created_at: datetime
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
+    source_customer_part_number: Optional[str] = None
+    source_customer_name: Optional[str] = None
+    destination_customer_part_number: Optional[str] = None
+    destination_customer_name: Optional[str] = None

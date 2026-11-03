@@ -159,6 +159,12 @@ def auto_migrate_schema():
         "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS client_request_id VARCHAR;",
         "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS operator_name VARCHAR;",
         "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS heat_number VARCHAR;",
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS production_type VARCHAR DEFAULT 'IN_HOUSE';",
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS vendor_name VARCHAR;",
+        "ALTER TABLE production_updates ADD COLUMN IF NOT EXISTS dc_number VARCHAR;",
+        "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS production_type VARCHAR DEFAULT 'IN_HOUSE';",
+        "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS vendor_name VARCHAR;",
+        "ALTER TABLE production_movements ADD COLUMN IF NOT EXISTS dc_number VARCHAR;",
 
         # Stage WIP
         "ALTER TABLE stage_wip ADD COLUMN IF NOT EXISTS ent_qty INTEGER DEFAULT 0;",

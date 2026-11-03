@@ -28,6 +28,9 @@ class ProductionMovement(Base):
     movement_date = Column(String, nullable=True)
     movement_time = Column(String, nullable=True)
     heat_number = Column(String(100), nullable=True, index=True)
+    production_type = Column(String(50), nullable=True, default='IN_HOUSE')
+    vendor_name = Column(String(200), nullable=True)
+    dc_number = Column(String(100), nullable=True)
     remarks = Column(String, nullable=True)
     
     created_by = Column(GUID, ForeignKey("users.id"), nullable=True)

@@ -208,9 +208,16 @@ class OMSIntegrationService:
                 nxt_stg = routes[i + 1].stage
                 nxt_wip = wip_map.get(nxt_stg)
                 nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
-            std_on_hand = max(ok - nxt_ent, 0)
+                std_on_hand = max(ok - nxt_ent, 0)
+            else:
+                dispatched_total = sum(d.dispatched_qty or 0 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all())
+                std_on_hand = max(ok - dispatched_total, 0)
 
-            if is_packing_or_final and pr:
+            if stg.upper() == "DISPATCH":
+                dispatched_total = sum(d.dispatched_qty or 0 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all())
+                net_ip = 0
+                on_hand = max(ok - dispatched_total, 0)
+            elif is_packing_or_final and pr:
                 net_ip = max(std_inproc, pr.pending_qty)
                 on_hand = max(std_on_hand, pr.ready_for_dispatch_qty)
             else:

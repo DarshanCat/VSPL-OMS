@@ -7,6 +7,7 @@ from app.api.deps import get_current_user, require_roles
 from app.core.roles import QUALITY_OVERSIGHT_ROLES
 from app.models.user import User
 from app.models.order import Customer, Part
+from app.models.customer_part_mapping import CustomerPartMapping
 from app.models.audit import AuditLog
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -31,6 +32,9 @@ class PartOut(BaseModel):
     # import_part_master.py) -- these are not invented defaults, so both stay optional.
     grade: Optional[str] = None
     description: Optional[str] = None
+    customer_part_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_code: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -66,7 +70,38 @@ def list_customers(db: Session = Depends(get_db), user: User = Depends(get_curre
 def list_parts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     # Cap raised past the real, imported VSPL Part Master count (~6,200) -- 5000 was
     # silently truncating the list before every part existed in this table.
-    return db.query(Part).order_by(Part.part_number).limit(20000).all()
+    parts = db.query(Part).order_by(Part.part_number).limit(20000).all()
+    cpms = (
+        db.query(
+            CustomerPartMapping.part_id,
+            CustomerPartMapping.customer_part_number,
+            Customer.name,
+            Customer.customer_code,
+        )
+        .outerjoin(Customer, CustomerPartMapping.customer_id == Customer.id)
+        .all()
+    )
+    cpm_map = {str(p_id): (cust_part_no, cust_name, cust_code) for p_id, cust_part_no, cust_name, cust_code in cpms if p_id}
+
+    res = []
+    for p in parts:
+        p_id_str = str(p.id)
+        c_info = cpm_map.get(p_id_str)
+        cust_part_no = c_info[0] if c_info and c_info[0] else (p.description or p.part_number)
+        cust_name = c_info[1] if c_info else None
+        cust_code = c_info[2] if c_info else None
+        res.append(
+            PartOut(
+                id=p_id_str,
+                part_number=p.part_number,
+                grade=p.grade,
+                description=p.description,
+                customer_part_number=cust_part_no,
+                customer_name=cust_name,
+                customer_code=cust_code,
+            )
+        )
+    return res
 
 @router.get("/machines", response_model=List[MachineOut])
 def list_machines(user: User = Depends(get_current_user)):

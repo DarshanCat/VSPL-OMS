@@ -174,7 +174,13 @@ export default function MovementHistoryPage() {
                       {m.rejected_quantity > 0 ? m.rejected_quantity : "0"}
                     </td>
                     <td className="py-3 px-3 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
-                      {m.machine_id || "—"}
+                      {m.production_type === "VENDOR" ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                          Vendor: {m.vendor_name || "Outside"} {m.dc_number ? `(DC: ${m.dc_number})` : ""}
+                        </span>
+                      ) : (
+                        <span>{m.machine_id || "In-House"}</span>
+                      )}
                     </td>
                     <td className="py-3 px-3 text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
                       {m.operator_name || "Operator"} ({m.shift || "A"})

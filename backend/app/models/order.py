@@ -66,6 +66,10 @@ class Order(Base):
     max_batch_size = Column(Integer, nullable=True, default=1000)
     delivery_date = Column(Date)
     commitment_date = Column(Date, nullable=True)
+    revised_commitment_date = Column(Date, nullable=True)
+    commitment_date_revision_count = Column(Integer, nullable=False, default=0)
+    commitment_date_last_revised_at = Column(DateTime(timezone=True), nullable=True)
+    commitment_date_revision_reason = Column(String, nullable=True)
     order_type = Column(String(50), nullable=False, default="Production")  # 'Production' | 'NPD'
     customer_part_number = Column(String, nullable=True)
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)

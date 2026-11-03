@@ -371,6 +371,16 @@ class WorkOrderService:
 
             oar_dt = order.created_at if order else None
             wo_dt = wo.created_at or datetime.now()
+            good_qty = max(launched_qty - rejected_qty, 0)
+
+            if final_good > 0:
+
+                good_qty = max(good_qty, final_good)
+
+            produced_qty = launched_qty
+
+
+
             rel_status = compute_wo_release_status(wo)
             is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
             ready_prod = bool(is_rel or rel_status in ("RELEASED", "AWAITING_WO_RELEASE") or wo.status in (WOStatus.OPEN, WOStatus.PLANNED))
@@ -408,7 +418,11 @@ class WorkOrderService:
                 is_released=is_rel,
                 ready_for_production=ready_prod,
                 heat_number=getattr(wo, "heat_number", None),
-                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
+                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
+                commitment_date=oar_commit_date,
+                revised_commitment_date=oar_revised_commit_date,
+                effective_commitment_date=oar_effective_commit_date,
+                commitment_date_revision_count=oar_commit_rev_count
             ))
 
         return results
@@ -483,6 +497,12 @@ class WorkOrderService:
             rej = (wip_rec.rejected_qty if wip_rec else 0)
             ok_qty = wip_rec.ok_qty if wip_rec else r.cumulative_ok_qty
 
+            # Terminal stage (DISPATCH): subtract dispatched parts from onhand
+            if (wo.status in (WOStatus.DISPATCHED, WOStatus.CLOSED) or str(cur_stage).lower() == "completed") and (idx == len(routes) - 1 or stg.upper() == "DISPATCH"):
+                dispatched_total = sum(d.dispatched_qty or 0 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all())
+                onhand = max(ok_qty - dispatched_total, 0)
+                avail = inproc + onhand
+
             total_wip_held += avail
             total_rejected += rej
             
@@ -515,7 +535,10 @@ class WorkOrderService:
 
         yield_pct = round(100.0 * max(wo.physical_wo_qty - total_rejected, 0) / wo.physical_wo_qty, 1) if wo.physical_wo_qty > 0 else 100.0
         risk = calculate_delivery_risk(order.delivery_date if order else None, cur_stage, wo.status.value, route_stages)
-        cur_wip_val = wip_records.get(cur_stage).available_wip if wip_records.get(cur_stage) else (wo.physical_wo_qty if cur_idx == 0 else 0)
+        if wo.status in (WOStatus.DISPATCHED, WOStatus.CLOSED) or str(cur_stage).lower() == "completed":
+            cur_wip_val = 0
+        else:
+            cur_wip_val = wip_records.get(cur_stage).available_wip if wip_records.get(cur_stage) else (wo.physical_wo_qty if (cur_idx == 0 and not wip_records) else 0)
 
         prod_updates = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).order_by(ProductionUpdate.created_at.desc()).all()
         
@@ -691,6 +714,13 @@ class WorkOrderService:
         total OAR fulfillment, and remaining shortfall without double-counting."""
         wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.created_at.asc(), WorkOrder.wo_number.asc()).all()
 
+        oar_commit_date = order.commitment_date
+        oar_revised_commit_date = getattr(order, "revised_commitment_date", None)
+        oar_commit_rev_count = getattr(order, "commitment_date_revision_count", 0) or 0
+        oar_effective_commit_date = oar_revised_commit_date or oar_commit_date
+        oar_last_revised_at = getattr(order, "commitment_date_last_revised_at", None)
+        oar_rev_reason = getattr(order, "commitment_date_revision_reason", None)
+
         wo_summaries: List[OARWorkOrderSummary] = []
         allocated_total = 0
 
@@ -711,28 +741,33 @@ class WorkOrderService:
             wips = db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()
             movements = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).all()
 
-            if prod_entries:
-                produced_qty = sum((p.good_qty or 0) + (p.reject_qty or 0) for p in prod_entries)
-                good_qty = sum(p.good_qty or 0 for p in prod_entries)
+            first_stg = route_stages[0] if route_stages else "F1"
+            first_wip = next((w for w in wips if w.stage.upper() == first_stg.upper()), None)
+            first_prod = [p for p in prod_entries if p.stage.upper() == first_stg.upper()]
+
+            # Total quantity launched into the work order pipeline:
+            # Measured at the initial production stage (e.g. F1) rather than summing intermediate steps.
+            if first_wip and (first_wip.ent_qty or (first_wip.ok_qty + first_wip.rejected_qty)):
+                launched_qty = first_wip.ent_qty or (first_wip.ok_qty + first_wip.rejected_qty)
+            elif first_prod:
+                launched_qty = sum((p.good_qty or 0) + (p.reject_qty or 0) for p in first_prod)
             elif movements:
-                first_stg = route_stages[0] if route_stages else "F1"
-                first_moves = [m for m in movements if m.from_stage == first_stg]
-                produced_qty = sum(m.quantity_moved + m.rejected_quantity for m in first_moves)
-                good_qty = sum(m.quantity_moved for m in movements)
+                first_moves = [m for m in movements if m.from_stage.upper() == first_stg.upper()]
+                launched_qty = sum(m.quantity_moved + m.rejected_quantity for m in first_moves)
             else:
-                produced_qty = 0
-                good_qty = 0
+                launched_qty = wo.physical_wo_qty if wo.released_by else 0
 
             # Total rejected on this WO across ALL stages
             rejected_qty = sum(w.rejected_qty for w in wips) if wips else sum(nc.qty for nc in db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).all())
 
             # Authoritative Final Good fulfillment contribution for this WO:
-            # Material ONLY counts as final good fulfillment when it has completed the entire route
-            # (i.e. reached Packing / BSR / Dispatch or completed the terminal stage of that specific route).
+            # Dispatched material is already packed material, so ready_for_dispatch + dispatched equals total output.
             pr = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
             if pr:
-                final_good = (pr.dispatched_qty or 0) + (pr.ready_for_dispatch_qty or 0) + (pr.packed_qty or 0)
-                if final_good == 0 and (pr.received_qty or 0) > 0:
+                final_good = (pr.dispatched_qty or 0) + (pr.ready_for_dispatch_qty or 0)
+                if final_good == 0 and (pr.packed_qty or 0) > 0:
+                    final_good = pr.packed_qty or 0
+                elif final_good == 0 and (pr.received_qty or 0) > 0:
                     final_good = pr.received_qty or 0
             else:
                 is_packing_route = any(s.upper() in ("PACKING", "BSR", "PACKING / BSR", "PACKING/BSR", "DISPATCH") for s in route_stages)
@@ -753,6 +788,16 @@ class WorkOrderService:
                 d.dispatched_qty or 0
                 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
             )
+
+            good_qty = max(launched_qty - rejected_qty, 0)
+
+            if final_good > 0:
+
+                good_qty = max(good_qty, final_good)
+
+            produced_qty = launched_qty
+
+
 
             rel_status = compute_wo_release_status(wo)
             is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
@@ -849,6 +894,11 @@ class WorkOrderService:
             status=order.status.value,
             delivery_date=order.delivery_date,
             commitment_date=order.commitment_date,
+            revised_commitment_date=oar_revised_commit_date,
+            effective_commitment_date=oar_effective_commit_date,
+            commitment_date_revision_count=oar_commit_rev_count,
+            commitment_date_last_revised_at=oar_last_revised_at,
+            commitment_date_revision_reason=oar_rev_reason,
             created_at=order.created_at or datetime.now(),
             po_date=po_date,
             oar_date=order.created_at,
@@ -884,6 +934,11 @@ class WorkOrderService:
             status=summary.status,
             delivery_date=summary.delivery_date,
             commitment_date=summary.commitment_date,
+            revised_commitment_date=summary.revised_commitment_date,
+            effective_commitment_date=summary.effective_commitment_date,
+            commitment_date_revision_count=summary.commitment_date_revision_count,
+            commitment_date_last_revised_at=summary.commitment_date_last_revised_at,
+            commitment_date_revision_reason=summary.commitment_date_revision_reason,
             created_at=summary.created_at,
             po_date=summary.po_date,
             oar_date=summary.oar_date,

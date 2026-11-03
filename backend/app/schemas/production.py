@@ -13,6 +13,9 @@ class MovePartsRequest(BaseModel):
     operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
     defect_code: Optional[str] = Field(None, max_length=100)
+    production_type: Optional[str] = Field('IN_HOUSE', description='Production mode: IN_HOUSE | VENDOR')
+    vendor_name: Optional[str] = Field(None, max_length=200, description='Vendor name if processed at outside vendor')
+    dc_number: Optional[str] = Field(None, max_length=100, description='Delivery Challan number if processed at outside vendor')
     heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
@@ -27,6 +30,9 @@ class RecordStageProductionRequest(BaseModel):
     operator_name: Optional[str] = Field(None, max_length=200)
     shift: Optional[str] = "Shift A"
     defect_code: Optional[str] = Field(None, max_length=100)
+    production_type: Optional[str] = Field('IN_HOUSE', description='Production mode: IN_HOUSE | VENDOR')
+    vendor_name: Optional[str] = Field(None, max_length=200, description='Vendor name if processed at outside vendor')
+    dc_number: Optional[str] = Field(None, max_length=100, description='Delivery Challan number if processed at outside vendor')
     heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
@@ -44,6 +50,9 @@ class ProductionEntryResponse(BaseModel):
     stage_onhand_available: int
     stage_inproc_remaining: int
     heat_number: Optional[str] = None
+    production_type: Optional[str] = 'IN_HOUSE'
+    vendor_name: Optional[str] = None
+    dc_number: Optional[str] = None
     timestamp: datetime
     message: str
 
@@ -61,6 +70,9 @@ class MovementResponse(BaseModel):
     to_stage_available_wip: int
     current_stage: str
     heat_number: Optional[str] = None
+    production_type: Optional[str] = 'IN_HOUSE'
+    vendor_name: Optional[str] = None
+    dc_number: Optional[str] = None
     timestamp: datetime
     message: str
 
@@ -84,6 +96,9 @@ class MovementListItem(BaseModel):
     movement_date: Optional[str] = None
     movement_time: Optional[str] = None
     heat_number: Optional[str] = None
+    production_type: Optional[str] = 'IN_HOUSE'
+    vendor_name: Optional[str] = None
+    dc_number: Optional[str] = None
     remarks: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: datetime

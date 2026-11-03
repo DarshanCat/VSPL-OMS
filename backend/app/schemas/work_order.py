@@ -51,6 +51,10 @@ class WorkOrderListItem(BaseModel):
     ready_for_production: bool = False
     heat_number: Optional[str] = None
     classification: Optional[str] = "Production"
+    commitment_date: Optional[date] = None
+    revised_commitment_date: Optional[date] = None
+    effective_commitment_date: Optional[date] = None
+    commitment_date_revision_count: int = 0
 
 class StageTimelineStep(BaseModel):
     stage: str
@@ -200,6 +204,11 @@ class OARListItem(BaseModel):
     status: str
     delivery_date: Optional[date] = None
     commitment_date: Optional[date] = None
+    revised_commitment_date: Optional[date] = None
+    effective_commitment_date: Optional[date] = None
+    commitment_date_revision_count: int = 0
+    commitment_date_last_revised_at: Optional[datetime] = None
+    commitment_date_revision_reason: Optional[str] = None
     created_at: datetime
     po_date: Optional[date] = None
     oar_date: Optional[datetime] = None
@@ -221,6 +230,11 @@ class OARGenealogyResponse(BaseModel):
     oar_qty: int
     delivery_date: Optional[date] = None
     commitment_date: Optional[date] = None
+    revised_commitment_date: Optional[date] = None
+    effective_commitment_date: Optional[date] = None
+    commitment_date_revision_count: int = 0
+    commitment_date_last_revised_at: Optional[datetime] = None
+    commitment_date_revision_reason: Optional[str] = None
     num_wos: int
     num_original_wos: int
     num_patch_wos: int

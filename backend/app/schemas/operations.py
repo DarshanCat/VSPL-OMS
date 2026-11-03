@@ -51,6 +51,8 @@ class OrderIntakeResponse(BaseModel):
 
 class OARUpdate(BaseModel):
     commitment_date: Optional[date] = None
+    revised_commitment_date: Optional[date] = None
+    revision_reason: Optional[str] = None
     delivery_date: Optional[date] = None
     customer_part_number: Optional[str] = None
     status: Optional[str] = Field(None, description="'accept', 'hold', or 'reject'")

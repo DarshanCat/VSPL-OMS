@@ -30,20 +30,22 @@ WO_RELEASE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGE
 CONVERSION_MODULE_ROLES = (UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER, UserRole.SALES, UserRole.CEO)
 
 # Physical shop-floor production entry (recording good/rejected quantity at a stage).
-# Production staff, Store, Planner/PPC, Sales, Data Analyst, Admin, and CEO granted rights.
+# Production staff, Store, Planner/PPC, Sales, Admin, and CEO granted rights.
+# DATA_ANALYST is strictly read-only and cannot mutate production records.
 PRODUCTION_ENTRY_ROLES = (
     UserRole.ADMIN, UserRole.PRODUCTION_MANAGER,
     UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
-    UserRole.PLANNER, UserRole.SALES, UserRole.DATA_ANALYST,
+    UserRole.PLANNER, UserRole.SALES,
     UserRole.CEO,
 )
 
 # Physical material movement between stages:
-# Production staff, Store, Planner/PPC, Sales, Data Analyst, Admin, and CEO granted rights.
+# Production staff, Store, Planner/PPC, Sales, Admin, and CEO granted rights.
+# DATA_ANALYST is strictly read-only and cannot move parts.
 MATERIAL_MOVEMENT_ROLES = (
     UserRole.ADMIN, UserRole.PRODUCTION_MANAGER, UserRole.STORE,
     UserRole.MACHINE_OPERATOR, UserRole.OPERATOR,
-    UserRole.PLANNER, UserRole.SALES, UserRole.DATA_ANALYST,
+    UserRole.PLANNER, UserRole.SALES,
     UserRole.CEO,
 )
 
