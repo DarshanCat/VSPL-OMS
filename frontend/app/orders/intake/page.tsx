@@ -130,8 +130,6 @@ export default function OrderIntakePage() {
 
       const pending: any[] = [];
       allPos.forEach((po) => {
-        // Check if any line on this PO already has an OAR number created
-        const existingOarInPo = po.lines.flatMap((l) => l.orders || []).find((o) => o.oar_number)?.oar_number;
         po.lines.forEach((l) => {
           if (l.available_qty > 0) {
             pending.push({
@@ -142,7 +140,6 @@ export default function OrderIntakePage() {
               customer_name: po.customer_name,
               po_date: po.po_date,
               validity_date: po.validity_date,
-              existing_oar_number: existingOarInPo || null,
             });
           }
         });
@@ -162,10 +159,10 @@ export default function OrderIntakePage() {
     }
   };
 
-  const refreshNextSequences = () => {
+  const refreshNextSequences = (force = false) => {
     getNextSequences()
       .then((seq) => {
-        if (!oarNumber) setOarNumber(seq.next_oar_number);
+        if (force || !oarNumber) setOarNumber(seq.next_oar_number);
       })
       .catch(() => {});
   };
@@ -212,10 +209,10 @@ export default function OrderIntakePage() {
       setCommitmentDate(p.required_date);
     }
 
-    // For multi-part POs: if an OAR was already created for another part in this PO, reuse that OAR!
-    if (p.existing_oar_number) {
-      setOarNumber(p.existing_oar_number);
-    }
+    // Always fetch fresh sequential OAR number for this line item
+    getNextSequences()
+      .then((seq) => setOarNumber(seq.next_oar_number))
+      .catch(() => {});
 
     // Set grade and description from part master
     const foundPart = partOptions.find((x) => x.num === p.part_number);
@@ -262,6 +259,11 @@ export default function OrderIntakePage() {
       setGrade("Standard");
       setPartDesc("");
     }
+
+    // Always fetch fresh sequential OAR number for this schedule
+    getNextSequences()
+      .then((seq) => setOarNumber(seq.next_oar_number))
+      .catch(() => {});
 
     getSchedules(s.customer_code)
       .then((scheds) => {
@@ -775,7 +777,7 @@ export default function OrderIntakePage() {
                 </label>
                 <button
                   type="button"
-                  onClick={refreshNextSequences}
+                  onClick={() => refreshNextSequences(true)}
                   className="text-[10px] text-blue-600 hover:underline flex items-center gap-1"
                 >
                   <RefreshCw className="h-2.5 w-2.5" /> Next Auto
