@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -83,6 +83,18 @@ export default function OarWoListPage() {
   const [classificationFilter, setClassificationFilter] = useState<"ALL" | "Production" | "NPD">("ALL");
   const [exportingExcel, setExportingExcel] = useState(false);
   const [oars, setOars] = useState<OARListItem[]>([]);
+
+  // Instant client-side filtering -- switching between Production & NPD is 0ms (no network delay)
+  const displayedOars = useMemo(() => {
+    if (classificationFilter === "ALL") return oars;
+    if (classificationFilter === "NPD") {
+      return oars.filter((o) => o.classification?.toUpperCase() === "NPD");
+    }
+    return oars.filter((o) => o.classification?.toUpperCase() !== "NPD");
+  }, [oars, classificationFilter]);
+
+  const productionCount = useMemo(() => oars.filter((o) => o.classification?.toUpperCase() !== "NPD").length, [oars]);
+  const npdCount = useMemo(() => oars.filter((o) => o.classification?.toUpperCase() === "NPD").length, [oars]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -97,15 +109,14 @@ export default function OarWoListPage() {
   const [patchError, setPatchError] = useState<string>("");
   const [patchSuccess, setPatchSuccess] = useState<ReplacementResult | null>(null);
 
-  const fetchOars = useCallback(async (searchTerm: string, status: string, classification: string = "ALL") => {
+  const fetchOars = useCallback(async (searchTerm: string = "", status: string = "") => {
     setLoading(true);
     setError("");
     try {
       const data = await getOarList({
         search: searchTerm.trim() || undefined,
         status_filter: status || undefined,
-        classification: classification === "ALL" ? undefined : classification,
-        limit: 200
+        limit: 300
       });
       const items = Array.isArray(data) ? data : [];
       setOars(items);
@@ -126,8 +137,8 @@ export default function OarWoListPage() {
   }, []);
 
   useEffect(() => {
-    fetchOars("", "", classificationFilter);
-  }, [fetchOars, classificationFilter]);
+    fetchOars("", "");
+  }, [fetchOars]);
 
   const handleExportExcel = async () => {
     try {
@@ -305,10 +316,7 @@ export default function OarWoListPage() {
         <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3 flex-wrap">
           <button
             type="button"
-            onClick={() => {
-              setClassificationFilter("ALL");
-              fetchOars(search, statusFilter, "ALL");
-            }}
+            onClick={() => setClassificationFilter("ALL")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
               classificationFilter === "ALL"
                 ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs"
@@ -321,10 +329,7 @@ export default function OarWoListPage() {
 
           <button
             type="button"
-            onClick={() => {
-              setClassificationFilter("Production");
-              fetchOars(search, statusFilter, "Production");
-            }}
+            onClick={() => setClassificationFilter("Production")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
               classificationFilter === "Production"
                 ? "bg-emerald-600 text-white shadow-xs"
@@ -332,17 +337,12 @@ export default function OarWoListPage() {
             }`}
           >
             <span>🏭 Production Series</span>
-            {classificationFilter === "Production" && (
-              <span className="text-[10px] opacity-90 font-mono">({oars.length})</span>
-            )}
+            <span className="text-[10px] opacity-90 font-mono">({productionCount})</span>
           </button>
 
           <button
             type="button"
-            onClick={() => {
-              setClassificationFilter("NPD");
-              fetchOars(search, statusFilter, "NPD");
-            }}
+            onClick={() => setClassificationFilter("NPD")}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
               classificationFilter === "NPD"
                 ? "bg-rose-600 text-white shadow-xs"
@@ -350,16 +350,14 @@ export default function OarWoListPage() {
             }`}
           >
             <span>🔬 NPD Traceability</span>
-            {classificationFilter === "NPD" && (
-              <span className="text-[10px] opacity-90 font-mono">({oars.length})</span>
-            )}
+            <span className="text-[10px] opacity-90 font-mono">({npdCount})</span>
           </button>
         </div>
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            fetchOars(search, statusFilter, classificationFilter);
+            fetchOars(search, statusFilter);
           }}
           className="flex flex-col sm:flex-row gap-3"
         >
@@ -431,7 +429,7 @@ export default function OarWoListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
-                {oars.map((oar) => {
+                {displayedOars.map((oar) => {
                   const rowKey = oar.order_id || `${oar.oar_number}-${oar.part_number}`;
                   return (
                     <React.Fragment key={rowKey}>
@@ -844,7 +842,7 @@ export default function OarWoListPage() {
                   );
                 })}
 
-                {oars.length === 0 && !loading && (
+                {displayedOars.length === 0 && !loading && (
                   <tr>
                     <td colSpan={11} className="py-10 text-center text-zinc-400">
                       <div className="flex flex-col items-center gap-2">
