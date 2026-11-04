@@ -1090,6 +1090,7 @@ export async function updateOAR(
     customer_part_number?: string | null;
     status?: string;
     remarks?: string;
+    order_type?: string;
   }
 ): Promise<OARListItem> {
   const { data } = await api.patch(`/api/v1/operations/oars/${encodeURIComponent(oarNumber)}`, payload);

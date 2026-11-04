@@ -202,6 +202,7 @@ export default function OarWoListPage() {
   const [editRevisionReason, setEditRevisionReason] = useState("");
   const [editDeliveryDate, setEditDeliveryDate] = useState("");
   const [editCustomerPartNumber, setEditCustomerPartNumber] = useState("");
+  const [editOrderType, setEditOrderType] = useState<"Production" | "NPD">("Production");
   const [editStatus, setEditStatus] = useState("accept");
   const [editRemarks, setEditRemarks] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -217,6 +218,7 @@ export default function OarWoListPage() {
     setEditRevisionReason(oar.commitment_date_revision_reason || "");
     setEditDeliveryDate(oar.delivery_date ? String(oar.delivery_date).substring(0, 10) : "");
     setEditCustomerPartNumber(oar.customer_part_number || "");
+    setEditOrderType(oar.classification?.toUpperCase() === "NPD" ? "NPD" : "Production");
     setEditStatus(oar.status?.toLowerCase() || "accept");
     setEditRemarks("");
     setEditError("");
@@ -240,11 +242,12 @@ export default function OarWoListPage() {
         customer_part_number: editCustomerPartNumber.trim() || null,
         status: editStatus,
         remarks: editRemarks || undefined,
+        order_type: editOrderType,
       });
       setEditSuccess(`OAR ${updated.oar_number} updated successfully.`);
       // Update local state in-place and reload
       setOars((prev) =>
-        prev.map((o) => (o.oar_number === updated.oar_number ? { ...o, ...updated } : o))
+        prev.map((o) => (o.oar_number === updated.oar_number ? { ...o, ...updated, classification: editOrderType } : o))
       );
       setTimeout(() => {
         setEditModalOar(null);
@@ -1137,6 +1140,40 @@ export default function OarWoListPage() {
                         Customer drawing or catalog part number printed on customer PO.
                       </p>
                     </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                        Order Classification
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditOrderType("Production")}
+                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all text-center flex items-center justify-center gap-1.5 ${
+                            editOrderType === "Production"
+                              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 shadow-sm ring-1 ring-blue-500"
+                              : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                          }`}
+                        >
+                          🏭 Series Production
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditOrderType("NPD")}
+                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all text-center flex items-center justify-center gap-1.5 ${
+                            editOrderType === "NPD"
+                              ? "border-purple-500 bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 shadow-sm ring-1 ring-purple-500"
+                              : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                          }`}
+                        >
+                          🔬 NPD (New Product Dev)
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 mt-1">
+                        Switches this OAR and all associated Work Orders between Production and NPD.
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-800/60">
                       <div>
                         <div className="flex items-center justify-between mb-1">
