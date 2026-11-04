@@ -556,11 +556,11 @@ export default function OarWoListPage() {
                             e.stopPropagation();
                             handleOpenEditOar(oar);
                           }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-100 hover:bg-blue-50 hover:text-blue-600 dark:bg-zinc-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400 text-xs font-semibold text-zinc-700 dark:text-zinc-300 border border-zinc-200/80 dark:border-zinc-700/80 transition-colors"
-                          title="Edit OAR Commitment Date & Delivery Details"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200 dark:border-blue-900/50 transition-colors cursor-pointer shadow-xs"
+                          title="Edit OAR Classification (NPD / Production), Dates & Details"
                         >
-                          <Calendar className="h-3.5 w-3.5 text-blue-500" />
-                          <span>Edit Date</span>
+                          <Edit3 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                          <span>Edit OAR</span>
                         </button>
                       </td>
                     </tr>
@@ -661,10 +661,10 @@ export default function OarWoListPage() {
                                     type="button"
                                     onClick={() => handleOpenEditOar(oar)}
                                     className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-200 dark:border-blue-900/50 transition-colors cursor-pointer"
-                                    title="Edit Commitment Date & Delivery Details"
+                                    title="Edit OAR Classification (NPD / Production), Dates & Details"
                                   >
-                                    <Calendar className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                                    <span>Edit Commitment Date</span>
+                                    <Edit3 className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                                    <span>Edit OAR Details</span>
                                   </button>
 
                                   {oar.oar_shortfall > 0 && (
@@ -1059,7 +1059,7 @@ export default function OarWoListPage() {
                   <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                   <div>
                     <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                      Edit Commitment Date &amp; Delivery Details
+                      Edit OAR Details &amp; Classification
                     </h3>
                     <p className="text-[11px] text-zinc-500 font-mono">
                       OAR: {editModalOar.oar_number} • Customer: {editModalOar.customer_code}
