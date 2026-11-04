@@ -375,7 +375,7 @@ export default function OarWoListPage() {
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
-              fetchOars(search, e.target.value, classificationFilter);
+              fetchOars(search, e.target.value);
             }}
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
           >
@@ -393,7 +393,7 @@ export default function OarWoListPage() {
           </button>
           <button
             type="button"
-            onClick={() => fetchOars(search, statusFilter, classificationFilter)}
+            onClick={() => fetchOars(search, statusFilter)}
             disabled={loading}
             title="Fetch latest production and order data"
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold text-zinc-700 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center gap-1.5"
