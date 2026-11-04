@@ -340,6 +340,9 @@ export default function POMasterPage() {
     setCreateError("");
     setCreating(true);
     try {
+      if (/^\s*schedule\b/i.test(poNumber.trim())) {
+        throw new Error("PO Number cannot be 'SCHEDULE'. Customer Delivery Schedules must be created under Master Data > Schedules.");
+      }
       const validLines = lines.filter(
         (l) => (l.customer_part_number?.trim() || l.part_number?.trim()) && l.po_qty
       );
@@ -395,6 +398,9 @@ export default function POMasterPage() {
     setUpdating(true);
 
     try {
+      if (/^\s*schedule\b/i.test(editPoNumber.trim())) {
+        throw new Error("PO Number cannot be 'SCHEDULE'. Customer Delivery Schedules must be created under Master Data > Schedules.");
+      }
       const validLines = editLines.filter(
         (l) => (l.customer_part_number?.trim() || l.part_number.trim()) && Number(l.po_qty) > 0
       );

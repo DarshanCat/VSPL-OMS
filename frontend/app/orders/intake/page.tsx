@@ -130,6 +130,10 @@ export default function OrderIntakePage() {
 
       const pending: any[] = [];
       allPos.forEach((po) => {
+        // Exclude entries named 'SCHEDULE' from PO queue (they belong in Schedule Master)
+        if (/^\s*schedule\b/i.test(po.po_number)) {
+          return;
+        }
         po.lines.forEach((l) => {
           if (l.available_qty > 0) {
             pending.push({
