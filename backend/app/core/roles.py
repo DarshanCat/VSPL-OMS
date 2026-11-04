@@ -112,11 +112,11 @@ HEAT_ALLOCATION_ROLES = (
 # Engineering Release: first step of the release chain (Engineering Release ->
 # Manufacturing Release -> WO Release -> Production). Super Admin may administer
 # every release step per existing admin policy.
-ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING)
+ENGINEERING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.ENGINEERING, UserRole.PLANNER, UserRole.CEO)
 
 # Manufacturing Release: second step of the release chain -- the service layer also
 # enforces that Engineering Release must already be recorded before this can happen.
-MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING, UserRole.PRODUCTION_MANAGER)
+MANUFACTURING_RELEASE_ROLES = (UserRole.ADMIN, UserRole.MANUFACTURING, UserRole.PRODUCTION_MANAGER, UserRole.PLANNER, UserRole.CEO)
 
 # Continuous Casting (China) raw-material module. One tuple per operation so widening
 # one never widens another; no China-specific role is introduced.

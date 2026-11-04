@@ -2,7 +2,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
+from app.core.roles import PLANNING_ROLES
+from app.schemas.operations import WorkOrderCreatePayload, WorkOrderCreateResponse
+from app.services.operations_service import OperationsService
 from app.models.user import User
 from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, WorkOrderRouteResponse,
@@ -30,6 +33,15 @@ def get_planning_summary(
     """Retrieve live aggregate planning metrics for production planners:
     unreleased count, released count, producing today count, ready for production count, etc."""
     return WorkOrderService.get_planning_summary(db)
+
+@router.post("", response_model=WorkOrderCreateResponse)
+def create_work_order(
+    payload: WorkOrderCreatePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Step 2: Planner generates Work Order(s) from a created OAR."""
+    return OperationsService.create_work_order(db, payload, current_user=user)
 
 @router.get("", response_model=List[WorkOrderListItem])
 def list_work_orders(
