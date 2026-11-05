@@ -4,18 +4,18 @@
 // one of these with require_roles(...) and answers 403 regardless of what the UI displays.
 // Keep in step with roles.py by hand. Reads need only an authenticated user, so there is no read tuple.
 
-export const CC_MATERIAL_MASTER_ROLES = ["admin", "engineering"] as const;
-export const CC_INWARD_ROLES = ["admin", "store"] as const;
-export const CC_QA_ROLES = ["admin", "qa"] as const;
-export const CC_ROUTING_ROLES = ["admin", "engineering"] as const;
-export const CC_RESERVE_ROLES = ["admin", "planner"] as const; // also allocation and release
-export const CC_ISSUE_ROLES = ["admin", "store"] as const; // also return and split
-export const CC_CUT_ROLES = ["admin", "production_manager"] as const; // also cut results
-export const CC_HOLD_ROLES = ["admin", "store", "qa"] as const;
-export const CC_HOLD_RELEASE_ROLES = ["admin", "qa"] as const;
-export const CC_SCRAP_ROLES = ["admin", "store"] as const;
-export const CC_ADJUSTMENT_ROLES = ["admin"] as const;
-export const CC_HEAT_RECONCILE_ROLES = ["admin", "qa", "planner", "store"] as const;
+export const CC_MATERIAL_MASTER_ROLES = ["admin", "engineering", "planner", "ceo"] as const;
+export const CC_INWARD_ROLES = ["admin", "store", "planner", "ceo"] as const;
+export const CC_QA_ROLES = ["admin", "qa", "planner", "ceo"] as const;
+export const CC_ROUTING_ROLES = ["admin", "engineering", "planner", "ceo"] as const;
+export const CC_RESERVE_ROLES = ["admin", "planner", "ceo"] as const; // also allocation and release
+export const CC_ISSUE_ROLES = ["admin", "store", "planner", "ceo"] as const; // also return and split
+export const CC_CUT_ROLES = ["admin", "production_manager", "planner", "ceo"] as const; // also cut results
+export const CC_HOLD_ROLES = ["admin", "store", "qa", "planner", "ceo"] as const;
+export const CC_HOLD_RELEASE_ROLES = ["admin", "qa", "planner", "ceo"] as const;
+export const CC_SCRAP_ROLES = ["admin", "store", "planner", "ceo"] as const;
+export const CC_ADJUSTMENT_ROLES = ["admin", "planner", "ceo"] as const;
+export const CC_HEAT_RECONCILE_ROLES = ["admin", "qa", "planner", "store", "ceo"] as const;
 
 export type CCRoleTuple = readonly string[];
 
