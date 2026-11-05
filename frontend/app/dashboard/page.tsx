@@ -104,44 +104,44 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <StatCard
             title="Active Work Orders"
-            value={stats?.running_work_orders ?? "4"}
+            value={stats ? String(stats.running_work_orders) : "0"}
             subtitle="In production cells"
             highlightColor="blue"
             icon={<Layers className="h-5 w-5" />}
           />
           <StatCard
             title="Total Plant WIP"
-            value={`${stats?.current_total_wip ?? "2,370"} pcs`}
+            value={`${stats ? stats.current_total_wip : 0} pcs`}
             subtitle="Stage buffer stock"
             highlightColor="emerald"
             icon={<Activity className="h-5 w-5" />}
           />
           <StatCard
             title="Overall Yield"
-            value={`${stats?.overall_yield_pct ?? "95.2"}%`}
+            value={`${stats && stats.overall_yield_pct != null ? stats.overall_yield_pct : 0.0}%`}
             subtitle="Cast to Good ratio"
             highlightColor="emerald"
             icon={<TrendingUp className="h-5 w-5" />}
           />
           <StatCard
             title="Packing / BSR Queue"
-            value={`${stats?.packing_pending_qty ?? "95"} pcs`}
+            value={`${stats ? stats.packing_pending_qty : 0} pcs`}
             subtitle="FI cleared, pending BSR"
             highlightColor="purple"
             icon={<PackageCheck className="h-5 w-5" />}
           />
           <StatCard
             title="Ready for Dispatch"
-            value={`${stats?.dispatch_pending_qty ?? "240"} pcs`}
+            value={`${stats ? stats.dispatch_pending_qty : 0} pcs`}
             subtitle="Packed & inspected"
             highlightColor="blue"
             icon={<Truck className="h-5 w-5" />}
           />
           <StatCard
             title="Delayed Orders"
-            value={stats?.delayed_orders_count ?? "1"}
+            value={stats ? String(stats.delayed_orders_count || 0) : "0"}
             subtitle="Past delivery target"
-            highlightColor={stats?.delayed_orders_count > 0 ? "rose" : "emerald"}
+            highlightColor={(stats?.delayed_orders_count || 0) > 0 ? "rose" : "emerald"}
             icon={<AlertTriangle className="h-5 w-5" />}
           />
         </div>

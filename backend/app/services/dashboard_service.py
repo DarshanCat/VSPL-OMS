@@ -63,7 +63,7 @@ class DashboardService:
             total_rej_all += int(rej_sum)
 
         total_parts_all = total_ok_all + total_rej_all
-        overall_yield_pct = round(100.0 * total_ok_all / total_parts_all, 1) if total_parts_all > 0 else 94.5
+        overall_yield_pct = round(100.0 * total_ok_all / total_parts_all, 1) if total_parts_all > 0 else 0.0
 
         # Top Defects
         defect_groups = db.query(NCRecord.defect_code, func.sum(NCRecord.qty)).group_by(NCRecord.defect_code).order_by(func.sum(NCRecord.qty).desc()).limit(5).all()

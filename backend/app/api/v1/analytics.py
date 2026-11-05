@@ -80,7 +80,7 @@ def get_plant_kpis(
     total_proc = total_ok + total_rej
     achieve = production_achievement(total_ok, total_target)
     plant_rej_rate = rejection_rate(total_rej, total_proc)
-    plant_yield = yield_pct(total_ok, total_proc) if total_proc > 0 else 96.5
+    plant_yield = yield_pct(total_ok, total_proc) if total_proc > 0 else 0.0
 
     # Proxy OEE: Availability (90%), Performance (88%), Quality (Yield)
     oee = oee_proxy(90.0, 88.0, plant_yield)
