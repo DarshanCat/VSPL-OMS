@@ -369,6 +369,7 @@ export interface WorkOrderListItem {
   ready_for_production?: boolean;
   heat_number?: string | null;
   classification?: string | null;
+  route_stages?: string[] | null;
 }
 
 export interface PlanningSummary {

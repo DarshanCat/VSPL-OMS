@@ -55,6 +55,7 @@ class WorkOrderListItem(BaseModel):
     revised_commitment_date: Optional[date] = None
     effective_commitment_date: Optional[date] = None
     commitment_date_revision_count: int = 0
+    route_stages: Optional[List[str]] = None
 
 class StageTimelineStep(BaseModel):
     stage: str
@@ -207,6 +208,7 @@ class OARListItem(BaseModel):
     revised_commitment_date: Optional[date] = None
     effective_commitment_date: Optional[date] = None
     commitment_date_revision_count: int = 0
+    route_stages: Optional[List[str]] = None
     commitment_date_last_revised_at: Optional[datetime] = None
     commitment_date_revision_reason: Optional[str] = None
     created_at: datetime
@@ -233,6 +235,7 @@ class OARGenealogyResponse(BaseModel):
     revised_commitment_date: Optional[date] = None
     effective_commitment_date: Optional[date] = None
     commitment_date_revision_count: int = 0
+    route_stages: Optional[List[str]] = None
     commitment_date_last_revised_at: Optional[datetime] = None
     commitment_date_revision_reason: Optional[str] = None
     num_wos: int

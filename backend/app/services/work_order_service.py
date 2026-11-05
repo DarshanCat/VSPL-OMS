@@ -417,7 +417,8 @@ class WorkOrderService:
                 commitment_date=oar_commit_date,
                 revised_commitment_date=oar_revised_commit_date,
                 effective_commitment_date=oar_effective_commit_date,
-                commitment_date_revision_count=oar_commit_rev_count
+                commitment_date_revision_count=oar_commit_rev_count,
+                route_stages=route_stages
             ))
 
         return results

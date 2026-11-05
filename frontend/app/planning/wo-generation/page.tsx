@@ -89,7 +89,6 @@ function WOGenerationContent() {
   const [woDate, setWoDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [targetDate, setTargetDate] = useState("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS">("CENTRIFUGAL");
-  const [heatNumber, setHeatNumber] = useState("");
   const [routeStages, setRouteStages] = useState<string[]>(DEFAULT_STAGES);
   const [remarks, setRemarks] = useState("Planned by Production Planning department.");
 
@@ -287,7 +286,6 @@ function WOGenerationContent() {
         wo_date: woDate || undefined,
         target_date: targetDate || undefined,
         casting_process: castingProcess,
-        heat_number: heatNumber.trim() || undefined,
         route_stages: routeStages,
         remarks: remarks.trim() || undefined,
       };
@@ -975,34 +973,19 @@ function WOGenerationContent() {
                 )}
               </div>
 
-              {/* Process, Target Date, Heat No */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                <div>
-                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    Casting Process
-                  </label>
-                  <select
-                    value={castingProcess}
-                    onChange={(e) => setCastingProcess(e.target.value as any)}
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                  >
-                    <option value="CENTRIFUGAL">CENTRIFUGAL (Foundry Melt)</option>
-                    <option value="CONTINUOUS">CONTINUOUS (Continuous Casting)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                    Heat / Melt Number (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={heatNumber}
-                    onChange={(e) => setHeatNumber(e.target.value)}
-                    placeholder="e.g. HT-2026-081"
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
-                  />
-                </div>
+              {/* Casting Process */}
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Casting Process
+                </label>
+                <select
+                  value={castingProcess}
+                  onChange={(e) => setCastingProcess(e.target.value as any)}
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-semibold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                >
+                  <option value="CENTRIFUGAL">CENTRIFUGAL (Foundry Melt)</option>
+                  <option value="CONTINUOUS">CONTINUOUS (Continuous Casting)</option>
+                </select>
               </div>
 
               {/* Route Stages */}
@@ -1286,8 +1269,9 @@ function EditWorkOrderModal({ wo, onClose, onSuccess }: EditWorkOrderModalProps)
   const [woDate, setWoDate] = useState(() => (wo.wo_date ? wo.wo_date.slice(0, 10) : new Date().toISOString().slice(0, 10)));
   const [targetDate, setTargetDate] = useState(() => (wo.delivery_date ? wo.delivery_date.slice(0, 10) : ""));
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS">((wo.casting_process as any) || "CENTRIFUGAL");
-  const [heatNumber, setHeatNumber] = useState(wo.heat_number || "");
-  const [routeStages, setRouteStages] = useState<string[]>(DEFAULT_STAGES);
+  const [routeStages, setRouteStages] = useState<string[]>(() => {
+    return wo.route_stages && wo.route_stages.length > 0 ? wo.route_stages : DEFAULT_STAGES;
+  });
   const [remarks, setRemarks] = useState("Updated by Production Planning.");
   const [allowOverrun, setAllowOverrun] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1325,7 +1309,6 @@ function EditWorkOrderModal({ wo, onClose, onSuccess }: EditWorkOrderModalProps)
         wo_date: woDate || null,
         target_date: targetDate || null,
         casting_process: castingProcess,
-        heat_number: heatNumber.trim() || null,
         route_stages: routeStages,
         remarks: remarks.trim() || null,
         allow_overrun: allowOverrun
@@ -1449,7 +1432,7 @@ function EditWorkOrderModal({ wo, onClose, onSuccess }: EditWorkOrderModalProps)
             </div>
 
             {/* Casting Process */}
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
                 Casting Process
               </label>
@@ -1461,20 +1444,6 @@ function EditWorkOrderModal({ wo, onClose, onSuccess }: EditWorkOrderModalProps)
                 <option value="CENTRIFUGAL">CENTRIFUGAL (Foundry Melt)</option>
                 <option value="CONTINUOUS">CONTINUOUS (Cast Bar Cutting)</option>
               </select>
-            </div>
-
-            {/* Heat / Melt Number */}
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
-                Heat / Melt Number (Optional)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. HT-2026-081"
-                value={heatNumber}
-                onChange={(e) => setHeatNumber(e.target.value)}
-                className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2 text-xs font-mono text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none"
-              />
             </div>
           </div>
 

@@ -153,9 +153,16 @@ function WOReleasePageInner() {
 
     if (found.casting_process === "CONTINUOUS") {
       setCastingProcess("CONTINUOUS");
-      setSelectedStages((prev) => prev.filter((s) => s !== "F1"));
     } else {
       setCastingProcess("CENTRIFUGAL");
+    }
+
+    // Reflect exact route stages configured during WO Generation
+    if (found.route_stages && Array.isArray(found.route_stages) && found.route_stages.length > 0) {
+      setSelectedStages(found.route_stages);
+    } else if (found.casting_process === "CONTINUOUS") {
+      setSelectedStages((prev) => prev.filter((s) => s !== "F1"));
+    } else {
       setSelectedStages((prev) => (prev.includes("F1") ? prev : ["F1", ...prev.filter((s) => s !== "F1")]));
     }
   }, []);
@@ -577,7 +584,6 @@ function WOReleasePageInner() {
         physical_wo_qty: qty,
         route_stages: selectedStages,
         casting_process: castingProcess || undefined,
-        heat_number: heatNumber.trim() || undefined,
         remarks: remarks,
       });
 
@@ -1032,8 +1038,8 @@ function WOReleasePageInner() {
           onSubmit={handleSubmit}
           className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-5"
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="lg:col-span-5 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                   Select Work Order for Release *
@@ -1721,7 +1727,35 @@ function WOReleasePageInner() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Right Column: Work Order Release Configuration & Routing (lg:col-span-7) */}
+            <div className="lg:col-span-7 space-y-5 bg-zinc-50/70 dark:bg-zinc-950/40 p-5 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80">
+              <div className="flex items-center justify-between border-b border-zinc-200/80 dark:border-zinc-800/80 pb-3">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block">
+                    Step 3: Route &amp; Release Execution
+                  </span>
+                  <h4 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                    <span>Release Work Order</span>
+                    {selectedWO ? (
+                      <span className="font-mono text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800 text-xs font-bold">
+                        {selectedWO}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-normal text-amber-600 dark:text-amber-400">
+                        (Select a Work Order on the left)
+                      </span>
+                    )}
+                  </h4>
+                </div>
+                {selectedWODetail && (
+                  <div className="text-right text-[11px]">
+                    <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200 block">{selectedWODetail.part_number}</span>
+                    <span className="text-zinc-400 text-[10px]">{selectedWODetail.customer_code || selectedWODetail.customer_name}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Released Physical WO Quantity */}
               <div>
                 <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                   Released Physical WO Quantity (pcs) *
@@ -1732,28 +1766,9 @@ function WOReleasePageInner() {
                   min={1}
                   value={physicalQty}
                   onChange={(e) => setPhysicalQty(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 shadow-xs"
                 />
               </div>
-
-              <div>
-                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
-                  <span>Heat Number / Cast Batch #</span>
-                  <span className="text-[10px] text-zinc-400 font-normal">Melt / continuous casting source</span>
-                </label>
-                <div className="relative mt-1.5">
-                  <Flame className="absolute left-3 top-2.5 h-3.5 w-3.5 text-orange-500 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={heatNumber}
-                    onChange={(e) => setHeatNumber(e.target.value)}
-                    placeholder="e.g. HN-2026-088, CAST-42..."
-                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 pl-9 pr-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Material Source & Casting Process Selector */}
           <div>
@@ -1916,6 +1931,8 @@ function WOReleasePageInner() {
               <Factory className="h-4 w-4" />
               <span>{loading ? "Releasing to Floor..." : `Release Work Order ${selectedWO || ""}`}</span>
             </button>
+          </div>
+            </div>
           </div>
         </form>
       </div>
