@@ -33,6 +33,7 @@ from app.services.oms_integration_service import (
     DEFAULT_YIELDS,
     next_oar_sequence,
     next_wo_sequence,
+    extract_wo_number,
     _normalize_oar_code,
     _normalize_wo_code
 )
@@ -496,6 +497,19 @@ class OperationsService:
         allocated_qty = sum(wo.physical_wo_qty for wo in order.work_orders)
         available_qty = max(order.po_qty - allocated_qty, 0)
 
+        # Rule: Same OAR should NOT repeat Work Order generation once fully planned
+        if available_qty <= 0 and not req.allow_overrun:
+            existing_wo_nums = [wo.wo_number for wo in order.work_orders]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"OAR '{order.oar_number}' has already been fully planned ({allocated_qty}/{order.po_qty} pcs) "
+                    f"with Work Order(s): {', '.join(existing_wo_nums)}. "
+                    f"The same OAR cannot repeat Work Order generation. "
+                    f"Check 'Allow Overrun / Additional Batch' only if creating an authorized overrun/rework batch."
+                )
+            )
+
         if total_requested > available_qty and not req.allow_overrun:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -526,29 +540,55 @@ class OperationsService:
         start_manual_num = None
         if req.wo_number and req.wo_number.strip():
             candidate = _normalize_wo_code(req.wo_number.strip())
-            exists = db.query(WorkOrder).filter(
-                or_(WorkOrder.wo_number == candidate, WorkOrder.wo_number == req.wo_number.strip())
-            ).first()
+            raw_wo = req.wo_number.strip()
+            num = extract_wo_number(candidate)
+            query_conds = [WorkOrder.wo_number == candidate, WorkOrder.wo_number == raw_wo]
+            if num is not None:
+                query_conds.extend([
+                    WorkOrder.wo_number == f"WO-{num}",
+                    WorkOrder.wo_number == f"WO {num}",
+                    WorkOrder.wo_number == str(num),
+                ])
+            exists = db.query(WorkOrder).filter(or_(*query_conds)).first()
             if exists:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Work Order number '{candidate}' already exists in the system."
+                    detail=f"Work Order ID '{candidate}' already exists in the system (WO: {exists.wo_number}). The same WO ID cannot be repeated."
                 )
             start_manual_num = candidate
 
         import re
         for idx, q in enumerate(quantities):
-            if idx == 0 and start_manual_num:
-                wo_num = start_manual_num
+            if idx == 0:
+                if start_manual_num:
+                    wo_num = start_manual_num
+                else:
+                    wo_num = next_wo_sequence(db)
             else:
-                wo_num = next_wo_sequence(db)
-                while db.query(WorkOrder).filter(WorkOrder.wo_number == wo_num).first() or wo_num in created_wos:
-                    m = re.match(r"^(WO[- ]?)(\d+)$", wo_num)
-                    if m:
-                        pref, num_str = m.group(1), m.group(2)
-                        wo_num = f"{pref}{int(num_str) + 1}"
-                    else:
-                        wo_num = f"{wo_num}-{idx}"
+                prev_wo = created_wos[-1]
+                m = re.match(r"^(WO[- ]?)(\d+)$", prev_wo, re.IGNORECASE)
+                if m:
+                    pref, num_str = m.group(1), m.group(2)
+                    wo_num = f"{pref}{int(num_str) + 1}"
+                else:
+                    wo_num = f"{prev_wo}-{idx+1}"
+
+            while (
+                db.query(WorkOrder).filter(
+                    or_(
+                        WorkOrder.wo_number == wo_num,
+                        WorkOrder.wo_number == wo_num.replace("-", " "),
+                        WorkOrder.wo_number == wo_num.replace("WO-", ""),
+                    )
+                ).first()
+                or wo_num in created_wos
+            ):
+                m = re.match(r"^(WO[- ]?)(\d+)$", wo_num, re.IGNORECASE)
+                if m:
+                    pref, num_str = m.group(1), m.group(2)
+                    wo_num = f"{pref}{int(num_str) + 1}"
+                else:
+                    wo_num = f"{wo_num}-dup"
 
             wo = WorkOrder(
                 wo_number=wo_num,

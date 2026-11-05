@@ -151,14 +151,11 @@ function WOGenerationContent() {
   const handleSelectOar = (oar: OARListItem) => {
     setSelectedOar(oar);
     setSearchOar(oar.oar_number);
-    const initialQty = oar.remaining_qty > 0 ? oar.remaining_qty : oar.oar_qty;
-    setWoQty(initialQty);
-    setManualQtys([String(Math.ceil(initialQty / 2)), String(Math.floor(initialQty / 2))]);
-    if (oar.remaining_qty <= 0) {
-      setAllowOverrun(true);
-    } else {
-      setAllowOverrun(false);
-    }
+    const initialQty = oar.remaining_qty > 0 ? oar.remaining_qty : 0;
+    setWoQty(initialQty || "");
+    setManualQtys([String(Math.ceil((initialQty || 10) / 2)), String(Math.floor((initialQty || 10) / 2))]);
+    // Rule: Same OAR should NOT repeat WO generation. Never auto-enable overrun.
+    setAllowOverrun(false);
     if (oar.delivery_date) {
       setTargetDate(oar.delivery_date.slice(0, 10));
     }
@@ -176,6 +173,15 @@ function WOGenerationContent() {
       setRouteStages([...routeStages, stage]);
     }
   };
+
+  // Rules: Same WO ID and Same OAR must never repeat
+  const isDuplicateWoNumber = React.useMemo(() => {
+    if (!woNumber.trim()) return false;
+    const clean = woNumber.trim().toUpperCase().replace(/\s+/g, "-");
+    return recentWOs.some((w) => w.wo_number.toUpperCase().replace(/\s+/g, "-") === clean);
+  }, [woNumber, recentWOs]);
+
+  const isOarFullyPlanned = selectedOar ? selectedOar.remaining_qty <= 0 : false;
 
   // Manual split helpers
   const updateManualQty = (idx: number, val: string) => {
@@ -243,6 +249,16 @@ function WOGenerationContent() {
       }
       quantitiesToSubmit = parsedManualQtys;
       totalQtyToSubmit = manualAllocated;
+    }
+
+    if (isDuplicateWoNumber) {
+      setError(`Work Order ID "${woNumber.trim()}" already exists in the system. The same WO ID cannot be repeated.`);
+      return;
+    }
+
+    if (isOarFullyPlanned && !allowOverrun) {
+      setError(`OAR ${selectedOar.oar_number} is already fully planned (${selectedOar.allocated_qty}/${selectedOar.oar_qty} pcs). The same OAR cannot repeat Work Order generation without explicit overrun authorization.`);
+      return;
     }
 
     // Check remaining unless allowOverrun is checked
@@ -686,11 +702,22 @@ function WOGenerationContent() {
                     value={woNumber}
                     onChange={(e) => setWoNumber(e.target.value)}
                     placeholder="e.g. WO-17618 or custom/dumped ID"
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                    className={`mt-1.5 w-full rounded-xl border ${
+                      isDuplicateWoNumber
+                        ? "border-red-500 bg-red-50/50 dark:bg-red-950/20 text-red-700 dark:text-red-400"
+                        : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100"
+                    } px-3 py-2 text-xs font-mono font-bold focus:outline-none`}
                   />
-                  <p className="mt-1 text-[10px] text-zinc-400">
-                    Auto-sequenced or enter custom/dumped WO ID.
-                  </p>
+                  {isDuplicateWoNumber ? (
+                    <p className="mt-1 text-[11px] font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      Work Order ID &quot;{woNumber.trim()}&quot; already exists! Same WO ID cannot repeat.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-zinc-400">
+                      Auto-sequenced or enter custom/dumped WO ID.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1012,6 +1039,8 @@ function WOGenerationContent() {
                     disabled={
                       submitting ||
                       !woNumber ||
+                      isDuplicateWoNumber ||
+                      (isOarFullyPlanned && !allowOverrun) ||
                       (splitMode === "single" && (!woQty || Number(woQty) <= 0)) ||
                       (splitMode === "auto" && autoSplitBatches.length === 0) ||
                       (splitMode === "manual" && !manualComplete)
@@ -1022,6 +1051,10 @@ function WOGenerationContent() {
                     <span>
                       {submitting
                         ? "Generating Work Order IDs..."
+                        : isDuplicateWoNumber
+                        ? "Duplicate WO ID — Click Next Auto"
+                        : isOarFullyPlanned && !allowOverrun
+                        ? "OAR Already Planned (Repeat Prohibited)"
                         : splitMode === "auto"
                         ? `Step 1: Generate ${autoSplitBatches.length} Work Order IDs`
                         : splitMode === "manual"
