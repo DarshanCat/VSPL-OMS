@@ -65,7 +65,7 @@ gcloud run deploy $SERVICE_NAME `
     --project $PROJECT_ID `
     --service-account $SERVICE_ACCOUNT `
     --add-cloudsql-instances $CLOUDSQL_INSTANCE `
-    --set-env-vars "CORS_ORIGINS=*,BOOTSTRAP_ADMIN_EMAIL=aravind.gurudev@vijayspheroidals.com,BOOTSTRAP_ADMIN_NAME=Aravind Gurudev" `
+    --set-env-vars "ENVIRONMENT=production,CORS_ORIGINS=*,BOOTSTRAP_ADMIN_EMAIL=aravind.gurudev@vijayspheroidals.com,BOOTSTRAP_ADMIN_NAME=Aravind Gurudev" `
     --set-secrets "DATABASE_URL=VSPL_DATABASE_URL:latest,SECRET_KEY=VSPL_SECRET_KEY:latest,BOOTSTRAP_ADMIN_PASSWORD=VSPL_ADMIN_PASSWORD:latest" `
     --port 8080 `
     --cpu 1 `

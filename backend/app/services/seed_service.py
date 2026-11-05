@@ -17,7 +17,9 @@ from app.models.operator import Operator
 from app.services.oms_integration_service import calculate_stage_targets
 
 def _is_production() -> bool:
-    return settings.ENVIRONMENT.lower() == "production"
+    if os.environ.get("K_SERVICE") or os.environ.get("CLOUD_RUN_JOB") or (os.environ.get("PORT") and "cloudsql" in (os.environ.get("DATABASE_URL") or "")):
+        return True
+    return (settings.ENVIRONMENT or "").lower() == "production"
 
 # The same defect codes already used historically across this codebase (the demo
 # NC records seeded below, and the legacy hardcoded frontend dropdown they came
@@ -188,7 +190,7 @@ def seed_database_if_empty(db: Session):
     db.flush()
 
     # Check if orders already seeded
-    if db.query(WorkOrder).first():
+    if db.query(Customer).first() or db.query(Order).first() or db.query(WorkOrder).first():
         db.commit()
         return
 
