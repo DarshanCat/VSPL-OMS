@@ -23,8 +23,10 @@ def get_current_user(
 
 
 def require_roles(*roles: UserRole):
+    allowed_values = {r.value if hasattr(r, "value") else str(r).lower() for r in roles}
     def wrapper(user: User = Depends(get_current_user)) -> User:
-        if user.role not in roles:
+        user_val = (user.role.value if hasattr(user.role, "value") else str(user.role)).lower()
+        if user.role not in roles and user_val not in allowed_values:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return user
     return wrapper

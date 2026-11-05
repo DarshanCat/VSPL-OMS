@@ -1,4 +1,13 @@
 "use client";
+function extractErrorMessage(err: any, fallback: string): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+  }
+  return err?.message || fallback;
+}
+
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
@@ -201,6 +210,7 @@ export default function OrderIntakePage() {
 
   const handleSelectPendingPO = (p: any) => {
     isSelectingPending.current = true;
+    setSelectedScheduleId("");
     setSourceType("po");
     setCustomerCode(p.customer_code);
     setCustomerName(p.customer_name);
@@ -243,6 +253,7 @@ export default function OrderIntakePage() {
 
   const handleSelectPendingSchedule = (s: ScheduleOut) => {
     isSelectingPending.current = true;
+    setSelectedPoLineId("");
     setSourceType("schedule");
     setCustomerCode(s.customer_code);
     setCustomerName(s.customer_name);
@@ -437,7 +448,7 @@ export default function OrderIntakePage() {
       refreshNextSequences();
       loadPendingDemand();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to process Order Intake.");
+      setError(extractErrorMessage(err, "Failed to process Order Intake."));
     } finally {
       setLoading(false);
     }

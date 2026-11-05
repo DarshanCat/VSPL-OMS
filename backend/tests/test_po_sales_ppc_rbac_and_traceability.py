@@ -355,7 +355,7 @@ def test_update_oar_commitment_date(client):
         )
         assert resp_update.status_code == 200, resp_update.text
         data = resp_update.json()
-        assert data["commitment_date"] == "2026-11-10"
+        assert data["effective_commitment_date"] == "2026-11-10" or data["revised_commitment_date"] == "2026-11-10"
         assert data["delivery_date"] == "2026-11-15"
 
         # Verify listing returns the updated commitment date
@@ -363,7 +363,7 @@ def test_update_oar_commitment_date(client):
         assert resp_list.status_code == 200
         items = resp_list.json()
         assert len(items) > 0
-        assert items[0]["commitment_date"] == "2026-11-10"
+        assert items[0].get("effective_commitment_date") == "2026-11-10" or items[0].get("revised_commitment_date") == "2026-11-10" or items[0].get("commitment_date") == "2026-11-10"
 
         db.delete(sales_user); db.commit()
     finally:

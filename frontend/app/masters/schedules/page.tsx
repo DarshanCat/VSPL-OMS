@@ -1,4 +1,13 @@
 "use client";
+function extractErrorMessage(err: any, fallback: string): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+  }
+  return err?.message || fallback;
+}
+
 import React, { useEffect, useState, useMemo } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
@@ -82,7 +91,7 @@ export default function ScheduleMasterPage() {
       setMasterParts(pts);
       if (!customerCode && c.length) setCustomerCode(c[0].customer_code);
     } catch (err: any) {
-      setListError(err?.response?.data?.detail || "Could not load schedule data.");
+      setListError(extractErrorMessage(err, "Could not load schedule data."));
     } finally {
       setLoading(false);
     }
@@ -234,7 +243,7 @@ export default function ScheduleMasterPage() {
       setCustomerScheduleRef("");
       await loadAll();
     } catch (err: any) {
-      setCreateError(err?.response?.data?.detail || "Could not create schedule.");
+      setCreateError(extractErrorMessage(err, "Could not create schedule."));
     } finally {
       setCreating(false);
     }
@@ -269,7 +278,7 @@ export default function ScheduleMasterPage() {
       setEditingSchedule(null);
       await loadAll();
     } catch (err: any) {
-      setEditError(err?.response?.data?.detail || "Could not update schedule.");
+      setEditError(extractErrorMessage(err, "Could not update schedule."));
     } finally {
       setUpdating(false);
     }

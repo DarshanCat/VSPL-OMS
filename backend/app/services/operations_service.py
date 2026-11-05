@@ -161,8 +161,11 @@ class OperationsService:
                     detail=f"Requested OAR quantity ({req.po_quantity}) exceeds remaining available schedule quantity ({available}) on {schedule.schedule_number}."
                 )
 
-            oar_po_status = "awaiting_po"
-            schedule.po_status = ScheduleStatus.AWAITING_PO
+            if schedule.po_status == ScheduleStatus.MATCHED:
+                oar_po_status = "po_matched"
+            else:
+                oar_po_status = "awaiting_po"
+                schedule.po_status = ScheduleStatus.AWAITING_PO
 
         # 3. Order (OAR) - user manual number or collision-free sequential generation
         # Each part line item receives a distinct, unique OAR number to prevent repeating

@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.models.order import Order, Customer, Part
+from app.models.order import Order, Customer, Part, OrderStatus
 from app.models.master_data import POLine, POMaster, ScheduleMaster, ScheduleStatus, POStatus
 from app.models.audit import AuditLog
 from app.models.user import User
@@ -63,7 +63,8 @@ class POMatchingService:
 
         candidates = []
         for s in schedules:
-            linked = s.orders[0] if s.orders else None
+            active_orders = [o for o in s.orders if getattr(o, "status", None) != OrderStatus.REJECT]
+            linked = active_orders[0] if active_orders else None
             candidates.append(MatchCandidate(
                 schedule_id=str(s.id), schedule_number=s.schedule_number, part_number=part.part_number,
                 scheduled_qty=s.scheduled_qty, required_date=s.required_date,
@@ -86,7 +87,8 @@ class POMatchingService:
         candidates = []
         for s in schedules:
             match_type, message = _quantity_match(s.scheduled_qty, po_line.po_qty)
-            linked = s.orders[0] if s.orders else None
+            active_orders = [o for o in s.orders if getattr(o, "status", None) != OrderStatus.REJECT]
+            linked = active_orders[0] if active_orders else None
             candidates.append(MatchCandidate(
                 schedule_id=str(s.id), schedule_number=s.schedule_number, part_number=po_line.part.part_number,
                 scheduled_qty=s.scheduled_qty, required_date=s.required_date,
@@ -125,25 +127,30 @@ class POMatchingService:
                 detail=mismatch_message + " -- planner must explicitly acknowledge the mismatch to proceed.",
             )
 
-        linked_order = schedule.orders[0] if schedule.orders else None
-        if not linked_order:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No OAR is linked to schedule '{schedule.schedule_number}'.")
+        active_orders = [o for o in schedule.orders if getattr(o, "status", None) != OrderStatus.REJECT]
+        if active_orders:
+            for order in active_orders:
+                order.po_line_id = po_line.id
+                order.customer_po = po.po_number
+                order.oar_po_status = "po_matched"
+            oar_label = ", ".join(o.oar_number for o in active_orders if o.oar_number)
+            first_audit_id = str(active_orders[0].id)
+        else:
+            oar_label = schedule.schedule_number
+            first_audit_id = str(schedule.id)
 
-        # Link PO/PO line to the EXISTING schedule-based OAR -- never create a new one.
-        linked_order.po_line_id = po_line.id
-        linked_order.customer_po = po.po_number
-        linked_order.oar_po_status = "po_matched"
         schedule.po_status = ScheduleStatus.MATCHED
 
         _audit(
-            db, current_user, "PO_SCHEDULE_MATCHED", str(linked_order.id),
-            details=f"schedule={schedule.schedule_number}, po={po.po_number}, po_line={po_line.id}, match={match_type}",
+            db, current_user, "PO_SCHEDULE_MATCHED", first_audit_id,
+            details=f"schedule={schedule.schedule_number}, po={po.po_number}, po_line={po_line.id}, match={match_type}, linked_oars={oar_label}",
         )
         db.commit()
-        db.refresh(linked_order)
+        for order in active_orders:
+            db.refresh(order)
 
         return MatchConfirmResponse(
-            success=True, oar_number=linked_order.oar_number, schedule_number=schedule.schedule_number,
+            success=True, oar_number=oar_label, schedule_number=schedule.schedule_number,
             po_number=po.po_number, quantity_match=match_type,
             message=mismatch_message or f"Schedule '{schedule.schedule_number}' matched to PO '{po.po_number}' -- exact quantity match.",
         )

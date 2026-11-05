@@ -42,18 +42,36 @@ def _auth(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _unique_code(prefix="CUST"):
+def _unique_code(prefix="BRZ"):
     return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
 
 
-def _create_customer(client, headers, code=None):
+def _create_customer(client, headers, code=None, part_numbers=("BRZ-BUSH-100", "BRZ-RING-250")):
     code = code or _unique_code()
     resp = client.post(
         "/api/v1/masters/customers", headers=headers,
         json={"customer_code": code, "name": f"Test Customer {code}", "email": "buyer@example.com"},
     )
     assert resp.status_code == 200, resp.text
-    return resp.json()
+    cust_data = resp.json()
+
+    from app.core.database import SessionLocal
+    from app.models.customer_part_mapping import CustomerPartMapping
+    from app.models.order import Part, Customer
+    db = SessionLocal()
+    try:
+        c = db.query(Customer).filter(Customer.customer_code == code).first()
+        if c:
+            for pn in part_numbers:
+                p = db.query(Part).filter(Part.part_number == pn).first()
+                if p:
+                    m = db.query(CustomerPartMapping).filter(CustomerPartMapping.customer_id == c.id, CustomerPartMapping.part_id == p.id).first()
+                    if not m:
+                        db.add(CustomerPartMapping(customer_id=c.id, part_id=p.id, customer_part_number=f"CPN-{pn}", status="Active"))
+            db.commit()
+    finally:
+        db.close()
+    return cust_data
 
 
 def _create_schedule(client, headers, customer_code, part_number="BRZ-BUSH-100", qty=500, ref=None):
