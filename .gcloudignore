@@ -1,4 +1,4 @@
-﻿.git
+.git
 .git/**
 .github
 .snapshots
@@ -15,3 +15,8 @@ backend/data
 frontend/node_modules
 backend/__pycache__
 frontend/.next
+backups
+.jetro
+projects
+.agents
+.cursor

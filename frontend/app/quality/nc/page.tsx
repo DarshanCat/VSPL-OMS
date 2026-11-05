@@ -1,4 +1,13 @@
 "use client";
+function extractErrorMessage(err: any, fallback: string): string {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+  }
+  return err?.message || fallback;
+}
+
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
@@ -100,14 +109,14 @@ export default function RejectionTrackingPage() {
           status: statusFilter || undefined,
           limit: 500
         }),
-        getRejectionSummary(),
-        getWorkOrders({ limit: 100 })
+        getRejectionSummary().catch(() => null),
+        getWorkOrders({ limit: 100 }).catch(() => [] as any[])
       ]);
       setRecords(Array.isArray(recData) ? recData : []);
-      setSummary(sumData);
+      if (sumData) setSummary(sumData);
       setWos(Array.isArray(wData) ? wData : []);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to load Rejection Tracking data.");
+      setError(extractErrorMessage(err, "Failed to load Rejection Tracking data."));
     } finally {
       setLoading(false);
     }

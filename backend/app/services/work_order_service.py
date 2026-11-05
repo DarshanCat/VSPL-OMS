@@ -371,15 +371,10 @@ class WorkOrderService:
 
             oar_dt = order.created_at if order else None
             wo_dt = wo.created_at or datetime.now()
-            good_qty = max(launched_qty - rejected_qty, 0)
-
-            if final_good > 0:
-
-                good_qty = max(good_qty, final_good)
-
-            produced_qty = launched_qty
-
-
+            oar_commit_date = order.commitment_date if order else None
+            oar_revised_commit_date = getattr(order, "revised_commitment_date", None) if order else None
+            oar_commit_rev_count = getattr(order, "commitment_date_revision_count", 0) or 0 if order else 0
+            oar_effective_commit_date = oar_revised_commit_date or oar_commit_date
 
             rel_status = compute_wo_release_status(wo)
             is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
