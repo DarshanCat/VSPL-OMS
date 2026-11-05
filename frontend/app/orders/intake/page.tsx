@@ -248,7 +248,7 @@ export default function OrderIntakePage() {
     setCustomerName(s.customer_name);
     setCustomerPO(s.customer_schedule_ref || s.schedule_number);
     setPartNumber(s.part_number);
-    setCustomerPartNo("");
+    setCustomerPartNo(s.customer_part_number || s.part_description || "");
     const availQty = s.available_qty !== undefined ? s.available_qty : s.scheduled_qty;
     setPoQty(availQty);
     setBatchSize(availQty);
@@ -638,9 +638,9 @@ export default function OrderIntakePage() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 uppercase text-[10px] tracking-wider sticky top-0">
                     <tr>
-                      <th className="p-2.5">Schedule # &amp; Ref</th>
-                      <th className="p-2.5">Customer</th>
+                      <th className="p-2.5">Customer &amp; PO</th>
                       <th className="p-2.5">Part / Drawing</th>
+                      <th className="p-2.5">Cust Part #</th>
                       <th className="p-2.5 text-right">Available / Total</th>
                       <th className="p-2.5">Target Date</th>
                       <th className="p-2.5 text-right">Action</th>
@@ -650,20 +650,30 @@ export default function OrderIntakePage() {
                     {filteredPendingSchedules.map((s, idx) => (
                       <tr key={`${s.id}-${idx}`} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                         <td className="p-2.5">
-                          <span className="font-mono font-bold text-blue-600 block">{s.schedule_number}</span>
-                          <span className="text-[11px] text-zinc-500">{s.customer_schedule_ref || "-"}</span>
-                        </td>
-                        <td className="p-2.5 font-semibold text-zinc-800 dark:text-zinc-200">
-                          {s.customer_name} ({s.customer_code})
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-blue-600">
+                              {s.customer_schedule_ref || s.schedule_number}
+                            </span>
+                            <span className="rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 px-1 py-0.5 text-[9px] font-bold border border-blue-200 dark:border-blue-800">
+                              {s.schedule_number}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-zinc-500 block">
+                            {s.customer_name || s.customer_code}
+                          </span>
                         </td>
                         <td className="p-2.5">
                           <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{s.part_number}</span>
+                          <span className="text-[10px] text-zinc-400">-</span>
+                        </td>
+                        <td className="p-2.5 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+                          {s.customer_part_number || s.part_description || "-"}
                         </td>
                         <td className="p-2.5 text-right font-mono">
                           <strong className="text-emerald-600">
                             {s.available_qty !== undefined ? s.available_qty : s.scheduled_qty}
                           </strong>{" "}
-                          / {s.scheduled_qty} pcs
+                          / {s.scheduled_qty}
                           {s.allocated_qty && s.allocated_qty > 0 ? (
                             <span className="text-[10px] text-zinc-400 block font-normal">
                               ({s.allocated_qty} in OAR)
