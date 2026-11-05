@@ -114,7 +114,7 @@ function WOGenerationContent() {
   const loadOars = useCallback(async () => {
     setLoadingOars(true);
     try {
-      const data = await getOarList();
+      const data = await getOarList({ limit: 1000 });
       setOars(data);
       if (urlOar) {
         const found = data.find((o) => o.oar_number.toLowerCase() === urlOar.toLowerCase());

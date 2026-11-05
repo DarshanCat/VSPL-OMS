@@ -144,7 +144,8 @@ export default function OrderIntakePage() {
           return;
         }
         po.lines.forEach((l) => {
-          if (l.available_qty > 0) {
+          const hasNoOar = !l.orders || l.orders.length === 0;
+          if (l.available_qty > 0 || hasNoOar) {
             pending.push({
               ...l,
               po_number: po.po_number,
@@ -162,7 +163,7 @@ export default function OrderIntakePage() {
       // Filter pending schedules awaiting OAR: keep any schedule with remaining available quantity
       const pendingScheds = (allScheds || []).filter(
         (s) =>
-          (s.po_status === "scheduled" || s.po_status === "awaiting_po") &&
+          s.po_status !== "cancelled" &&
           (s.available_qty !== undefined ? s.available_qty > 0 : !s.linked_oar_number)
       );
       setAllPendingSchedules(pendingScheds);
@@ -204,7 +205,7 @@ export default function OrderIntakePage() {
     setSelectedScheduleId("");
     getPOMasters(customerCode).then(setPoMasters).catch(() => setPoMasters([]));
     getSchedules(customerCode)
-      .then((all) => setSchedules(all.filter((s) => s.po_status === "scheduled" || s.po_status === "awaiting_po")))
+      .then((all) => setSchedules(all.filter((s) => s.po_status !== "cancelled" && (s.available_qty !== undefined ? s.available_qty > 0 : !s.linked_oar_number))))
       .catch(() => setSchedules([]));
   }, [customerCode]);
 
@@ -217,8 +218,9 @@ export default function OrderIntakePage() {
     setCustomerPO(p.po_number);
     setPartNumber(p.part_number);
     setCustomerPartNo(p.customer_part_number || "");
-    setPoQty(p.available_qty);
-    setBatchSize(p.available_qty);
+    const defaultQty = p.available_qty > 0 ? p.available_qty : (p.po_qty > 0 ? p.po_qty : "");
+    setPoQty(defaultQty);
+    setBatchSize(defaultQty);
     setSelectedPoLineId(p.id);
     if (p.required_date) {
       setDeliveryDate(p.required_date);
@@ -608,7 +610,10 @@ export default function OrderIntakePage() {
                           {p.customer_part_number || "-"}
                         </td>
                         <td className="p-2.5 text-right font-mono">
-                          <strong className="text-emerald-600">{p.available_qty}</strong> / {p.po_qty}
+                          <strong className={p.available_qty > 0 ? "text-emerald-600" : "text-amber-600"}>{p.available_qty}</strong> / {p.po_qty}
+                          {p.po_qty === 0 && (!p.orders || p.orders.length === 0) && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 block font-sans">Set Qty in OAR</span>
+                          )}
                         </td>
                         <td className="p-2.5 text-[11px] text-zinc-500">
                           {p.required_date || "-"}

@@ -62,7 +62,17 @@ const WO_RELEASE_LABELS: Record<string, string> = {
  * renders "WO not created" -- the real, current linkage state, nothing inferred. */
 function POLineTraceability({ orders }: { orders: POLineOrderSummary[] }) {
   if (!orders || orders.length === 0) {
-    return <span className="text-zinc-400 italic">OAR not created</span>;
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-zinc-400 italic">OAR not created</span>
+        <a
+          href="/orders/intake"
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 hover:bg-blue-100 transition"
+        >
+          Generate OAR →
+        </a>
+      </div>
+    );
   }
   return (
     <div className="space-y-1.5">

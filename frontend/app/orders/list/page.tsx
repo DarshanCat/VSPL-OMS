@@ -116,7 +116,7 @@ export default function OarWoListPage() {
       const data = await getOarList({
         search: searchTerm.trim() || undefined,
         status_filter: status || undefined,
-        limit: 300
+        limit: 1000
       });
       const items = Array.isArray(data) ? data : [];
       setOars(items);

@@ -59,7 +59,7 @@ def list_oars(
     status_filter: Optional[str] = Query(None, description="Filter by OAR status (accept/hold/reject)"),
     customer_code: Optional[str] = Query(None, description="Filter by customer code"),
     classification: Optional[str] = Query(None, description="Filter by classification: 'Production' or 'NPD'"),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(1000, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)

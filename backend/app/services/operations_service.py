@@ -121,7 +121,12 @@ class OperationsService:
                 )
             allocated = sum(o.po_qty for o in po_line.orders)
             available = max(po_line.po_qty - allocated, 0)
-            if req.po_quantity > available:
+            if po_line.po_qty == 0 and allocated == 0:
+                # Open/placeholder PO line with 0 qty: adopt the OAR quantity
+                po_line.po_qty = req.po_quantity
+                po_line.line_total = round(req.po_quantity * (po_line.unit_price or 0.0), 2)
+                available = req.po_quantity
+            elif req.po_quantity > available:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"OAR quantity ({req.po_quantity}) exceeds the available unallocated PO quantity ({available}) on this PO line.",
@@ -143,7 +148,12 @@ class OperationsService:
             for cand_line in matching_lines:
                 allocated = sum(o.po_qty for o in cand_line.orders)
                 available = max(cand_line.po_qty - allocated, 0)
-                if available >= req.po_quantity:
+                if cand_line.po_qty == 0 and allocated == 0:
+                    cand_line.po_qty = req.po_quantity
+                    cand_line.line_total = round(req.po_quantity * (cand_line.unit_price or 0.0), 2)
+                    po_line = cand_line
+                    break
+                elif available >= req.po_quantity:
                     po_line = cand_line
                     break
 
@@ -156,7 +166,11 @@ class OperationsService:
 
             allocated = sum(o.po_qty for o in schedule.orders if getattr(o, "status", None) != OrderStatus.REJECT)
             available = max(schedule.scheduled_qty - allocated, 0)
-            if req.po_quantity > available:
+            if schedule.scheduled_qty == 0 and allocated == 0:
+                schedule.scheduled_qty = req.po_quantity
+                schedule.total_value = round(req.po_quantity * (schedule.unit_price or 0.0), 2)
+                available = req.po_quantity
+            elif req.po_quantity > available:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Requested OAR quantity ({req.po_quantity}) exceeds remaining available schedule quantity ({available}) on {schedule.schedule_number}."

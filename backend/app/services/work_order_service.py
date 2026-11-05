@@ -181,7 +181,7 @@ class WorkOrderService:
         to_date: Optional[str] = None,
         date_type: Optional[str] = "wo_date",
         classification: Optional[str] = None,
-        limit: int = 100,
+        limit: int = 1000,
         offset: int = 0
     ) -> List[WorkOrderListItem]:
         query = db.query(WorkOrder).join(Order).join(Customer).join(Part)
@@ -665,7 +665,7 @@ class WorkOrderService:
         status_filter: Optional[str] = None,
         customer_code: Optional[str] = None,
         classification: Optional[str] = None,
-        limit: int = 100,
+        limit: int = 1000,
         offset: int = 0
     ) -> List[OARListItem]:
         """Read-only OAR + WO roll-up over existing Order/WorkOrder records. Computes no
