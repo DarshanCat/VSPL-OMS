@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
   getMasterCustomers,
@@ -7,10 +7,22 @@ import {
   createSchedule,
   updateSchedule,
   deleteSchedule,
+  getParts,
   MasterCustomer,
   ScheduleOut,
+  AdminPart,
 } from "@/lib/api";
-import { CalendarClock, AlertTriangle, FileSpreadsheet, Edit3, Trash2, X, Check, DollarSign, Search } from "lucide-react";
+import {
+  CalendarClock,
+  AlertTriangle,
+  FileSpreadsheet,
+  Edit3,
+  Trash2,
+  X,
+  Check,
+  Search,
+  CheckCircle2,
+} from "lucide-react";
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
@@ -27,13 +39,16 @@ function statusLabel(s: string) {
 export default function ScheduleMasterPage() {
   const [customers, setCustomers] = useState<MasterCustomer[]>([]);
   const [schedules, setSchedules] = useState<ScheduleOut[]>([]);
+  const [masterParts, setMasterParts] = useState<AdminPart[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  // Add schedule state
   const [customerCode, setCustomerCode] = useState("");
   const [partNumber, setPartNumber] = useState("");
+  const [customerPartNumber, setCustomerPartNumber] = useState("");
   const [scheduledQty, setScheduledQty] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [requiredDate, setRequiredDate] = useState("");
@@ -43,9 +58,11 @@ export default function ScheduleMasterPage() {
 
   // Edit schedule state
   const [editingSchedule, setEditingSchedule] = useState<ScheduleOut | null>(null);
+  const [editCustomerCode, setEditCustomerCode] = useState("");
+  const [editPartNumber, setEditPartNumber] = useState("");
+  const [editCustomerPartNumber, setEditCustomerPartNumber] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
   const [editScheduledQty, setEditScheduledQty] = useState("");
-  const [editPartNumber, setEditPartNumber] = useState("");
   const [editRequiredDate, setEditRequiredDate] = useState("");
   const [editCustomerScheduleRef, setEditCustomerScheduleRef] = useState("");
   const [updating, setUpdating] = useState(false);
@@ -55,9 +72,14 @@ export default function ScheduleMasterPage() {
     setLoading(true);
     setListError("");
     try {
-      const [c, s] = await Promise.all([getMasterCustomers(), getSchedules()]);
+      const [c, s, pts] = await Promise.all([
+        getMasterCustomers(),
+        getSchedules(),
+        getParts().catch(() => [] as AdminPart[]),
+      ]);
       setCustomers(c);
       setSchedules(s);
+      setMasterParts(pts);
       if (!customerCode && c.length) setCustomerCode(c[0].customer_code);
     } catch (err: any) {
       setListError(err?.response?.data?.detail || "Could not load schedule data.");
@@ -71,6 +93,125 @@ export default function ScheduleMasterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Filter parts for Add form
+  const availablePartsForCustomer = useMemo(() => {
+    if (!customerCode) return [];
+    const code = customerCode.toUpperCase();
+    return masterParts.filter(
+      (p) =>
+        (p.customer_code && p.customer_code.toUpperCase() === code) ||
+        p.part_number.toUpperCase().startsWith(code)
+    );
+  }, [customerCode, masterParts]);
+
+  // Filter parts for Edit modal
+  const availablePartsForEdit = useMemo(() => {
+    const code = (editCustomerCode || editingSchedule?.customer_code || "").toUpperCase();
+    if (!code) return [];
+    return masterParts.filter(
+      (p) =>
+        (p.customer_code && p.customer_code.toUpperCase() === code) ||
+        p.part_number.toUpperCase().startsWith(code)
+    );
+  }, [editCustomerCode, editingSchedule, masterParts]);
+
+  // When customer changes in Add form, clear part inputs
+  function handleCustomerChange(code: string) {
+    setCustomerCode(code);
+    setPartNumber("");
+    setCustomerPartNumber("");
+  }
+
+  // Handle selecting a part from the quick dropdown in Add form
+  function handleQuickPartSelect(selectedPartNumber: string) {
+    if (!selectedPartNumber) {
+      setPartNumber("");
+      setCustomerPartNumber("");
+      return;
+    }
+    const found = availablePartsForCustomer.find(
+      (p) => p.part_number.toUpperCase() === selectedPartNumber.toUpperCase()
+    );
+    if (found) {
+      setPartNumber(found.part_number);
+      setCustomerPartNumber(found.customer_part_number || found.description || "");
+    } else {
+      setPartNumber(selectedPartNumber);
+    }
+  }
+
+  // Handle manual customer part number change in Add form
+  function handleCustomerPartNumberChange(val: string) {
+    setCustomerPartNumber(val);
+    const clean = val.trim().toUpperCase();
+    if (!clean) return;
+    const found = availablePartsForCustomer.find(
+      (p) =>
+        (p.customer_part_number && p.customer_part_number.toUpperCase() === clean) ||
+        (p.description && p.description.toUpperCase() === clean)
+    );
+    if (found) {
+      setPartNumber(found.part_number);
+    }
+  }
+
+  // Handle manual internal part ID change in Add form
+  function handlePartNumberChange(val: string) {
+    setPartNumber(val);
+    const clean = val.trim().toUpperCase();
+    if (!clean) return;
+    const found = availablePartsForCustomer.find(
+      (p) => p.part_number.toUpperCase() === clean
+    );
+    if (found) {
+      setCustomerPartNumber(found.customer_part_number || found.description || "");
+    }
+  }
+
+  // Edit form part handlers
+  function handleEditQuickPartSelect(selectedPartNumber: string) {
+    if (!selectedPartNumber) {
+      setEditPartNumber("");
+      setEditCustomerPartNumber("");
+      return;
+    }
+    const found = availablePartsForEdit.find(
+      (p) => p.part_number.toUpperCase() === selectedPartNumber.toUpperCase()
+    );
+    if (found) {
+      setEditPartNumber(found.part_number);
+      setEditCustomerPartNumber(found.customer_part_number || found.description || "");
+    } else {
+      setEditPartNumber(selectedPartNumber);
+    }
+  }
+
+  function handleEditCustomerPartNumberChange(val: string) {
+    setEditCustomerPartNumber(val);
+    const clean = val.trim().toUpperCase();
+    if (!clean) return;
+    const found = availablePartsForEdit.find(
+      (p) =>
+        (p.customer_part_number && p.customer_part_number.toUpperCase() === clean) ||
+        (p.description && p.description.toUpperCase() === clean)
+    );
+    if (found) {
+      setEditPartNumber(found.part_number);
+    }
+  }
+
+  function handleEditPartNumberChange(val: string) {
+    setEditPartNumber(val);
+    const clean = val.trim().toUpperCase();
+    if (!clean) return;
+    const found = availablePartsForEdit.find(
+      (p) => p.part_number.toUpperCase() === clean
+    );
+    if (found) {
+      setEditCustomerPartNumber(found.customer_part_number || found.description || "");
+    }
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setCreateError("");
@@ -78,13 +219,15 @@ export default function ScheduleMasterPage() {
     try {
       await createSchedule({
         customer_code: customerCode,
-        part_number: partNumber,
+        part_number: partNumber.trim() || undefined,
+        customer_part_number: customerPartNumber.trim() || undefined,
         scheduled_qty: Number(scheduledQty),
         unit_price: unitPrice ? Number(unitPrice) : 0,
         required_date: requiredDate || undefined,
         customer_schedule_ref: customerScheduleRef || undefined,
       });
       setPartNumber("");
+      setCustomerPartNumber("");
       setScheduledQty("");
       setUnitPrice("");
       setRequiredDate("");
@@ -99,9 +242,11 @@ export default function ScheduleMasterPage() {
 
   function handleOpenEdit(s: ScheduleOut) {
     setEditingSchedule(s);
+    setEditCustomerCode(s.customer_code || "");
     setEditUnitPrice(s.unit_price && s.unit_price > 0 ? String(s.unit_price) : "");
     setEditScheduledQty(String(s.scheduled_qty || ""));
     setEditPartNumber(s.part_number || "");
+    setEditCustomerPartNumber(s.customer_part_number || s.part_description || "");
     setEditRequiredDate(s.required_date || "");
     setEditCustomerScheduleRef(s.customer_schedule_ref || "");
     setEditError("");
@@ -114,7 +259,8 @@ export default function ScheduleMasterPage() {
     setUpdating(true);
     try {
       await updateSchedule(editingSchedule.id, {
-        part_number: editPartNumber.trim(),
+        part_number: editPartNumber.trim() || undefined,
+        customer_part_number: editCustomerPartNumber.trim() || undefined,
         scheduled_qty: Number(editScheduledQty),
         unit_price: editUnitPrice ? Number(editUnitPrice) : 0,
         required_date: editRequiredDate || undefined,
@@ -148,6 +294,8 @@ export default function ScheduleMasterPage() {
       (s.customer_code && s.customer_code.toLowerCase().includes(q)) ||
       (s.customer_name && s.customer_name.toLowerCase().includes(q)) ||
       (s.part_number && s.part_number.toLowerCase().includes(q)) ||
+      (s.customer_part_number && s.customer_part_number.toLowerCase().includes(q)) ||
+      (s.part_description && s.part_description.toLowerCase().includes(q)) ||
       (s.customer_schedule_ref && s.customer_schedule_ref.toLowerCase().includes(q)) ||
       (s.linked_oar_number && s.linked_oar_number.toLowerCase().includes(q))
     );
@@ -158,6 +306,14 @@ export default function ScheduleMasterPage() {
     (acc, s) => acc + (s.total_value || ((s.scheduled_qty || 0) * (s.unit_price || 0))),
     0
   );
+
+  // Check matching status for Add form part
+  const addFormPartMatch = useMemo(() => {
+    if (!partNumber.trim()) return null;
+    return availablePartsForCustomer.find(
+      (p) => p.part_number.toUpperCase() === partNumber.trim().toUpperCase()
+    );
+  }, [partNumber, availablePartsForCustomer]);
 
   return (
     <AppShell>
@@ -175,6 +331,7 @@ export default function ScheduleMasterPage() {
           </p>
         </div>
 
+        {/* Add Schedule Card */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
           <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
             <CalendarClock className="h-4 w-4 text-blue-500" /> Add Schedule
@@ -185,30 +342,165 @@ export default function ScheduleMasterPage() {
               <span>{createError}</span>
             </div>
           )}
-          <form onSubmit={handleCreate} className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <select required value={customerCode} onChange={(e) => setCustomerCode(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs">
-              <option value="" disabled>Select customer</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.customer_code}>{c.customer_code} — {c.name}</option>
-              ))}
-            </select>
-            <input required placeholder="Part number" value={partNumber} onChange={(e) => setPartNumber(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-            <input required type="number" min={1} placeholder="Scheduled qty" value={scheduledQty}
-              onChange={(e) => setScheduledQty(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-            <input type="number" step="any" min={0} placeholder="Value / Piece (₹) (Optional)" value={unitPrice}
-              onChange={(e) => setUnitPrice(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-            <input type="date" value={requiredDate} onChange={(e) => setRequiredDate(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
-            <input placeholder="Customer schedule reference" value={customerScheduleRef}
-              onChange={(e) => setCustomerScheduleRef(e.target.value)}
-              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs" />
+          <form onSubmit={handleCreate} className="mt-3 space-y-3">
+            {/* Row 1: Customer Selection & Quick Part Selector */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Customer *
+                </label>
+                <select
+                  required
+                  value={customerCode}
+                  onChange={(e) => handleCustomerChange(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                >
+                  <option value="" disabled>Select customer</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.customer_code}>
+                      {c.customer_code} — {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Quick Part Dropdown <span className="text-[10px] text-zinc-400 font-normal">({availablePartsForCustomer.length} parts mapped to {customerCode || "customer"})</span>
+                </label>
+                <select
+                  value={partNumber}
+                  onChange={(e) => handleQuickPartSelect(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                >
+                  <option value="">-- Choose or search Part below --</option>
+                  {availablePartsForCustomer.map((p) => (
+                    <option key={p.id} value={p.part_number}>
+                      {p.part_number} — Cust Part: {p.customer_part_number || p.description || p.part_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: Part Number (Internal ID) and Customer Part Number */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 rounded-xl bg-zinc-50/70 dark:bg-zinc-800/30 border border-zinc-200/80 dark:border-zinc-800">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                    Customer Part Number / Drawing
+                  </label>
+                  {addFormPartMatch && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 className="h-3 w-3" /> Linked to {addFormPartMatch.part_number}
+                    </span>
+                  )}
+                </div>
+                <input
+                  list="add-customer-parts"
+                  placeholder="e.g. 12052165"
+                  value={customerPartNumber}
+                  onChange={(e) => handleCustomerPartNumberChange(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-mono"
+                />
+                <datalist id="add-customer-parts">
+                  {availablePartsForCustomer.map((p) => (
+                    <option key={p.id} value={p.customer_part_number || p.description || ""}>
+                      Internal: {p.part_number}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                    Internal Part ID (Part Number) *
+                  </label>
+                  {partNumber && !addFormPartMatch && (
+                    <span className="text-[10px] text-amber-500 font-medium">
+                      New or unmapped internal ID
+                    </span>
+                  )}
+                </div>
+                <input
+                  required
+                  list="add-internal-parts"
+                  placeholder="e.g. MIL116"
+                  value={partNumber}
+                  onChange={(e) => handlePartNumberChange(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-mono font-semibold"
+                />
+                <datalist id="add-internal-parts">
+                  {availablePartsForCustomer.map((p) => (
+                    <option key={p.id} value={p.part_number}>
+                      {p.customer_part_number || p.description || p.part_number}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+            </div>
+
+            {/* Row 3: Quantities, Price, Dates, and Reference */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Scheduled Quantity *
+                </label>
+                <input
+                  required
+                  type="number"
+                  min={1}
+                  placeholder="e.g. 14"
+                  value={scheduledQty}
+                  onChange={(e) => setScheduledQty(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Value / Piece (₹) <span className="text-[10px] text-zinc-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  placeholder="e.g. 60570"
+                  value={unitPrice}
+                  onChange={(e) => setUnitPrice(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Required Target Date
+                </label>
+                <input
+                  type="date"
+                  value={requiredDate}
+                  onChange={(e) => setRequiredDate(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Customer Schedule Ref
+                </label>
+                <input
+                  placeholder="e.g. SCHED-SEP-2026"
+                  value={customerScheduleRef}
+                  onChange={(e) => setCustomerScheduleRef(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Calculated Total Value Box */}
             {Number(scheduledQty) > 0 && Number(unitPrice) > 0 && (
-              <div className="md:col-span-3 flex items-center justify-between p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs">
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-xs">
                 <span className="font-semibold text-zinc-600 dark:text-zinc-300">
                   Calculated Total Value ({Number(scheduledQty).toLocaleString()} pcs @ ₹{Number(unitPrice).toLocaleString("en-IN", { minimumFractionDigits: 2 })}):
                 </span>
@@ -218,13 +510,19 @@ export default function ScheduleMasterPage() {
               </div>
             )}
 
-            <button type="submit" disabled={creating}
-              className="md:col-span-3 justify-self-end rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors">
-              {creating ? "Creating..." : "Add Schedule"}
-            </button>
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit"
+                disabled={creating}
+                className="rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-60 transition-colors shadow-sm"
+              >
+                {creating ? "Creating..." : "Add Schedule"}
+              </button>
+            </div>
           </form>
         </div>
 
+        {/* Existing Schedules Table */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -295,7 +593,7 @@ export default function ScheduleMasterPage() {
                 <tr>
                   <th className="text-left px-4 py-2 font-semibold">Schedule #</th>
                   <th className="text-left px-4 py-2 font-semibold">Customer</th>
-                  <th className="text-left px-4 py-2 font-semibold">Part</th>
+                  <th className="text-left px-4 py-2 font-semibold">Part Details</th>
                   <th className="text-right px-4 py-2 font-semibold">Qty</th>
                   <th className="text-right px-4 py-2 font-semibold">Rate / Pc (₹)</th>
                   <th className="text-right px-4 py-2 font-semibold">Total Value (₹)</th>
@@ -325,65 +623,76 @@ export default function ScheduleMasterPage() {
                   </tr>
                 ) : (
                   filteredSchedules.map((s) => (
-                  <tr key={s.id} className="border-t border-zinc-100 dark:border-zinc-800">
-                    <td className="px-4 py-2 font-mono font-medium">{s.schedule_number}</td>
-                    <td className="px-4 py-2">{s.customer_code} — {s.customer_name}</td>
-                    <td className="px-4 py-2 font-mono">{s.part_number}</td>
-                    <td className="px-4 py-2 text-right font-mono">{s.scheduled_qty}</td>
-                    <td className="px-4 py-2 text-right font-mono">
-                      {s.unit_price && s.unit_price > 0
-                        ? `₹${Number(s.unit_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-2 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
-                      {s.total_value && s.total_value > 0
-                        ? `₹${Number(s.total_value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : s.unit_price && s.scheduled_qty
-                        ? `₹${(Number(s.scheduled_qty) * Number(s.unit_price)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-2">{s.required_date || "-"}</td>
-                    <td className="px-4 py-2">
-                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_STYLES[s.po_status] || ""}`}>
-                        {statusLabel(s.po_status)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 font-mono">{s.linked_oar_number || "-"}</td>
-                    <td className="px-4 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {!s.unit_price || s.unit_price === 0 ? (
+                    <tr key={s.id} className="border-t border-zinc-100 dark:border-zinc-800">
+                      <td className="px-4 py-2 font-mono font-medium">{s.schedule_number}</td>
+                      <td className="px-4 py-2">{s.customer_code} — {s.customer_name}</td>
+                      <td className="px-4 py-2">
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">
+                            {s.customer_part_number || s.part_description || s.part_number}
+                          </span>
+                          {s.customer_part_number && s.customer_part_number !== s.part_number && (
+                            <span className="text-[10px] text-zinc-500 font-mono">
+                              Internal: {s.part_number}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono">{s.scheduled_qty}</td>
+                      <td className="px-4 py-2 text-right font-mono">
+                        {s.unit_price && s.unit_price > 0
+                          ? `₹${Number(s.unit_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
+                        {s.total_value && s.total_value > 0
+                          ? `₹${Number(s.total_value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : s.unit_price && s.scheduled_qty
+                          ? `₹${(Number(s.scheduled_qty) * Number(s.unit_price)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "-"}
+                      </td>
+                      <td className="px-4 py-2">{s.required_date || "-"}</td>
+                      <td className="px-4 py-2">
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${STATUS_STYLES[s.po_status] || ""}`}>
+                          {statusLabel(s.po_status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 font-mono">{s.linked_oar_number || "-"}</td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {!s.unit_price || s.unit_price === 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(s)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] shadow-sm transition"
+                              title="Set Price for this schedule"
+                            >
+                              <Edit3 className="h-3 w-3" />
+                              <span>Set Price</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(s)}
+                              className="p-1.5 rounded-md text-zinc-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition"
+                              title="Edit Schedule & Price"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => handleOpenEdit(s)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] shadow-sm transition"
-                            title="Set Price for this schedule"
+                            onClick={() => handleDelete(s.id, s.schedule_number)}
+                            className="p-1.5 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                            title="Delete Schedule"
                           >
-                            <Edit3 className="h-3 w-3" />
-                            <span>Set Price</span>
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(s)}
-                            className="p-1.5 rounded-md text-zinc-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition"
-                            title="Edit Schedule & Price"
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(s.id, s.schedule_number)}
-                          className="p-1.5 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
-                          title="Delete Schedule"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )))
-              }
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           )}
@@ -420,18 +729,52 @@ export default function ScheduleMasterPage() {
               )}
 
               <form onSubmit={handleUpdate} className="mt-4 space-y-4 text-xs">
+                {/* Quick select in edit modal */}
                 <div>
                   <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                    Part Number
+                    Quick Part Dropdown ({availablePartsForEdit.length} parts for {editingSchedule.customer_code})
                   </label>
-                  <input
-                    required
-                    type="text"
+                  <select
                     value={editPartNumber}
-                    onChange={(e) => setEditPartNumber(e.target.value)}
+                    onChange={(e) => handleEditQuickPartSelect(e.target.value)}
                     className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
-                    placeholder="Part number"
-                  />
+                  >
+                    <option value="">-- Select from mapped parts --</option>
+                    {availablePartsForEdit.map((p) => (
+                      <option key={p.id} value={p.part_number}>
+                        {p.part_number} — Cust Part: {p.customer_part_number || p.description || p.part_number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                      Customer Part Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editCustomerPartNumber}
+                      onChange={(e) => handleEditCustomerPartNumberChange(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono"
+                      placeholder="Customer Part #"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                      Internal Part ID (Part Number) *
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      value={editPartNumber}
+                      onChange={(e) => handleEditPartNumberChange(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-xs font-mono font-semibold"
+                      placeholder="Part number"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

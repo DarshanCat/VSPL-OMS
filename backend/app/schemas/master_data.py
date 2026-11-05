@@ -163,7 +163,8 @@ class POMasterUpdate(BaseModel):
 
 class ScheduleCreate(BaseModel):
     customer_code: str = Field(..., max_length=100)
-    part_number: str = Field(..., max_length=100)
+    part_number: Optional[str] = Field(None, max_length=100)
+    customer_part_number: Optional[str] = Field(None, max_length=100)
     scheduled_qty: int = Field(..., gt=0, le=1_000_000)
     unit_price: Optional[float] = Field(0.0, ge=0)
     total_value: Optional[float] = Field(0.0, ge=0)
@@ -174,6 +175,7 @@ class ScheduleCreate(BaseModel):
 class ScheduleUpdate(BaseModel):
     customer_code: Optional[str] = Field(None, max_length=100)
     part_number: Optional[str] = Field(None, max_length=100)
+    customer_part_number: Optional[str] = Field(None, max_length=100)
     scheduled_qty: Optional[int] = Field(None, gt=0, le=1_000_000)
     unit_price: Optional[float] = Field(None, ge=0)
     total_value: Optional[float] = Field(None, ge=0)
@@ -188,6 +190,8 @@ class ScheduleOut(BaseModel):
     customer_code: str
     customer_name: str
     part_number: str
+    customer_part_number: Optional[str] = None
+    part_description: Optional[str] = None
     scheduled_qty: int
     unit_price: Optional[float] = 0.0
     total_value: Optional[float] = 0.0

@@ -967,15 +967,30 @@ class POMasterService:
 
 class ScheduleMasterService:
     @staticmethod
-    def _schedule_out(s: ScheduleMaster) -> ScheduleOut:
+    def _schedule_out(s: ScheduleMaster, db: Optional[Session] = None) -> ScheduleOut:
         linked_order = s.orders[0] if s.orders else None
         u_price = getattr(s, "unit_price", 0.0) or 0.0
         t_val = getattr(s, "total_value", 0.0)
         if t_val is None or t_val == 0.0:
             t_val = round(s.scheduled_qty * u_price, 2)
+
+        cust_pn = None
+        if db is not None:
+            m = db.query(CustomerPartMapping).filter(
+                CustomerPartMapping.customer_id == s.customer_id,
+                CustomerPartMapping.part_id == s.part_id,
+            ).first()
+            if m:
+                cust_pn = m.customer_part_number
+        if not cust_pn and s.part:
+            cust_pn = s.part.description or None
+
         return ScheduleOut(
             id=str(s.id), schedule_number=s.schedule_number, customer_code=s.customer.customer_code,
-            customer_name=s.customer.name, part_number=s.part.part_number, scheduled_qty=s.scheduled_qty,
+            customer_name=s.customer.name, part_number=s.part.part_number,
+            customer_part_number=cust_pn,
+            part_description=s.part.description if s.part else None,
+            scheduled_qty=s.scheduled_qty,
             unit_price=round(u_price, 2), total_value=round(t_val, 2),
             required_date=s.required_date, customer_schedule_ref=s.customer_schedule_ref,
             po_status=s.po_status.value, linked_oar_number=linked_order.oar_number if linked_order else None,
@@ -990,18 +1005,28 @@ class ScheduleMasterService:
                 return []
             query = query.filter(ScheduleMaster.customer_id == customer.id)
         rows = query.order_by(ScheduleMaster.created_at.desc()).all()
-        return [ScheduleMasterService._schedule_out(s) for s in rows]
+        return [ScheduleMasterService._schedule_out(s, db) for s in rows]
 
     @staticmethod
     def create_schedule(db: Session, req: ScheduleCreate, current_user: Optional[User] = None) -> ScheduleOut:
         customer = db.query(Customer).filter(Customer.customer_code == req.customer_code.strip().upper()).first()
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Customer '{req.customer_code}' not found.")
-        part = _get_part(db, req.part_number)
-        validate_part_for_customer(db, customer, part)
+        
+        part, _cust_pn = resolve_po_line_part(db, customer, req.customer_part_number, req.part_number)
 
-        count = db.query(ScheduleMaster).count()
-        schedule_number = f"SCH-{count + 1:05d}"
+        # Robust generation of next schedule number
+        max_num = 0
+        all_nums = db.query(ScheduleMaster.schedule_number).all()
+        for (sn,) in all_nums:
+            if sn and sn.startswith("SCH-"):
+                try:
+                    num = int(sn.split("-")[1])
+                    if num > max_num:
+                        max_num = num
+                except (ValueError, IndexError):
+                    pass
+        schedule_number = f"SCH-{max_num + 1:05d}"
 
         u_price = round(float(req.unit_price or 0.0), 2)
         t_val = round(float(req.scheduled_qty * u_price), 2)
@@ -1020,7 +1045,7 @@ class ScheduleMasterService:
         _audit(db, current_user, "SCHEDULE_CREATED", "ScheduleMaster", schedule_number, details=f"qty={req.scheduled_qty}, unit_price={u_price}, total_value={t_val}")
         db.commit()
         db.refresh(schedule)
-        return ScheduleMasterService._schedule_out(schedule)
+        return ScheduleMasterService._schedule_out(schedule, db)
 
     @staticmethod
     def update_schedule(db: Session, schedule_id: str, req: ScheduleUpdate, current_user: Optional[User] = None) -> ScheduleOut:
@@ -1037,8 +1062,8 @@ class ScheduleMasterService:
                 changes.append(f"customer: {schedule.customer.customer_code} -> {customer.customer_code}")
                 schedule.customer_id = customer.id
 
-        if req.part_number is not None:
-            part = _get_part(db, req.part_number)
+        if req.part_number is not None or req.customer_part_number is not None:
+            part, _cust_pn = resolve_po_line_part(db, schedule.customer, req.customer_part_number, req.part_number)
             if schedule.part_id != part.id:
                 changes.append(f"part: {schedule.part.part_number} -> {part.part_number}")
                 schedule.part_id = part.id
@@ -1075,7 +1100,7 @@ class ScheduleMasterService:
         _audit(db, current_user, "SCHEDULE_UPDATED", "ScheduleMaster", schedule.schedule_number, details="; ".join(changes) if changes else "Updated")
         db.commit()
         db.refresh(schedule)
-        return ScheduleMasterService._schedule_out(schedule)
+        return ScheduleMasterService._schedule_out(schedule, db)
 
     @staticmethod
     def delete_schedule(db: Session, schedule_id: str, current_user: Optional[User] = None) -> dict:
