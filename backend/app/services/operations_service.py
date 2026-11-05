@@ -681,6 +681,186 @@ class OperationsService:
         )
 
     @staticmethod
+    def update_work_order(
+        db: Session,
+        wo_identifier: str,
+        req: Any,
+        current_user: Optional[User] = None
+    ) -> Any:
+        ident = wo_identifier.strip()
+        try:
+            uuid_obj = uuid.UUID(ident)
+            wo = db.query(WorkOrder).filter(or_(WorkOrder.wo_number == ident, WorkOrder.id == uuid_obj)).with_for_update().first()
+        except (ValueError, AttributeError):
+            wo = db.query(WorkOrder).filter(WorkOrder.wo_number == ident).with_for_update().first()
+
+        if not wo:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Work Order '{wo_identifier}' not found.")
+
+        # Check if WO has started physical production
+        from app.models.production import ProductionUpdate
+        from app.models.production_movement import ProductionMovement
+
+        has_movements = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None
+        has_updates = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+        has_started_production = has_movements or has_updates
+
+        changes = []
+
+        # 1. Update WO Number / ID
+        if getattr(req, "wo_number", None) and req.wo_number.strip():
+            clean_new = _normalize_wo_code(req.wo_number.strip())
+            if clean_new != wo.wo_number:
+                if has_started_production:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot change WO ID on '{wo.wo_number}' because floor production activity has already started.",
+                    )
+                # Check uniqueness across all work orders
+                conflict = db.query(WorkOrder).filter(
+                    func.upper(WorkOrder.wo_number) == clean_new.upper(),
+                    WorkOrder.id != wo.id
+                ).first()
+                if conflict:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Work Order ID '{clean_new}' already exists in the system.",
+                    )
+                changes.append(f"wo_number: {wo.wo_number} -> {clean_new}")
+                wo.wo_number = clean_new
+
+        # 2. Update Quantity
+        if getattr(req, "physical_wo_qty", None) is not None and req.physical_wo_qty != wo.physical_wo_qty:
+            if has_started_production:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot change quantity on '{wo.wo_number}' because floor production activity has already started.",
+                )
+            # Check parent OAR available quantity
+            order = wo.order
+            other_allocated = sum(w.physical_wo_qty for w in order.work_orders if w.id != wo.id)
+            available_for_wo = order.po_qty - other_allocated
+            if req.physical_wo_qty > available_for_wo and not getattr(req, "allow_overrun", False):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Requested quantity ({req.physical_wo_qty}) exceeds available remaining OAR balance "
+                        f"({max(available_for_wo, 0)}) on OAR '{order.oar_number}'."
+                    ),
+                )
+            changes.append(f"physical_wo_qty: {wo.physical_wo_qty} -> {req.physical_wo_qty}")
+            wo.physical_wo_qty = req.physical_wo_qty
+            wo.projected_final_good = req.physical_wo_qty
+
+            # Update route targets
+            routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+            if routes:
+                stg_names = [r.stage for r in routes]
+                targets = calculate_stage_targets(req.physical_wo_qty, route=stg_names)
+                for r in routes:
+                    r.stage_target_qty = targets.get(r.stage, req.physical_wo_qty)
+                    if r.sequence == 1:
+                        r.cumulative_ent_qty = req.physical_wo_qty
+                        r.cumulative_inproc_qty = req.physical_wo_qty
+
+                # Update initial StageWIP
+                first_stg = routes[0].stage
+                first_wip = db.query(StageWIP).filter(
+                    StageWIP.work_order_id == wo.id,
+                    StageWIP.stage == first_stg
+                ).first()
+                if first_wip:
+                    first_wip.ent_qty = req.physical_wo_qty
+                    first_wip.inproc_qty = req.physical_wo_qty
+                    first_wip.received_qty = req.physical_wo_qty
+                    first_wip.available_wip = req.physical_wo_qty
+
+        # 3. Update Route Stages
+        if getattr(req, "route_stages", None) is not None and len(req.route_stages) > 0:
+            if has_started_production:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot modify routing stages on '{wo.wo_number}' because floor production activity has already started.",
+                )
+            existing_stages = [r.stage for r in db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()]
+            if existing_stages != req.route_stages:
+                db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete()
+                db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete()
+                db.flush()
+
+                wo.current_stage = req.route_stages[0]
+                targets = calculate_stage_targets(wo.physical_wo_qty, route=req.route_stages)
+                for seq, stg in enumerate(req.route_stages, start=1):
+                    r = WORoute(
+                        work_order_id=wo.id,
+                        stage=stg,
+                        sequence=seq,
+                        stage_target_qty=targets.get(stg, wo.physical_wo_qty),
+                        cumulative_ent_qty=wo.physical_wo_qty if seq == 1 else 0,
+                        cumulative_inproc_qty=wo.physical_wo_qty if seq == 1 else 0,
+                        stage_status="In-Progress" if seq == 1 else "Pending"
+                    )
+                    db.add(r)
+                initial_wip = StageWIP(
+                    work_order_id=wo.id,
+                    stage=req.route_stages[0],
+                    ent_qty=wo.physical_wo_qty,
+                    ok_qty=0,
+                    inproc_qty=wo.physical_wo_qty,
+                    onhand_qty=0,
+                    rejected_qty=0,
+                    received_qty=wo.physical_wo_qty,
+                    available_wip=wo.physical_wo_qty,
+                    moved_out_qty=0
+                )
+                db.add(initial_wip)
+                changes.append(f"route_stages: {' -> '.join(existing_stages)} -> {' -> '.join(req.route_stages)}")
+
+        # 4. Metadata updates
+        if getattr(req, "casting_process", None) is not None:
+            clean_cp = req.casting_process.strip().upper()
+            if clean_cp != wo.casting_process:
+                changes.append(f"casting_process: {wo.casting_process} -> {clean_cp}")
+                wo.casting_process = clean_cp
+
+        if getattr(req, "heat_number", None) is not None:
+            clean_hn = req.heat_number.strip() if req.heat_number.strip() else None
+            if clean_hn != wo.heat_number:
+                changes.append(f"heat_number: {wo.heat_number} -> {clean_hn}")
+                wo.heat_number = clean_hn
+
+        if getattr(req, "wo_date", None) is not None:
+            wo.created_at = datetime.combine(req.wo_date, datetime.min.time())
+            changes.append(f"wo_date: {req.wo_date}")
+
+        if getattr(req, "target_date", None) is not None:
+            changes.append(f"target_date: {req.target_date}")
+            if wo.order and not wo.order.delivery_date:
+                wo.order.delivery_date = req.target_date
+
+        if changes:
+            audit = AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "Planner",
+                action="WO_UPDATED",
+                entity="WorkOrder",
+                entity_id=wo.wo_number,
+                new_value="; ".join(changes),
+                details=getattr(req, "remarks", None) or "Work Order updated by planner"
+            )
+            db.add(audit)
+
+        db.commit()
+        db.refresh(wo)
+
+        from app.services.work_order_service import WorkOrderService
+        items = WorkOrderService.list_work_orders(db, search=wo.wo_number, limit=1)
+        if items:
+            return items[0]
+        from app.schemas.work_order import WorkOrderListItem
+        return WorkOrderListItem.model_validate(wo)
+
+    @staticmethod
     def get_next_sequences(db: Session) -> NextSequencesResponse:
         return NextSequencesResponse(
             next_oar_number=next_oar_sequence(db),

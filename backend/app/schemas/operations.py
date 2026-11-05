@@ -73,6 +73,17 @@ class WorkOrderCreatePayload(BaseModel):
     route_stages: Optional[List[str]] = Field(None, description="Optional custom stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
     remarks: Optional[str] = Field(None, max_length=2000)
 
+class WorkOrderUpdatePayload(BaseModel):
+    wo_number: Optional[str] = Field(None, max_length=100, description="New Work Order ID")
+    physical_wo_qty: Optional[int] = Field(None, gt=0, le=1_000_000, description="Updated quantity")
+    wo_date: Optional[date] = None
+    target_date: Optional[date] = None
+    casting_process: Optional[str] = Field(None, max_length=50)
+    heat_number: Optional[str] = Field(None, max_length=100)
+    route_stages: Optional[List[str]] = Field(None, description="Optional updated custom stages")
+    remarks: Optional[str] = Field(None, max_length=2000)
+    allow_overrun: bool = Field(False, description="Allow quantity above parent OAR balance")
+
 class WorkOrderCreateResponse(BaseModel):
     success: bool
     wo_number: str

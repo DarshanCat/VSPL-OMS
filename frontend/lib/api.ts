@@ -684,6 +684,26 @@ export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<
   return data;
 }
 
+export interface WorkOrderUpdatePayload {
+  wo_number?: string;
+  physical_wo_qty?: number;
+  wo_date?: string | null;
+  target_date?: string | null;
+  casting_process?: string | null;
+  heat_number?: string | null;
+  route_stages?: string[] | null;
+  remarks?: string | null;
+  allow_overrun?: boolean;
+}
+
+export async function updateWorkOrder(
+  woIdentifier: string,
+  payload: WorkOrderUpdatePayload
+): Promise<WorkOrderListItem> {
+  const { data } = await api.put(`/api/v1/operations/work-orders/${encodeURIComponent(woIdentifier)}`, payload);
+  return data;
+}
+
 export interface MovableWorkOrderItem {
   wo_id: string;
   wo_number: string;

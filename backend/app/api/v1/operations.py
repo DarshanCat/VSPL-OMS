@@ -12,10 +12,10 @@ from app.schemas.operations import (
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
     ReleaseEvidenceCreate,
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
-    WorkOrderCreatePayload, WorkOrderCreateResponse,
+    WorkOrderCreatePayload, WorkOrderCreateResponse, WorkOrderUpdatePayload,
     NextSequencesResponse, OARUpdate
 )
-from app.schemas.work_order import OARListItem, OARGenealogyResponse
+from app.schemas.work_order import OARListItem, OARGenealogyResponse, WorkOrderListItem
 from app.services.operations_service import OperationsService
 from app.services.work_order_service import WorkOrderService
 from app.core.roles import (
@@ -52,6 +52,17 @@ def create_work_order(
     """Step 2: Planner generates Work Order(s) from a created OAR with custom date,
     quantity, and process route."""
     return OperationsService.create_work_order(db, payload, current_user=user)
+
+@router.put("/work-orders/{wo_identifier}", response_model=WorkOrderListItem)
+@router.patch("/work-orders/{wo_identifier}", response_model=WorkOrderListItem)
+def update_work_order(
+    wo_identifier: str,
+    payload: WorkOrderUpdatePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Planner edits an existing Work Order: ID, quantity, casting process, heat number, route stages, or dates."""
+    return OperationsService.update_work_order(db, wo_identifier, payload, current_user=user)
 
 @router.get("/oars", response_model=List[OARListItem])
 def list_oars(
