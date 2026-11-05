@@ -825,11 +825,11 @@ export default function POMasterPage() {
               </div>
 
               <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
-                <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Allocated (OAR)</p>
+                <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Allocated (WO)</p>
                 <p className="text-base font-extrabold text-amber-600 dark:text-amber-400 mt-0.5">
                   {metrics.totalAllocated.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-zinc-400">pcs with OAR raised</p>
+                <p className="text-[10px] text-zinc-400">pcs planned in Work Orders</p>
               </div>
 
               <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-2.5">
@@ -837,7 +837,7 @@ export default function POMasterPage() {
                 <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {metrics.totalAvailable.toLocaleString()}
                 </p>
-                <p className="text-[10px] text-zinc-400">pcs awaiting OAR</p>
+                <p className="text-[10px] text-zinc-400">pcs available for planning</p>
               </div>
 
               <div className="rounded-xl border border-blue-200/80 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-950/30 p-2.5 col-span-2 sm:col-span-1">
