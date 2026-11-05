@@ -152,6 +152,15 @@ class OperationsService:
             schedule = db.query(ScheduleMaster).filter(ScheduleMaster.id == req.schedule_id).with_for_update().first()
             if not schedule:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Schedule '{req.schedule_id}' not found.")
+
+            allocated = sum(o.po_qty for o in schedule.orders if getattr(o, "status", None) != OrderStatus.REJECT)
+            available = max(schedule.scheduled_qty - allocated, 0)
+            if req.po_quantity > available:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Requested OAR quantity ({req.po_quantity}) exceeds remaining available schedule quantity ({available}) on {schedule.schedule_number}."
+                )
+
             oar_po_status = "awaiting_po"
             schedule.po_status = ScheduleStatus.AWAITING_PO
 

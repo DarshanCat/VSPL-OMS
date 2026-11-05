@@ -968,7 +968,13 @@ class POMasterService:
 class ScheduleMasterService:
     @staticmethod
     def _schedule_out(s: ScheduleMaster, db: Optional[Session] = None) -> ScheduleOut:
-        linked_order = s.orders[0] if s.orders else None
+        from app.models.order import OrderStatus
+        active_orders = [o for o in s.orders if getattr(o, "status", None) != OrderStatus.REJECT]
+        allocated = sum(o.po_qty for o in active_orders)
+        available = max(s.scheduled_qty - allocated, 0)
+        linked_oars = [o.oar_number for o in active_orders if o.oar_number]
+        first_oar = linked_oars[0] if linked_oars else None
+
         u_price = getattr(s, "unit_price", 0.0) or 0.0
         t_val = getattr(s, "total_value", 0.0)
         if t_val is None or t_val == 0.0:
@@ -991,9 +997,13 @@ class ScheduleMasterService:
             customer_part_number=cust_pn,
             part_description=s.part.description if s.part else None,
             scheduled_qty=s.scheduled_qty,
+            allocated_qty=allocated,
+            available_qty=available,
             unit_price=round(u_price, 2), total_value=round(t_val, 2),
             required_date=s.required_date, customer_schedule_ref=s.customer_schedule_ref,
-            po_status=s.po_status.value, linked_oar_number=linked_order.oar_number if linked_order else None,
+            po_status=s.po_status.value,
+            linked_oar_number=first_oar,
+            linked_oar_numbers=linked_oars,
         )
 
     @staticmethod

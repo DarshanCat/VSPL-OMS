@@ -193,12 +193,15 @@ class ScheduleOut(BaseModel):
     customer_part_number: Optional[str] = None
     part_description: Optional[str] = None
     scheduled_qty: int
+    allocated_qty: int = 0
+    available_qty: int = 0
     unit_price: Optional[float] = 0.0
     total_value: Optional[float] = 0.0
     required_date: Optional[date] = None
     customer_schedule_ref: Optional[str] = None
     po_status: str
     linked_oar_number: Optional[str] = None
+    linked_oar_numbers: List[str] = []
 
 
 # ---------------------------------------------------------------------------

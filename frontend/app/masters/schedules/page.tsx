@@ -594,7 +594,7 @@ export default function ScheduleMasterPage() {
                   <th className="text-left px-4 py-2 font-semibold">Schedule #</th>
                   <th className="text-left px-4 py-2 font-semibold">Customer</th>
                   <th className="text-left px-4 py-2 font-semibold">Part Details</th>
-                  <th className="text-right px-4 py-2 font-semibold">Qty</th>
+                  <th className="text-right px-4 py-2 font-semibold">Available / Sched Qty</th>
                   <th className="text-right px-4 py-2 font-semibold">Rate / Pc (₹)</th>
                   <th className="text-right px-4 py-2 font-semibold">Total Value (₹)</th>
                   <th className="text-left px-4 py-2 font-semibold">Required Date</th>
@@ -638,7 +638,17 @@ export default function ScheduleMasterPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-2 text-right font-mono">{s.scheduled_qty}</td>
+                      <td className="px-4 py-2 text-right font-mono">
+                        <span className="font-bold text-emerald-600">
+                          {s.available_qty !== undefined ? s.available_qty : s.scheduled_qty}
+                        </span>
+                        <span className="text-zinc-400"> / {s.scheduled_qty}</span>
+                        {s.allocated_qty && s.allocated_qty > 0 ? (
+                          <span className="text-[10px] text-zinc-400 block font-normal">
+                            ({s.allocated_qty} in OAR)
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-2 text-right font-mono">
                         {s.unit_price && s.unit_price > 0
                           ? `₹${Number(s.unit_price).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -657,7 +667,22 @@ export default function ScheduleMasterPage() {
                           {statusLabel(s.po_status)}
                         </span>
                       </td>
-                      <td className="px-4 py-2 font-mono">{s.linked_oar_number || "-"}</td>
+                      <td className="px-4 py-2 font-mono">
+                        {s.linked_oar_numbers && s.linked_oar_numbers.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {s.linked_oar_numbers.map((oar) => (
+                              <span
+                                key={oar}
+                                className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 text-[10px] font-semibold border border-blue-200 dark:border-blue-800"
+                              >
+                                {oar}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          s.linked_oar_number || "-"
+                        )}
+                      </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {!s.unit_price || s.unit_price === 0 ? (

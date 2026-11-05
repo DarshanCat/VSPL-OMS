@@ -150,9 +150,11 @@ export default function OrderIntakePage() {
       });
       setAllPendingPOs(pending);
 
-      // Filter pending schedules awaiting OAR
+      // Filter pending schedules awaiting OAR: keep any schedule with remaining available quantity
       const pendingScheds = (allScheds || []).filter(
-        (s) => (s.po_status === "scheduled" || s.po_status === "awaiting_po") && !s.linked_oar_number
+        (s) =>
+          (s.po_status === "scheduled" || s.po_status === "awaiting_po") &&
+          (s.available_qty !== undefined ? s.available_qty > 0 : !s.linked_oar_number)
       );
       setAllPendingSchedules(pendingScheds);
     } catch {
@@ -247,8 +249,9 @@ export default function OrderIntakePage() {
     setCustomerPO(s.customer_schedule_ref || s.schedule_number);
     setPartNumber(s.part_number);
     setCustomerPartNo("");
-    setPoQty(s.scheduled_qty);
-    setBatchSize(s.scheduled_qty);
+    const availQty = s.available_qty !== undefined ? s.available_qty : s.scheduled_qty;
+    setPoQty(availQty);
+    setBatchSize(availQty);
     setSelectedScheduleId(s.id);
     if (s.required_date) {
       setDeliveryDate(s.required_date);
@@ -271,7 +274,13 @@ export default function OrderIntakePage() {
 
     getSchedules(s.customer_code)
       .then((scheds) => {
-        setSchedules(scheds.filter((item) => item.po_status === "scheduled" || item.po_status === "awaiting_po"));
+        setSchedules(
+          scheds.filter(
+            (item) =>
+              (item.po_status === "scheduled" || item.po_status === "awaiting_po") &&
+              (item.available_qty === undefined || item.available_qty > 0)
+          )
+        );
         setSelectedScheduleId(s.id);
       })
       .catch(() => {});
@@ -632,7 +641,7 @@ export default function OrderIntakePage() {
                       <th className="p-2.5">Schedule # &amp; Ref</th>
                       <th className="p-2.5">Customer</th>
                       <th className="p-2.5">Part / Drawing</th>
-                      <th className="p-2.5 text-right">Scheduled Qty</th>
+                      <th className="p-2.5 text-right">Available / Total</th>
                       <th className="p-2.5">Target Date</th>
                       <th className="p-2.5 text-right">Action</th>
                     </tr>
@@ -650,8 +659,16 @@ export default function OrderIntakePage() {
                         <td className="p-2.5">
                           <span className="font-semibold text-zinc-800 dark:text-zinc-200 block">{s.part_number}</span>
                         </td>
-                        <td className="p-2.5 text-right font-mono font-bold text-emerald-600">
-                          {s.scheduled_qty} pcs
+                        <td className="p-2.5 text-right font-mono">
+                          <strong className="text-emerald-600">
+                            {s.available_qty !== undefined ? s.available_qty : s.scheduled_qty}
+                          </strong>{" "}
+                          / {s.scheduled_qty} pcs
+                          {s.allocated_qty && s.allocated_qty > 0 ? (
+                            <span className="text-[10px] text-zinc-400 block font-normal">
+                              ({s.allocated_qty} in OAR)
+                            </span>
+                          ) : null}
                         </td>
                         <td className="p-2.5 text-[11px] text-zinc-500">
                           {s.required_date || "-"}

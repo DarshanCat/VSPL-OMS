@@ -888,12 +888,15 @@ export interface ScheduleOut {
   customer_part_number?: string | null;
   part_description?: string | null;
   scheduled_qty: number;
+  allocated_qty?: number;
+  available_qty?: number;
   unit_price?: number;
   total_value?: number;
   required_date?: string | null;
   customer_schedule_ref?: string | null;
   po_status: string;
   linked_oar_number?: string | null;
+  linked_oar_numbers?: string[];
 }
 
 export async function getSchedules(customerCode?: string): Promise<ScheduleOut[]> {
