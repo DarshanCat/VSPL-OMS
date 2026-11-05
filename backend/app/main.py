@@ -57,6 +57,8 @@ def _json_safe(obj):
     Pydantic correctly rejects but Python's spec-compliant JSON encoder cannot
     serialize -- with their string form, so echoing a rejected value back to the
     client in a validation-error body can never itself crash the response."""
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
     if isinstance(obj, float) and not math.isfinite(obj):
         return str(obj)
     if isinstance(obj, dict):
