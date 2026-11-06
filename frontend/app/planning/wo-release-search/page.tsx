@@ -24,6 +24,7 @@ import {
   Boxes,
   Check,
   Eye,
+  Edit2,
   ArrowUpDown,
   SlidersHorizontal,
   Table as TableIcon,
@@ -33,6 +34,7 @@ import {
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
 import { getWorkOrders, WorkOrderListItem } from "@/lib/api";
+import { EditWorkOrderModal } from "@/app/components/planning/EditWorkOrderModal";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -121,6 +123,8 @@ function WOReleaseSearchContent() {
   const [workOrders, setWorkOrders] = useState<WorkOrderListItem[]>([]);
   const [exporting, setExporting] = useState<boolean>(false);
   const [copiedWo, setCopiedWo] = useState<string | null>(null);
+  const [editingWO, setEditingWO] = useState<WorkOrderListItem | null>(null);
+  const [editSuccessMsg, setEditSuccessMsg] = useState<string>("");
 
   // Apply Quick Date Presets
   const applyDatePreset = (preset: string) => {
@@ -897,6 +901,16 @@ function WOReleaseSearchContent() {
 
                         {/* Column 4: Quick Actions */}
                         <div className="flex items-center gap-2 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setEditingWO(wo)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors shadow-xs cursor-pointer"
+                            title="Edit Work Order ID, Quantity, or Routing"
+                          >
+                            <Edit2 className="h-3.5 w-3.5 text-blue-500" />
+                            <span>Edit</span>
+                          </button>
+
                           <Link
                             href={`/production/tracking?wo=${encodeURIComponent(wo.wo_number)}`}
                             className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
@@ -1001,14 +1015,25 @@ function WOReleaseSearchContent() {
                         {formatDate(wo.delivery_date)}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <Link
-                          href={`/planning/wo-release?wo_id=${encodeURIComponent(wo.id)}`}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
-                            !isReleased ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-blue-600 text-white hover:bg-blue-700"
-                          }`}
-                        >
-                          {!isReleased ? "Release →" : "View"}
-                        </Link>
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setEditingWO(wo)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 cursor-pointer"
+                            title="Edit Work Order ID"
+                          >
+                            <Edit2 className="h-3 w-3 text-blue-500" />
+                            <span>Edit</span>
+                          </button>
+                          <Link
+                            href={`/planning/wo-release?wo_id=${encodeURIComponent(wo.id)}`}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${
+                              !isReleased ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-blue-600 text-white hover:bg-blue-700"
+                            }`}
+                          >
+                            {!isReleased ? "Release →" : "View"}
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1065,6 +1090,14 @@ function WOReleaseSearchContent() {
                   </div>
 
                   <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setEditingWO(wo)}
+                      className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Edit2 className="h-3 w-3 text-blue-500" />
+                      <span>Edit</span>
+                    </button>
                     <Link
                       href={`/production/tracking?wo=${encodeURIComponent(wo.wo_number)}`}
                       className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100"
@@ -1083,6 +1116,27 @@ function WOReleaseSearchContent() {
                 </div>
               );
             })}
+          </div>
+        )}
+        {/* Edit Work Order Modal */}
+        {editingWO && (
+          <EditWorkOrderModal
+            wo={editingWO}
+            onClose={() => setEditingWO(null)}
+            onSuccess={async (updated) => {
+              setEditingWO(null);
+              setEditSuccessMsg(`Work Order ${updated.wo_number} updated successfully!`);
+              await fetchData();
+              setTimeout(() => setEditSuccessMsg(""), 5000);
+            }}
+          />
+        )}
+
+        {/* Toast alert for edit success */}
+        {editSuccessMsg && (
+          <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 text-white px-4 py-3 shadow-xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{editSuccessMsg}</span>
           </div>
         )}
       </div>

@@ -27,10 +27,12 @@ import {
   Flame,
   Filter,
   BarChart3,
-  Pencil
+  Pencil,
+  Edit2
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
+import { EditWorkOrderModal } from "@/app/components/planning/EditWorkOrderModal";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -120,6 +122,8 @@ function WOReleasePageInner() {
   const [savingHeat, setSavingHeat] = useState<boolean>(false);
   const [heatError, setHeatError] = useState<string>("");
   const [heatSuccessMsg, setHeatSuccessMsg] = useState<string>("");
+  const [editingWO, setEditingWO] = useState<WorkOrderListItem | null>(null);
+  const [editSuccessMsg, setEditSuccessMsg] = useState<string>("");
 
   const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
@@ -1715,6 +1719,14 @@ function WOReleasePageInner() {
                                       </div>
                                       <button
                                         type="button"
+                                        onClick={() => setEditingWO(w)}
+                                        className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 hover:text-blue-600 cursor-pointer shadow-xs"
+                                        title="Edit Work Order ID or properties"
+                                      >
+                                        <Edit2 className="h-3 w-3" />
+                                      </button>
+                                      <button
+                                        type="button"
                                         onClick={() => {
                                           applyWO(w);
                                           setSearchQuery(w.wo_number);
@@ -1759,8 +1771,18 @@ function WOReleasePageInner() {
                   <h4 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                     <span>Release Work Order</span>
                     {selectedWO ? (
-                      <span className="font-mono text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800 text-xs font-bold">
-                        {selectedWO}
+                      <span className="inline-flex items-center gap-1.5 font-mono text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800 text-xs font-bold">
+                        <span>{selectedWO}</span>
+                        {selectedWODetail && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingWO(selectedWODetail)}
+                            className="hover:text-blue-800 text-blue-500 cursor-pointer ml-1 p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                            title="Edit Work Order ID or properties"
+                          >
+                            <Edit2 className="h-3 w-3" />
+                          </button>
+                        )}
                       </span>
                     ) : (
                       <span className="text-xs font-normal text-amber-600 dark:text-amber-400">
@@ -2073,6 +2095,31 @@ function WOReleasePageInner() {
           <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-orange-600 text-white px-4 py-3 shadow-xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
             <CheckCircle2 className="h-4 w-4" />
             <span>{heatSuccessMsg}</span>
+          </div>
+        )}
+
+        {/* Edit Work Order Modal */}
+        {editingWO && (
+          <EditWorkOrderModal
+            wo={editingWO}
+            onClose={() => setEditingWO(null)}
+            onSuccess={async (updated) => {
+              setEditingWO(null);
+              setEditSuccessMsg(`Work Order ${updated.wo_number} updated successfully!`);
+              handleSearch(searchQuery, releaseFilter, sortBy, fromDate, toDate, dateType);
+              if (selectedWO === editingWO.wo_number) {
+                applyWO(updated);
+              }
+              setTimeout(() => setEditSuccessMsg(""), 5000);
+            }}
+          />
+        )}
+
+        {/* Toast alert for edit success */}
+        {editSuccessMsg && (
+          <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 text-white px-4 py-3 shadow-xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{editSuccessMsg}</span>
           </div>
         )}
       </div>
