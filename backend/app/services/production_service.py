@@ -704,6 +704,46 @@ class ProductionService:
         wip.ok_qty += req.good_qty
         wip.rejected_qty += req.rejected_quantity
 
+        # F1 Shortfall (Less Production Closure): Finalize F1 with actual produced pieces, adjust downstream route targets, and log shortfall
+        is_f1_shortfall = is_f1 and bool(getattr(req, "is_f1_shortfall_closure", False))
+        if is_f1_shortfall:
+            shortfall_reason = (getattr(req, "shortfall_reason", None) or req.remarks or "").strip()
+            if not shortfall_reason:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Remarks / Reason is mandatory when closing F1 with less quantity (shortfall)."
+                )
+            total_produced_f1 = wip.ok_qty + wip.rejected_qty
+            total_good_f1 = wip.ok_qty
+            orig_planned = wo.physical_wo_qty or 0
+            shortfall_val = max(0, orig_planned - total_good_f1)
+
+            # Close F1 in-process balance so this Work Order is not left hanging at F1
+            wip.ent_qty = total_produced_f1
+            wip.inproc_qty = 0
+            wip.onhand_qty = total_good_f1
+            wip.available_wip = total_good_f1
+
+            # Adjust Work Order planned quantity and downstream stage targets to the actual good pieces produced
+            wo.physical_wo_qty = total_good_f1
+            wo.shortfall = "YES"
+            wo.shortfall_qty = shortfall_val
+            wo.shortfall_reason = shortfall_reason
+
+            for r in routes:
+                r.stage_target_qty = total_good_f1
+
+            db.add(AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "Floor Operator",
+                action="F1_SHORTFALL_PRODUCTION",
+                entity="WorkOrder",
+                entity_id=wo.wo_number,
+                old_value=f"Planned Target: {orig_planned} pcs",
+                new_value=f"Closed F1 with Shortfall: {total_good_f1} good pcs (-{shortfall_val} pcs Shortfall)",
+                details=f"Reason: {shortfall_reason} (Heat: {req.heat_number or wo.heat_number or 'N/A'})"
+            ))
+
         # Record ProductionUpdate log
         entry = ProductionUpdate(
             work_order_id=wo.id,

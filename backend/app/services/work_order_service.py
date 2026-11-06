@@ -403,6 +403,9 @@ class WorkOrderService:
                 status=wo.status.value,
                 delivery_risk=risk,
                 shortfall=wo.shortfall or "No",
+                excess_qty=getattr(wo, "excess_qty", 0) or 0,
+                shortfall_qty=getattr(wo, "shortfall_qty", 0) or 0,
+                shortfall_reason=getattr(wo, "shortfall_reason", None),
                 delivery_date=order.delivery_date if order else None,
                 created_at=wo_dt,
                 po_date=po_dt,
@@ -615,7 +618,9 @@ class WorkOrderService:
             created_at=wo.created_at or datetime.now(),
             heat_number=getattr(wo, "heat_number", None),
             classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
-            excess_qty=getattr(wo, "excess_qty", 0) or 0
+            excess_qty=getattr(wo, "excess_qty", 0) or 0,
+            shortfall_qty=getattr(wo, "shortfall_qty", 0) or 0,
+            shortfall_reason=getattr(wo, "shortfall_reason", None)
         )
 
     @staticmethod
@@ -831,7 +836,9 @@ class WorkOrderService:
                 ready_for_production=ready_prod,
                 heat_number=getattr(wo, "heat_number", None),
                 classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
-                excess_qty=getattr(wo, "excess_qty", 0) or 0
+                excess_qty=getattr(wo, "excess_qty", 0) or 0,
+                shortfall_qty=getattr(wo, "shortfall_qty", 0) or 0,
+                shortfall_reason=getattr(wo, "shortfall_reason", None)
             ))
 
         num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")

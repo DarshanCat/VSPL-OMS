@@ -37,6 +37,9 @@ class WorkOrder(Base):
     current_stage = Column(String, default="F1")
     projected_final_good = Column(Integer, default=0)
     shortfall = Column(String, default="No")  # "YES" | "No"
+    shortfall_qty = Column(Integer, default=0, nullable=False)
+    shortfall_reason = Column(String, nullable=True)
+    excess_qty = Column(Integer, default=0, nullable=False)
     status = Column(Enum(WOStatus), nullable=False, default=WOStatus.IN_PRODUCTION)
     # Release chain: OAR -> WO Created -> Engineering Release -> Manufacturing
     # Release -> WO Released (released_by/release_date below, unchanged) -> Production.

@@ -469,6 +469,8 @@ def auto_migrate_schema():
         ");",
         "CREATE INDEX IF NOT EXISTS ix_bsr_stock_part_id ON bsr_stock (part_id);",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS excess_qty INTEGER DEFAULT 0;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall_qty INTEGER DEFAULT 0;",
+        "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall_reason VARCHAR;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfilled_from_stock_qty INTEGER DEFAULT 0;",
     ]
 

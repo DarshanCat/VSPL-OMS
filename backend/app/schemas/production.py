@@ -36,6 +36,8 @@ class RecordStageProductionRequest(BaseModel):
     heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
+    is_f1_shortfall_closure: Optional[bool] = Field(False, description="Whether to finalize F1 stage with less quantity (shortfall)")
+    shortfall_reason: Optional[str] = Field(None, description="Mandatory operator reason when closing F1 with shortfall")
 
 class ProductionEntryResponse(BaseModel):
     success: bool

@@ -252,6 +252,11 @@ function WorkOrderTrackingPageInner() {
                           ⚠️ F1 Excess: +{(woData as any).excess_qty} pcs
                         </span>
                       )}
+                      {Boolean((woData as any).shortfall_qty && (woData as any).shortfall_qty > 0) && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-200 border border-rose-300 dark:border-rose-700" title={(woData as any).shortfall_reason || "Shortfall recorded"}>
+                          ⚠️ F1 Shortfall: -{(woData as any).shortfall_qty} pcs{(woData as any).shortfall_reason ? ` (${(woData as any).shortfall_reason})` : ""}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                       Part: <strong className="text-zinc-800 dark:text-zinc-200">{woData.customer_part_number || woData.part_number}</strong>

@@ -102,6 +102,8 @@ export function ProductionEntryContent() {
   const [defectCode, setDefectCode] = useState("DEF-POROSITY");
   const [heatNumber, setHeatNumber] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [isF1ShortfallChecked, setIsF1ShortfallChecked] = useState(false);
+  const [shortfallReason, setShortfallReason] = useState("");
   const [productionType, setProductionType] = useState<"IN_HOUSE" | "VENDOR">("IN_HOUSE");
   const [vendorName, setVendorName] = useState("");
   const [dcNumber, setDcNumber] = useState("");
@@ -409,6 +411,13 @@ export function ProductionEntryContent() {
       return;
     }
 
+    const isShortfallF1 = isF1 && isF1ShortfallChecked && totalProc < remainingTarget;
+    if (isShortfallF1 && !shortfallReason.trim() && !remarks.trim()) {
+      setFormError("Remarks / Reason is mandatory when closing F1 with less quantity (shortfall).");
+      inputRemarksRef.current?.focus();
+      return;
+    }
+
     setSubmitting(true);
     setFormError("");
 
@@ -431,6 +440,8 @@ export function ProductionEntryContent() {
         production_type: selectedStage === "F2" ? productionType : "IN_HOUSE",
         vendor_name: selectedStage === "F2" && productionType === "VENDOR" ? vendorName.trim() : undefined,
         dc_number: selectedStage === "F2" && productionType === "VENDOR" ? dcNumber.trim() : undefined,
+        is_f1_shortfall_closure: isShortfallF1,
+        shortfall_reason: isShortfallF1 ? (shortfallReason.trim() || remarks.trim()) : undefined,
       });
 
       setSuccessResult({
@@ -1054,6 +1065,43 @@ export function ProductionEntryContent() {
                           Work Order planned quantity and downstream route targets will automatically expand to {woData?.physical_wo_qty ? woData.physical_wo_qty + f1ExcessAmount : curProcTotal} pcs. Remarks / reason is mandatory.
                         </p>
                       </div>
+                    </div>
+                  )}
+
+                  {/* F1 Shortfall (Less Production Closure) Card */}
+                  {isStageF1 && curProcTotal > 0 && curProcTotal < remainingTargetForStage && (
+                    <div className="rounded-xl border border-sky-300 dark:border-sky-800 bg-sky-50/70 dark:bg-sky-950/40 p-3.5 space-y-2 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          id="f1ShortfallCheck"
+                          checked={isF1ShortfallChecked}
+                          onChange={(e) => setIsF1ShortfallChecked(e.target.checked)}
+                          className="h-4 w-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                        />
+                        <label htmlFor="f1ShortfallCheck" className="font-bold text-sky-900 dark:text-sky-200 cursor-pointer select-none">
+                          Close F1 Heat / Batch with Less Production (Shortfall of {remainingTargetForStage - curProcTotal} pcs)
+                        </label>
+                      </div>
+                      {isF1ShortfallChecked && (
+                        <div className="pl-6 space-y-2 pt-1 border-t border-sky-200 dark:border-sky-800/60">
+                          <p className="text-[11px] text-sky-800 dark:text-sky-300">
+                            Finalizes F1 stage at {curProcTotal} pcs and adjusts downstream routes. The parent OAR will record a shortfall of {remainingTargetForStage - curProcTotal} pcs for Patch WO planning.
+                          </p>
+                          <div>
+                            <label className="block text-[11px] font-bold text-rose-600 dark:text-rose-400 mb-1">
+                              Reason for Less Production / Shortfall * (Mandatory)
+                            </label>
+                            <input
+                              type="text"
+                              value={shortfallReason}
+                              onChange={(e) => setShortfallReason(e.target.value)}
+                              placeholder="e.g. Metal short in ladle, furnace heat ended, mould shortage, core breakdown..."
+                              className="w-full rounded-lg border border-sky-300 dark:border-sky-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

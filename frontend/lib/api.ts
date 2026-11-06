@@ -371,6 +371,9 @@ export interface WorkOrderListItem {
   release_status?: string | null;
   is_released?: boolean;
   ready_for_production?: boolean;
+  excess_qty?: number;
+  shortfall_qty?: number;
+  shortfall_reason?: string | null;
   heat_number?: string | null;
   classification?: string | null;
   route_stages?: string[] | null;
@@ -442,6 +445,8 @@ export async function recordStageProduction(payload: {
   production_type?: "IN_HOUSE" | "VENDOR";
   vendor_name?: string;
   dc_number?: string;
+  is_f1_shortfall_closure?: boolean;
+  shortfall_reason?: string;
 }) {
   const { data } = await api.post("/api/v1/production/entry", payload);
   return data;
