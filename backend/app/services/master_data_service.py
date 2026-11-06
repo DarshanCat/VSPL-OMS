@@ -485,12 +485,19 @@ class POMasterService:
     @staticmethod
     def _line_out(line: POLine) -> POLineOut:
         from app.models.work_order import WOStatus
+        from app.models.order import OrderStatus
+        active_orders = [
+            o for o in line.orders
+            if getattr(o, "status", None) and o.status.value not in ("CANCELLED", "REJECT")
+        ]
+        # OAR allocation against this PO line:
+        oar_allocated = sum((o.po_qty or 0) for o in active_orders)
         wo_allocated = sum(
             sum(wo.physical_wo_qty for wo in o.work_orders if getattr(wo, "status", None) != WOStatus.CLOSED)
-            for o in line.orders
+            for o in active_orders
         )
-        effective_qty = max(line.po_qty, sum(o.po_qty for o in line.orders)) if line.po_qty == 0 or line.orders else line.po_qty
-        available = max(effective_qty - wo_allocated, 0)
+        effective_qty = max(line.po_qty or 0, oar_allocated) if (line.po_qty == 0 or active_orders) else (line.po_qty or 0)
+        available = max(effective_qty - oar_allocated, 0)
         orders_summary = [
             POLineOrderSummary(
                 oar_id=str(o.id), oar_number=o.oar_number, order_status=o.status.value,
@@ -503,7 +510,7 @@ class POMasterService:
                     for wo in o.work_orders
                 ],
             )
-            for o in line.orders
+            for o in active_orders
         ]
         u_price = getattr(line, "unit_price", 0.0) or 0.0
         l_total = getattr(line, "line_total", 0.0)
@@ -512,7 +519,7 @@ class POMasterService:
         return POLineOut(
             id=str(line.id), part_number=line.part.part_number,
             customer_part_number=line.customer_part_number if hasattr(line, "customer_part_number") else None,
-            po_qty=line.po_qty, allocated_qty=wo_allocated, available_qty=available,
+            po_qty=line.po_qty, allocated_qty=oar_allocated, available_qty=available,
             unit_price=round(u_price, 2),
             line_total=round(l_total, 2),
             required_date=line.required_date, orders=orders_summary,
@@ -996,13 +1003,17 @@ class ScheduleMasterService:
     def _schedule_out(s: ScheduleMaster, db: Optional[Session] = None) -> ScheduleOut:
         from app.models.order import OrderStatus
         from app.models.work_order import WOStatus
-        active_orders = [o for o in s.orders if getattr(o, "status", None) != OrderStatus.REJECT]
-        allocated = sum(
+        active_orders = [
+            o for o in s.orders
+            if getattr(o, "status", None) and o.status.value not in ("CANCELLED", "REJECT")
+        ]
+        oar_allocated = sum((o.po_qty or 0) for o in active_orders)
+        wo_allocated = sum(
             sum(wo.physical_wo_qty for wo in o.work_orders if getattr(wo, "status", None) != WOStatus.CLOSED)
             for o in active_orders
         )
-        effective_sched_qty = max(s.scheduled_qty, sum(o.po_qty for o in active_orders)) if s.scheduled_qty == 0 or active_orders else s.scheduled_qty
-        available = max(effective_sched_qty - allocated, 0)
+        effective_sched_qty = max(s.scheduled_qty or 0, oar_allocated) if (s.scheduled_qty == 0 or active_orders) else (s.scheduled_qty or 0)
+        available = max(effective_sched_qty - oar_allocated, 0)
         linked_oars = [o.oar_number for o in active_orders if o.oar_number]
         first_oar = linked_oars[0] if linked_oars else None
 
@@ -1028,7 +1039,7 @@ class ScheduleMasterService:
             customer_part_number=cust_pn,
             part_description=s.part.description if s.part else None,
             scheduled_qty=s.scheduled_qty,
-            allocated_qty=allocated,
+            allocated_qty=oar_allocated,
             available_qty=available,
             unit_price=round(u_price, 2), total_value=round(t_val, 2),
             required_date=s.required_date, customer_schedule_ref=s.customer_schedule_ref,

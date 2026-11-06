@@ -608,8 +608,8 @@ export default function OarWoListPage() {
 
                     {expanded[rowKey] && (
                       <tr>
-                        <td colSpan={13} className="bg-zinc-50/70 dark:bg-zinc-950/60 p-0 border-y border-zinc-200 dark:border-zinc-800">
-                          <div className="p-4 space-y-4">
+                        <td colSpan={13} className="bg-zinc-50/90 dark:bg-zinc-950/80 p-0 border-y-2 border-indigo-200/80 dark:border-indigo-900/60 shadow-inner">
+                          <div className="p-4 pb-6 space-y-4">
                             {/* OAR Genealogy Metric Cards */}
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                               <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 shadow-xs">
@@ -686,7 +686,7 @@ export default function OarWoListPage() {
                                   <span className="text-[10px] text-zinc-400 font-mono">
                                     ({oar.work_orders.length} Work Order{oar.work_orders.length === 1 ? "" : "s"} linked to {oar.oar_number})
                                   </span>
-                                  <POCoverageBadge status={oar.po_coverage_status} customerPo={oar.customer_po} size="sm" />
+                                  
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                                     Customer Part: {oar.customer_part_number || oar.part_number}
                                   </span>

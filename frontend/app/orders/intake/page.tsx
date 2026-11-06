@@ -145,7 +145,8 @@ export default function OrderIntakePage() {
         }
         po.lines.forEach((l) => {
           const hasNoOar = !l.orders || l.orders.length === 0;
-          if (l.available_qty > 0 || hasNoOar) {
+          const isPending = (l.available_qty > 0) || (hasNoOar && (l.po_qty === 0));
+          if (isPending) {
             pending.push({
               ...l,
               po_number: po.po_number,
