@@ -7,7 +7,7 @@ from sqlalchemy import func
 from app.models.bsr_stock import BSRStock
 from app.models.order import Order
 from app.models.work_order import WorkOrder
-from app.models.part import Part
+from app.models.order import Part
 from app.models.audit import AuditLog
 from app.models.user import User
 

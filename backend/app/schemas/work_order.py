@@ -203,7 +203,9 @@ class OARListItem(BaseModel):
     total_produced: int = 0
     total_good: int = 0
     total_rejected: int
-    excess_qty: Optional[int] = 0 = 0
+    excess_qty: Optional[int] = 0
+    fulfilled_from_stock_qty: Optional[int] = 0
+    part_id: Optional[str] = None
     oar_fulfilled: int = 0
     oar_shortfall: int = 0
     status: str
