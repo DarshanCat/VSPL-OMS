@@ -140,6 +140,35 @@ class PackingService:
         if packing_rec.pending_qty == 0:
             packing_rec.status = "Ready-for-Dispatch"
             wo.status = WOStatus.READY
+
+            # Automatic Excess Stock Banking into BSR Finished Goods Buffer
+            if wo.order and wo.order.part_id:
+                wo_excess = getattr(wo, "excess_qty", 0) or 0
+                if wo_excess > 0:
+                    from sqlalchemy import func
+                    from app.models.bsr_stock import BSRStock
+                    already_banked = db.query(func.coalesce(func.sum(BSRStock.available_qty + BSRStock.allocated_qty), 0)).filter(
+                        BSRStock.source_wo_id == wo.id
+                    ).scalar() or 0
+                    to_bank = max(0, wo_excess - already_banked)
+                    if to_bank > 0:
+                        bsr_item = BSRStock(
+                            part_id=wo.order.part_id,
+                            available_qty=to_bank,
+                            allocated_qty=0,
+                            source_wo_id=wo.id,
+                            heat_number=wo.heat_number,
+                            remarks=f"Excess finished pieces auto-banked from WO {wo.wo_number} (PO: {wo.order.customer_po}, OAR: {wo.order.oar_number})"
+                        )
+                        db.add(bsr_item)
+                        db.add(AuditLog(
+                            user_id=current_user.id if current_user else None,
+                            user_name=current_user.full_name if current_user else "System",
+                            action="BSR_EXCESS_STOCK_BANKED",
+                            entity="BSRStock",
+                            entity_id=wo.wo_number,
+                            details=f"Auto-banked {to_bank} excess pieces from {wo.wo_number} into BSR Finished Goods Stock."
+                        ))
         else:
             packing_rec.status = "In-Packing"
 

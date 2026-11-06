@@ -1051,6 +1051,8 @@ export interface OARWorkOrderSummary {
 export interface OARListItem {
   oar_number: string;
   order_id: string;
+  part_id?: string;
+  fulfilled_from_stock_qty?: number;
   customer_code: string;
   customer_name: string;
   customer_po: string;
@@ -1775,4 +1777,49 @@ export async function receiveVendorDispatch(payload: {
   return data;
 }
 
+// ============================================================================
+// BSR Finished Goods Buffer Stock
+// ============================================================================
 
+export interface BSRStockLot {
+  id: string;
+  source_wo_number: string;
+  heat_number?: string;
+  available_qty: number;
+  allocated_qty: number;
+  created_at: string;
+}
+
+export interface BSRStockSummary {
+  part_id: string;
+  part_number: string;
+  part_description?: string;
+  total_available: number;
+  total_allocated: number;
+  lots: BSRStockLot[];
+}
+
+export async function getBSRStockForPart(partId: string): Promise<BSRStockSummary> {
+  const { data } = await api.get(`/api/v1/bsr-stock/part/${encodeURIComponent(partId)}`);
+  return data;
+}
+
+export async function listBSRStock(): Promise<BSRStockSummary[]> {
+  const { data } = await api.get('/api/v1/bsr-stock');
+  return data;
+}
+
+export async function allocateBSRStock(payload: {
+  oar_id: string;
+  quantity: number;
+}): Promise<{
+  success: boolean;
+  oar_number: string;
+  allocated_from_stock: number;
+  total_fulfilled_from_stock: number;
+  remaining_to_plan: number;
+  message: string;
+}> {
+  const { data } = await api.post('/api/v1/bsr-stock/allocate', payload);
+  return data;
+}

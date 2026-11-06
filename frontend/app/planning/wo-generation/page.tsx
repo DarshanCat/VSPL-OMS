@@ -37,7 +37,10 @@ import {
   WorkOrderCreateResult,
   updateWorkOrder,
   WorkOrderUpdatePayload,
-  updateOAR
+  updateOAR,
+  getBSRStockForPart,
+  allocateBSRStock,
+  BSRStockSummary
 } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
@@ -112,6 +115,10 @@ function WOGenerationContent() {
   const [editingCommitmentOar, setEditingCommitmentOar] = useState<OARListItem | null>(null);
   const [editingOarModal, setEditingOarModal] = useState<OARListItem | null>(null);
   const [commitmentSuccessMsg, setCommitmentSuccessMsg] = useState("");
+  const [bsrStock, setBsrStock] = useState<BSRStockSummary | null>(null);
+  const [stockAllocQty, setStockAllocQty] = useState<number | "">("");
+  const [allocatingStock, setAllocatingStock] = useState(false);
+  const [stockSuccessMsg, setStockSuccessMsg] = useState("");
   const [successResult, setSuccessResult] = useState<WorkOrderCreateResult | null>(null);
 
   const handleOarModalSuccess = (updatedOar: OARListItem) => {
@@ -193,6 +200,20 @@ function WOGenerationContent() {
     setError("");
     setSuccessResult(null);
     loadNextWoSequence();
+    if (oar.part_id) {
+      getBSRStockForPart(oar.part_id)
+        .then((stock) => {
+          setBsrStock(stock);
+          if (stock.total_available > 0) {
+            setStockAllocQty(Math.min(stock.total_available, oar.remaining_qty));
+          } else {
+            setStockAllocQty("");
+          }
+        })
+        .catch(() => setBsrStock(null));
+    } else {
+      setBsrStock(null);
+    }
     document.getElementById("wo-generator-card")?.scrollIntoView({ behavior: "smooth" });
   };
 
@@ -209,6 +230,57 @@ function WOGenerationContent() {
       }
     }
     setTimeout(() => setCommitmentSuccessMsg(""), 5000);
+  };
+
+  const handleAllocateStock = async () => {
+    if (!selectedOar || !stockAllocQty || Number(stockAllocQty) <= 0) return;
+    setAllocatingStock(true);
+    setError("");
+    try {
+      const qtyNum = Number(stockAllocQty);
+      const res = await allocateBSRStock({
+        oar_id: selectedOar.order_id,
+        quantity: qtyNum
+      });
+      setStockSuccessMsg(res.message);
+      setTimeout(() => setStockSuccessMsg(""), 6000);
+      await loadOars();
+      setSelectedOar((prev) =>
+        prev
+          ? {
+              ...prev,
+              allocated_qty: prev.allocated_qty + qtyNum,
+              remaining_qty: res.remaining_to_plan,
+              fulfilled_from_stock_qty: res.total_fulfilled_from_stock
+            }
+          : null
+      );
+      setWoQty(res.remaining_to_plan > 0 ? res.remaining_to_plan : "");
+      if (res.remaining_to_plan > 0) {
+        setManualQtys([
+          String(Math.ceil(res.remaining_to_plan / 2)),
+          String(Math.floor(res.remaining_to_plan / 2))
+        ]);
+      } else {
+        setManualQtys([]);
+      }
+      if (selectedOar.part_id) {
+        getBSRStockForPart(selectedOar.part_id)
+          .then((s) => {
+            setBsrStock(s);
+            if (s.total_available > 0 && res.remaining_to_plan > 0) {
+              setStockAllocQty(Math.min(s.total_available, res.remaining_to_plan));
+            } else {
+              setStockAllocQty("");
+            }
+          })
+          .catch(() => {});
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to allocate BSR stock.");
+    } finally {
+      setAllocatingStock(false);
+    }
   };
 
   const handleToggleStage = (stage: string) => {
@@ -783,6 +855,11 @@ function WOGenerationContent() {
                   <span className="text-zinc-600 dark:text-zinc-300 block">
                     OAR: <strong>{selectedOar.oar_qty}</strong> | Planned: {selectedOar.allocated_qty}
                   </span>
+                  {Boolean(selectedOar.fulfilled_from_stock_qty && selectedOar.fulfilled_from_stock_qty > 0) && (
+                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold block">
+                      From BSR Stock: {selectedOar.fulfilled_from_stock_qty} pcs
+                    </span>
+                  )}
                   <span className="font-bold text-emerald-600 font-mono">
                     Remaining: {selectedOar.remaining_qty} pcs
                   </span>
@@ -828,6 +905,60 @@ function WOGenerationContent() {
                   )}
                 </div>
               </div>
+
+              {/* BSR Finished Goods Stock Available Banner & Action */}
+              {bsrStock && bsrStock.total_available > 0 && selectedOar.remaining_qty > 0 && (
+                <div className="rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/90 dark:bg-emerald-950/40 p-4 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                          🟢 BSR Finished Stock Available: {bsrStock.total_available} pcs
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-200 dark:bg-emerald-800/60 text-emerald-800 dark:text-emerald-200">
+                          Part: {selectedOar.part_number}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                        Stock is already inspected & ready in BSR. Fulfill demand directly from buffer stock without releasing new casting WOs.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Allocate:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={Math.min(bsrStock.total_available, selectedOar.remaining_qty)}
+                          value={stockAllocQty}
+                          onChange={(e) => setStockAllocQty(e.target.value === "" ? "" : Number(e.target.value))}
+                          className="w-20 px-2.5 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 text-center"
+                          placeholder="Qty"
+                        />
+                        <span className="text-xs text-zinc-400">pcs</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAllocateStock}
+                        disabled={allocatingStock || !stockAllocQty || Number(stockAllocQty) <= 0}
+                        className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        {allocatingStock ? "Allocating..." : "Fulfill from Stock"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {stockSuccessMsg && (
+                <div className="rounded-xl border border-emerald-400 bg-emerald-100 dark:bg-emerald-950/60 p-3 text-xs text-emerald-900 dark:text-emerald-200 font-bold flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>{stockSuccessMsg}</span>
+                </div>
+              )}
 
               {/* Overrun / 0-Remaining Warning Banner */}
               {selectedOar.remaining_qty <= 0 && (

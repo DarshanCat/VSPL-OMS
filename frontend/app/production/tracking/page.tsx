@@ -247,6 +247,11 @@ function WorkOrderTrackingPageInner() {
                           🏭 Production Series
                         </span>
                       )}
+                      {Boolean((woData as any).excess_qty && (woData as any).excess_qty > 0) && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                          ⚠️ F1 Excess: +{(woData as any).excess_qty} pcs
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                       Part: <strong className="text-zinc-800 dark:text-zinc-200">{woData.customer_part_number || woData.part_number}</strong>

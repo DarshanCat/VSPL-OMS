@@ -49,6 +49,7 @@ class WorkOrderListItem(BaseModel):
     release_status: Optional[str] = None
     is_released: bool = False
     ready_for_production: bool = False
+    excess_qty: Optional[int] = 0
     heat_number: Optional[str] = None
     classification: Optional[str] = "Production"
     commitment_date: Optional[date] = None
@@ -133,6 +134,7 @@ class WorkOrderTrackingDetail(BaseModel):
     transactions: List[TransactionHistoryItem] = []
     total_wip_on_hand: int
     total_rejected: int
+    excess_qty: Optional[int] = 0
     yield_pct: float
     created_at: datetime
     heat_number: Optional[str] = None
@@ -164,6 +166,7 @@ class OARWorkOrderSummary(BaseModel):
     release_date: Optional[datetime] = None
     is_released: bool = False
     ready_for_production: bool = False
+    excess_qty: Optional[int] = 0
     heat_number: Optional[str] = None
     classification: Optional[str] = "Production"
 
@@ -199,7 +202,8 @@ class OARListItem(BaseModel):
     num_patch_wos: int = 0
     total_produced: int = 0
     total_good: int = 0
-    total_rejected: int = 0
+    total_rejected: int
+    excess_qty: Optional[int] = 0 = 0
     oar_fulfilled: int = 0
     oar_shortfall: int = 0
     status: str
@@ -244,6 +248,7 @@ class OARGenealogyResponse(BaseModel):
     total_produced: int
     total_good: int
     total_rejected: int
+    excess_qty: Optional[int] = 0
     oar_fulfilled: int
     oar_shortfall: int
     status: str

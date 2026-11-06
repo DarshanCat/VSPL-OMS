@@ -72,6 +72,7 @@ class Order(Base):
     commitment_date_revision_reason = Column(String, nullable=True)
     order_type = Column(String(50), nullable=False, default="Production")  # 'Production' | 'NPD'
     customer_part_number = Column(String, nullable=True)
+    fulfilled_from_stock_qty = Column(Integer, nullable=False, default=0)  # Pieces fulfilled directly from BSR Finished Stock
     status = Column(Enum(OrderStatus), nullable=False, default=OrderStatus.ACCEPT)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

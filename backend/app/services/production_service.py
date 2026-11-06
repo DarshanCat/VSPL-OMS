@@ -654,14 +654,31 @@ class ProductionService:
 
         if total_proc > wip.inproc_qty:
             if is_f1:
+                if not (req.remarks and req.remarks.strip()):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Remarks / Reason is mandatory when recording F1 Excess Production (e.g., Extra mould poured, Heat balance batch)."
+                    )
                 # F1 Excess Production: Expand physical WO quantity, F1 ent_qty, and all downstream route targets
                 excess_qty = total_proc - wip.inproc_qty
                 orig_target = wo.physical_wo_qty or 0
                 wo.physical_wo_qty = orig_target + excess_qty
+                wo.excess_qty = (getattr(wo, "excess_qty", 0) or 0) + excess_qty
                 wip.ent_qty = (wip.ent_qty or 0) + excess_qty
                 wip.inproc_qty = total_proc - (wip.ok_qty + wip.rejected_qty)
                 for r in routes:
                     r.stage_target_qty = wo.physical_wo_qty
+
+                db.add(AuditLog(
+                    user_id=current_user.id if current_user else None,
+                    user_name=current_user.full_name if current_user else "Floor Operator",
+                    action="F1_EXCESS_PRODUCTION",
+                    entity="WorkOrder",
+                    entity_id=wo.wo_number,
+                    old_value=f"Planned Target: {orig_target} pcs",
+                    new_value=f"Expanded Target: {wo.physical_wo_qty} pcs (+{excess_qty} Excess pcs)",
+                    details=f"Reason: {req.remarks} (Heat: {req.heat_number or wo.heat_number or 'N/A'})"
+                ))
 
                 # Trigger In-System & Email Alert for F1 excess
                 try:

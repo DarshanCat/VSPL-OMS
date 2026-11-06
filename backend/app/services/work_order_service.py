@@ -614,7 +614,8 @@ class WorkOrderService:
             yield_pct=yield_pct,
             created_at=wo.created_at or datetime.now(),
             heat_number=getattr(wo, "heat_number", None),
-            classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
+            classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
+            excess_qty=getattr(wo, "excess_qty", 0) or 0
         )
 
     @staticmethod
@@ -829,7 +830,8 @@ class WorkOrderService:
                 is_released=is_rel,
                 ready_for_production=ready_prod,
                 heat_number=getattr(wo, "heat_number", None),
-                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production"
+                classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
+                excess_qty=getattr(wo, "excess_qty", 0) or 0
             ))
 
         num_orig = sum(1 for w in wo_summaries if w.wo_type == "ORIGINAL")
@@ -837,7 +839,9 @@ class WorkOrderService:
         tot_produced = sum(w.production_qty for w in wo_summaries)
         tot_good = sum(w.good_qty for w in wo_summaries)
         tot_rejected = sum(w.rejected_qty for w in wo_summaries)
-        oar_fulfilled = sum(w.final_good_contribution for w in wo_summaries)
+        fulfilled_from_stock = getattr(order, "fulfilled_from_stock_qty", 0) or 0
+        allocated_total += fulfilled_from_stock
+        oar_fulfilled = sum(w.final_good_contribution for w in wo_summaries) + fulfilled_from_stock
         oar_shortfall = max(order.po_qty - oar_fulfilled, 0)
 
         po_cov_status = compute_po_coverage_status(order)
@@ -873,12 +877,14 @@ class WorkOrderService:
             po_coverage_status=po_cov_status,
             order_type=order_classification,
             classification=order_classification,
+            part_id=str(order.part_id) if order.part_id else None,
+            fulfilled_from_stock_qty=fulfilled_from_stock,
             part_number=order.part.part_number if order.part else "N/A",
             customer_part_number=cust_part_no,
             part_name=order.part.description if order.part else None,
             oar_qty=order.po_qty,
             allocated_qty=allocated_total,
-            remaining_qty=order.po_qty - allocated_total,
+            remaining_qty=max(order.po_qty - allocated_total, 0),
             num_wos=len(wos),
             num_original_wos=num_orig,
             num_patch_wos=num_patch,

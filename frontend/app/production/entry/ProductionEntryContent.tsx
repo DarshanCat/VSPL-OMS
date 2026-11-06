@@ -393,10 +393,19 @@ export function ProductionEntryContent() {
     // authoritative target. This mirrors the backend's own authoritative check in
     // ProductionService.record_stage_production; the backend remains the enforcing
     // authority regardless of this client-side check.
+    const isF1 = selectedStage.toUpperCase() === "F1";
     const remainingTarget = stageState?.in_process_qty ?? activeStage.in_process_qty ?? 0;
-    if (totalProc > remainingTarget) {
+    const isExcessF1 = isF1 && totalProc > remainingTarget;
+
+    if (totalProc > remainingTarget && !isF1) {
       setFormError(`Total quantity processed (${totalProc}) exceeds the remaining allowable target at ${selectedStage} (${remainingTarget} pcs remaining of target).`);
       inputGoodQtyRef.current?.focus();
+      return;
+    }
+
+    if (isExcessF1 && !remarks.trim()) {
+      setFormError("Remarks / Reason is mandatory when recording F1 Excess Production (e.g. Extra mould poured, Heat balance batch).");
+      inputRemarksRef.current?.focus();
       return;
     }
 
@@ -474,6 +483,12 @@ export function ProductionEntryContent() {
     remaining_to_produce: woData?.physical_wo_qty ?? 0,
     stage_status: "In-Progress"
   };
+
+  const isStageF1 = selectedStage.toUpperCase() === "F1";
+  const remainingTargetForStage = stageState?.in_process_qty ?? activeStage?.in_process_qty ?? 0;
+  const curProcTotal = (Number(goodQty) || 0) + (Number(rejectedQty) || 0);
+  const isF1ExcessActive = isStageF1 && curProcTotal > remainingTargetForStage;
+  const f1ExcessAmount = isF1ExcessActive ? curProcTotal - remainingTargetForStage : 0;
 
   return (
       <div className="max-w-5xl mx-auto space-y-6">
@@ -792,7 +807,7 @@ export function ProductionEntryContent() {
                         ref={inputGoodQtyRef}
                         type="number"
                         min="0"
-                        max={activeStage.in_process_qty}
+                        max={isStageF1 ? undefined : activeStage.in_process_qty}
                         value={goodQty}
                         onChange={(e) => setGoodQty(e.target.value === "" ? "" : Number(e.target.value))}
                         onKeyDown={(e) => handleKeyDown(e, "rejQty")}
@@ -1012,8 +1027,8 @@ export function ProductionEntryContent() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        REMARKS / LOG DETAILS
+                      <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1.5 flex items-center justify-between">
+                        <span>REMARKS / LOG DETAILS {isF1ExcessActive ? <span className="text-rose-500 font-extrabold">* (Mandatory for F1 Excess)</span> : <span className="text-zinc-400 font-normal">(Optional)</span>}</span>
                       </label>
                       <input
                         ref={inputRemarksRef}
@@ -1026,6 +1041,21 @@ export function ProductionEntryContent() {
                       />
                     </div>
                   </div>
+
+                  {/* F1 Excess Production Alert Banner */}
+                  {isF1ExcessActive && (
+                    <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-3.5 flex items-start gap-3 text-xs">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-amber-900 dark:text-amber-200">
+                          ⚠️ F1 Excess Production: Planned {remainingTargetForStage} | Total {curProcTotal} (+{f1ExcessAmount} Excess pcs)
+                        </div>
+                        <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                          Work Order planned quantity and downstream route targets will automatically expand to {woData?.physical_wo_qty ? woData.physical_wo_qty + f1ExcessAmount : curProcTotal} pcs. Remarks / reason is mandatory.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Submit Button */}
                   <div className="pt-2">

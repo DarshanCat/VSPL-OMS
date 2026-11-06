@@ -14,7 +14,7 @@ from app.api.v1 import (
     auth, oms, production, work_orders, packing,
     dispatch, operations, dashboard, reports, ai, admin, analytics, rejection,
     conversion_mapping, users, migration, masters, po_matching, roles, continuous_casting,
-    mrb, vendor
+    mrb, vendor, bsr_stock
 )
 from app.services.seed_service import seed_database_if_empty
 
@@ -111,6 +111,7 @@ app.include_router(roles.router)
 app.include_router(continuous_casting.router)
 app.include_router(mrb.router)
 app.include_router(vendor.router)
+app.include_router(bsr_stock.router)
 
 @app.get("/health")
 def health():
