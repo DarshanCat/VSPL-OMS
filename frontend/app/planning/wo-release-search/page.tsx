@@ -894,8 +894,22 @@ function WOReleaseSearchContent() {
                               {wo.current_stage || "F1"}
                             </span>
                           </div>
-                          <div className="text-[11px] text-zinc-400 flex items-center gap-2">
+                          <div className="text-[11px] text-zinc-400 flex items-center gap-3 flex-wrap">
                             <span>Delivery: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(wo.delivery_date)}</strong></span>
+                            {(wo.revised_commitment_date || wo.commitment_date) && (
+                              <span className="flex items-center gap-1 font-mono text-[10px]">
+                                <span className="text-zinc-400">Commit:</span>
+                                {wo.revised_commitment_date ? (
+                                  <span className="font-bold text-amber-600 dark:text-amber-400">
+                                    {formatDate(wo.revised_commitment_date)} (Rev #{wo.commitment_date_revision_count || 1})
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-blue-600 dark:text-blue-400">
+                                    {formatDate(wo.commitment_date)}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                           </div>
                         </div>
 

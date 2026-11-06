@@ -50,6 +50,7 @@ class OrderIntakeResponse(BaseModel):
     message: str
 
 class OARUpdate(BaseModel):
+    oar_qty: Optional[int] = Field(None, gt=0, description="Update OAR quantity and sync with linked Customer PO line")
     commitment_date: Optional[date] = None
     revised_commitment_date: Optional[date] = None
     revision_reason: Optional[str] = None

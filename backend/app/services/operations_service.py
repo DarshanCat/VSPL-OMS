@@ -380,6 +380,50 @@ class OperationsService:
         old_commit = orders[0].commitment_date
 
         for order in orders:
+            if payload.oar_qty is not None and payload.oar_qty > 0:
+                allocated_qty = sum(
+                    wo.physical_wo_qty for wo in order.work_orders
+                    if getattr(wo, "status", None) != WOStatus.CANCELLED
+                )
+                if payload.oar_qty < allocated_qty:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Cannot reduce OAR quantity to {payload.oar_qty} pcs because {allocated_qty} pcs "
+                            f"are already allocated across active Work Orders. Please delete or reduce existing Work Orders first."
+                        )
+                    )
+                old_qty = order.po_qty
+                if old_qty != payload.oar_qty:
+                    order.po_qty = payload.oar_qty
+                    changes.append(f"OAR Quantity: {old_qty} -> {payload.oar_qty}")
+
+                    # Sync to linked Customer PO Line (POLine) and POMaster
+                    po_line = None
+                    if order.po_line_id:
+                        po_line = db.query(POLine).filter(POLine.id == order.po_line_id).first()
+                    elif order.customer_po:
+                        po = db.query(POMaster).filter(POMaster.po_number == order.customer_po.strip()).first()
+                        if po:
+                            po_line = db.query(POLine).filter(
+                                POLine.po_id == po.id,
+                                POLine.part_id == order.part_id
+                            ).first()
+
+                    if po_line:
+                        old_po_line_qty = po_line.po_qty
+                        po_line.po_qty = payload.oar_qty
+                        po_line.line_total = round((po_line.unit_price or 0.0) * payload.oar_qty, 2)
+                        po_num_str = po_line.po.po_number if po_line.po else order.customer_po
+                        changes.append(f"PO Line (PO #{po_num_str}) Quantity: {old_po_line_qty} -> {payload.oar_qty}")
+
+                        if po_line.po:
+                            parent_po = po_line.po
+                            parent_po.total_value = round(
+                                sum((l.line_total or 0.0) for l in parent_po.lines), 2
+                            )
+                            changes.append(f"PO Total Value -> ₹{parent_po.total_value:,.2f}")
+
             if payload.revised_commitment_date is not None:
                 order.revised_commitment_date = payload.revised_commitment_date
                 if not order.commitment_date:

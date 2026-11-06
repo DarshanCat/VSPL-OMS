@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { EditWorkOrderModal } from "@/app/components/planning/EditWorkOrderModal";
+import { EditOARModal } from "@/app/components/planning/EditOARModal";
 import {
   getOarList,
   OARListItem,
@@ -109,8 +110,25 @@ function WOGenerationContent() {
   const [editingWO, setEditingWO] = useState<WorkOrderListItem | null>(null);
   const [editSuccessMsg, setEditSuccessMsg] = useState("");
   const [editingCommitmentOar, setEditingCommitmentOar] = useState<OARListItem | null>(null);
+  const [editingOarModal, setEditingOarModal] = useState<OARListItem | null>(null);
   const [commitmentSuccessMsg, setCommitmentSuccessMsg] = useState("");
   const [successResult, setSuccessResult] = useState<WorkOrderCreateResult | null>(null);
+
+  const handleOarModalSuccess = (updatedOar: OARListItem) => {
+    setOars((prev) =>
+      prev.map((o) => (o.order_id === updatedOar.order_id || o.oar_number === updatedOar.oar_number ? { ...o, ...updatedOar } : o))
+    );
+    if (selectedOar && (selectedOar.order_id === updatedOar.order_id || selectedOar.oar_number === updatedOar.oar_number)) {
+      setSelectedOar((prev) => (prev ? { ...prev, ...updatedOar } : prev));
+      if (updatedOar.remaining_qty !== undefined && updatedOar.remaining_qty > 0) {
+        setWoQty(updatedOar.remaining_qty);
+        setManualQtys([String(updatedOar.remaining_qty)]);
+      }
+    }
+    setEditingOarModal(null);
+    setCommitmentSuccessMsg(`OAR ${updatedOar.oar_number} & linked Customer PO updated successfully.`);
+    setTimeout(() => setCommitmentSuccessMsg(""), 5000);
+  };
 
   // Load next WO number sequence
   const loadNextWoSequence = async () => {
@@ -517,7 +535,22 @@ function WOGenerationContent() {
                             </span>
                           )}
                         </td>
-                        <td className="p-3 text-right font-mono font-bold">{o.oar_qty}</td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{o.oar_qty}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingOarModal(o);
+                              }}
+                              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition cursor-pointer"
+                              title="Edit OAR Quantity (syncs with Customer PO)"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </td>
                         <td className="p-3 text-right font-mono text-zinc-500">{o.allocated_qty}</td>
                         <td className="p-3 text-right font-mono">
                           {o.remaining_qty > 0 ? (
@@ -734,7 +767,17 @@ function WOGenerationContent() {
                   )}
                 </div>
                 <div>
-                  <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Quantities</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Quantities</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingOarModal(selectedOar)}
+                      className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
+                      title="Edit OAR Quantity (syncs with Customer PO)"
+                    >
+                      <Pencil className="h-2.5 w-2.5" /> Edit
+                    </button>
+                  </div>
                   <span className="text-zinc-600 dark:text-zinc-300 block">
                     OAR: <strong>{selectedOar.oar_qty}</strong> | Planned: {selectedOar.allocated_qty}
                   </span>
@@ -1360,6 +1403,15 @@ function WOGenerationContent() {
             await loadOars();
             setTimeout(() => setEditSuccessMsg(""), 5000);
           }}
+        />
+      )}
+
+      {/* Edit OAR & Customer PO Quantity Modal */}
+      {editingOarModal && (
+        <EditOARModal
+          oar={editingOarModal}
+          onClose={() => setEditingOarModal(null)}
+          onSuccess={handleOarModalSuccess}
         />
       )}
 

@@ -359,6 +359,10 @@ export interface WorkOrderListItem {
   delivery_risk: string;
   shortfall: string;
   delivery_date?: string | null;
+  commitment_date?: string | null;
+  revised_commitment_date?: string | null;
+  effective_commitment_date?: string | null;
+  commitment_date_revision_count?: number;
   created_at: string;
   po_date?: string | null;
   oar_date?: string | null;
@@ -1111,6 +1115,7 @@ export async function getOarGenealogy(oarNumber: string): Promise<OARGenealogyRe
 export async function updateOAR(
   oarNumber: string,
   payload: {
+    oar_qty?: number;
     commitment_date?: string | null;
     revised_commitment_date?: string | null;
     revision_reason?: string | null;

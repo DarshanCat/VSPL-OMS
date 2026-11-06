@@ -898,7 +898,7 @@ function WOReleasePageInner() {
             </div>
 
             {/* Production Planning & Genealogy Timeline Dates & Heat Number */}
-            <div className="pt-2 border-t border-blue-200/40 dark:border-blue-800/40 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
+            <div className="pt-2 border-t border-blue-200/40 dark:border-blue-800/40 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-xs">
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
                 <span className="text-[9px] text-zinc-400 uppercase font-bold block">1. PO Creation Date</span>
                 <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">
@@ -924,7 +924,26 @@ function WOReleasePageInner() {
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold block">5. Release Status</span>
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">5. Commitment Date</span>
+                {selectedWODetail.revised_commitment_date ? (
+                  <div>
+                    <span className="font-mono font-bold text-amber-600 dark:text-amber-400 block">
+                      {formatDate(selectedWODetail.revised_commitment_date)}
+                    </span>
+                    <span className="text-[9px] text-zinc-400 font-mono block">
+                      Rev #{selectedWODetail.commitment_date_revision_count || 1}
+                    </span>
+                  </div>
+                ) : selectedWODetail.commitment_date ? (
+                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                    {formatDate(selectedWODetail.commitment_date)}
+                  </span>
+                ) : (
+                  <span className="text-zinc-400 italic text-[11px] block">—</span>
+                )}
+              </div>
+              <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
+                <span className="text-[9px] text-zinc-400 uppercase font-bold block">6. Release Status</span>
                 <span className="font-mono font-bold text-xs">
                   {selectedWODetail.is_released ? (
                     <span className="text-emerald-600">Released</span>
@@ -937,7 +956,7 @@ function WOReleasePageInner() {
               </div>
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
                 <div className="flex items-center justify-between">
-                  <span className="text-[9px] text-zinc-400 uppercase font-bold block">6. Heat Number</span>
+                  <span className="text-[9px] text-zinc-400 uppercase font-bold block">7. Heat Number</span>
                   <button
                     type="button"
                     onClick={() => {
