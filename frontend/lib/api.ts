@@ -1130,6 +1130,11 @@ export async function updateOAR(
   return data;
 }
 
+export async function deleteOAR(oarNumber: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/api/v1/operations/oars/${encodeURIComponent(oarNumber)}`);
+  return data;
+}
+
 export async function releaseWorkOrder(payload: {
   wo_number: string;
   physical_wo_qty: number;

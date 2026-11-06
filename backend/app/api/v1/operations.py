@@ -129,6 +129,15 @@ def update_oar(
     """Update OAR Commitment Date, Delivery Date, Status, or Remarks."""
     return OperationsService.update_oar(db, oar_number=oar_number, payload=payload, current_user=user)
 
+@router.delete("/oars/{oar_number}")
+def delete_oar(
+    oar_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Delete an unstarted OAR if no Work Orders have shop floor activity."""
+    return OperationsService.delete_oar(db, oar_number=oar_number, current_user=user)
+
 @router.post("/wo/{wo_number}/engineering-release", response_model=EngineeringReleaseResponse)
 def engineering_release(
     wo_number: str,

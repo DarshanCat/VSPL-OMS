@@ -508,6 +508,79 @@ class OperationsService:
         return WorkOrderService.build_oar_summary(db, orders[0])
 
     @staticmethod
+    def delete_oar(
+        db: Session,
+        oar_number: str,
+        current_user: Optional[User] = None
+    ) -> dict:
+        """Safely delete an unstarted OAR if no active or released Work Orders have shop floor activity."""
+        clean_oar = oar_number.strip()
+        orders = db.query(Order).filter(Order.oar_number == clean_oar).all()
+        if not orders:
+            try:
+                u = uuid.UUID(clean_oar)
+                order_by_id = db.query(Order).filter(Order.id == u).first()
+                if order_by_id:
+                    orders = [order_by_id]
+            except Exception:
+                pass
+
+        if not orders:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"OAR '{clean_oar}' not found."
+            )
+
+        from app.models.work_order import WorkOrder, WORoute
+        from app.models.production import ProductionUpdate
+        from app.models.production_movement import ProductionMovement, StageWIP
+        from app.models.dispatch import Dispatch
+        from app.models.nc import NCRecord
+
+        for order in orders:
+            wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).all()
+            for wo in wos:
+                has_prod = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+                has_mov = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None
+                has_disp = db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).first() is not None
+                has_nc = db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).first() is not None
+
+                if wo.released_by or has_prod or has_mov or has_disp or has_nc:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Cannot delete OAR '{order.oar_number}' because Work Order '{wo.wo_number}' "
+                            f"is already released to the shop floor or has recorded activity."
+                        )
+                    )
+                db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete(synchronize_session=False)
+                db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete(synchronize_session=False)
+                db.delete(wo)
+
+            oar_num = order.oar_number
+            cust_po = order.customer_po
+            qty = order.po_qty
+
+            order.po_line_id = None
+            db.delete(order)
+
+            audit = AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=(getattr(current_user, "full_name", None) or getattr(current_user, "email", None) or "System"),
+                action="OAR_DELETE",
+                entity="Order",
+                entity_id=str(order.id),
+                details=f"Deleted unstarted OAR {oar_num} (Qty: {qty}, PO: {cust_po})"
+            )
+            db.add(audit)
+
+        db.commit()
+        return {
+            "success": True,
+            "message": f"OAR '{clean_oar}' deleted successfully."
+        }
+
+    @staticmethod
     def create_work_order(
         db: Session,
         req: WorkOrderCreatePayload,

@@ -17,11 +17,12 @@ import {
   X,
   Calendar,
   Edit3,
-  Download
+  Download,
+  Trash2
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
-import { getOarList, OARListItem, createReplacement, ReplacementResult, updateOAR, exportOarsExcel } from "@/lib/api";
+import { getOarList, OARListItem, createReplacement, ReplacementResult, updateOAR, deleteOAR, exportOarsExcel } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -281,6 +282,23 @@ export default function OarWoListPage() {
     } catch (err: any) {
       setEditError(err?.response?.data?.detail || "Failed to update OAR details.");
     } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteOar = async () => {
+    if (!editModalOar) return;
+    const confirmMsg = `Are you sure you want to delete ${editModalOar.oar_number} (${editModalOar.part_name || editModalOar.part_number})?\n\nThis will remove the unstarted OAR and unlink it from any linked PO line.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setEditSubmitting(true);
+    setEditError("");
+    try {
+      await deleteOAR(editModalOar.oar_number);
+      setOars((prev) => prev.filter((o) => o.oar_number !== editModalOar.oar_number));
+      setEditModalOar(null);
+    } catch (err: any) {
+      setEditError(err?.response?.data?.detail || "Failed to delete OAR.");
       setEditSubmitting(false);
     }
   };
@@ -1326,32 +1344,47 @@ export default function OarWoListPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-                    <button
-                      type="button"
-                      onClick={() => setEditModalOar(null)}
-                      disabled={editSubmitting}
-                      className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={editSubmitting}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {editSubmitting ? (
-                        <>
-                          <RotateCw className="h-3.5 w-3.5 animate-spin" />
-                          <span>Saving...</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>Save Changes</span>
-                        </>
+                  <div className="flex items-center justify-between pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                    <div>
+                      {editModalOar && (!editModalOar.allocated_qty || editModalOar.allocated_qty === 0) && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteOar}
+                          disabled={editSubmitting}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Delete OAR</span>
+                        </button>
                       )}
-                    </button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditModalOar(null)}
+                        disabled={editSubmitting}
+                        className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={editSubmitting}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {editSubmitting ? (
+                          <>
+                            <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Save Changes</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}

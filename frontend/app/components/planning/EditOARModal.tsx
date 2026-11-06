@@ -1,7 +1,7 @@
 "use client";
 import React, { useState } from "react";
-import { AlertTriangle, Check, RefreshCw, X, ShoppingCart, CalendarClock } from "lucide-react";
-import { OARListItem, updateOAR } from "@/lib/api";
+import { AlertTriangle, Check, RefreshCw, X, ShoppingCart, CalendarClock, Trash2 } from "lucide-react";
+import { OARListItem, updateOAR, deleteOAR } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "—";
@@ -22,9 +22,10 @@ export interface EditOARModalProps {
   oar: OARListItem;
   onClose: () => void;
   onSuccess: (updatedOar: OARListItem) => void;
+  onDelete?: (deletedOarNumber: string) => void;
 }
 
-export function EditOARModal({ oar, onClose, onSuccess }: EditOARModalProps) {
+export function EditOARModal({ oar, onClose, onSuccess, onDelete }: EditOARModalProps) {
   const isAlreadyCommitted = Boolean(oar.commitment_date || oar.revised_commitment_date);
   const currentEffDate = oar.effective_commitment_date || oar.revised_commitment_date || oar.commitment_date;
   const initialCommitmentDate = currentEffDate
@@ -37,9 +38,31 @@ export function EditOARModal({ oar, onClose, onSuccess }: EditOARModalProps) {
   const [commitmentDate, setCommitmentDate] = useState<string>(initialCommitmentDate);
   const [revisionReason, setRevisionReason] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const minAllowedQty = oar.allocated_qty || 1;
+
+  const handleDeleteOar = async () => {
+    if (!window.confirm(`Are you sure you want to permanently delete OAR ${oar.oar_number}? This will unlink it from the Customer PO line.`)) {
+      return;
+    }
+    try {
+      setDeleting(true);
+      setError("");
+      await deleteOAR(oar.oar_number);
+      if (onDelete) {
+        onDelete(oar.oar_number);
+      } else {
+        onClose();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to delete OAR.";
+      setError(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,23 +264,38 @@ export function EditOARModal({ oar, onClose, onSuccess }: EditOARModalProps) {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="px-3.5 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
-            >
-              {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              <span>{saving ? "Saving Changes..." : "Update OAR & PO"}</span>
-            </button>
+          <div className="flex items-center justify-between pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            {(!oar.allocated_qty || oar.allocated_qty === 0) ? (
+              <button
+                type="button"
+                onClick={handleDeleteOar}
+                disabled={deleting || saving}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                title="Permanently delete this unstarted OAR"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>{deleting ? "Deleting OAR..." : "Delete OAR"}</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={saving || deleting}
+                className="px-3.5 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || deleting}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
+              >
+                {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                <span>{saving ? "Saving Changes..." : "Update OAR & PO"}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

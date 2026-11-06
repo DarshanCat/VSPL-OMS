@@ -857,18 +857,38 @@ class POMasterService:
                     db.add(new_line)
                     changes.append(f"added line: part={part.part_number}, po_qty={line_req.po_qty}, unit_price={u_price}")
 
-            # Deleted lines check
+            # Deleted lines check (safely cleans up unstarted draft OARs, blocks if active production)
             for line_id_str, line in existing_lines_by_id.items():
                 if line_id_str not in payload_line_ids:
-                    allocated = sum(o.po_qty for o in line.orders)
-                    if allocated > 0 or len(line.orders) > 0:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=(
-                                f"Cannot delete PO line for part '{line.part.part_number}' "
-                                f"because it has {allocated} allocated quantity across {len(line.orders)} linked order(s)."
-                            ),
-                        )
+                    from app.models.work_order import WorkOrder, WORoute
+                    from app.models.production import ProductionUpdate
+                    from app.models.production_movement import ProductionMovement, StageWIP
+                    from app.models.dispatch import Dispatch
+                    from app.models.nc import NCRecord
+
+                    for order in list(line.orders):
+                        wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).all()
+                        for wo in wos:
+                            has_prod = db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None
+                            has_mov = db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None
+                            has_disp = db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).first() is not None
+                            has_nc = db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).first() is not None
+
+                            if wo.released_by or has_prod or has_mov or has_disp or has_nc:
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=(
+                                        f"Cannot delete PO line for part '{line.part.part_number}' because linked Work Order '{wo.wo_number}' "
+                                        f"is already released to the shop floor or has recorded activity."
+                                    ),
+                                )
+                            db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete(synchronize_session=False)
+                            db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete(synchronize_session=False)
+                            db.delete(wo)
+
+                        changes.append(f"deleted unstarted linked order: {order.oar_number}")
+                        db.delete(order)
+
                     changes.append(f"deleted line: part={line.part.part_number}, po_qty={line.po_qty}")
                     db.delete(line)
 

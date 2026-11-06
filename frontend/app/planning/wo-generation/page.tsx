@@ -1416,6 +1416,15 @@ function WOGenerationContent() {
           oar={editingOarModal}
           onClose={() => setEditingOarModal(null)}
           onSuccess={handleOarModalSuccess}
+          onDelete={(delOar) => {
+            setOars((prev) => prev.filter((o) => o.oar_number !== delOar));
+            if (selectedOar?.oar_number === delOar) {
+              setSelectedOar(null);
+            }
+            setEditingOarModal(null);
+            setCommitmentSuccessMsg(`OAR ${delOar} deleted successfully.`);
+            setTimeout(() => setCommitmentSuccessMsg(""), 5000);
+          }}
         />
       )}
 
