@@ -9,7 +9,7 @@ from app.models.work_order import WorkOrder
 from app.models.order import Order, Customer, Part
 from app.models.production import ProductionUpdate
 from app.models.production_movement import StageWIP
-from app.models.nc import NCRecord
+from app.models.nc import NCRecord, next_nc_number
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.mrb import (
@@ -237,6 +237,32 @@ class MRBService:
                 review.status = "ADJUSTED"
             else:
                 review.status = "APPROVED"
+                if v_rej > 0 and wo:
+                    nc = db.query(NCRecord).filter(
+                        NCRecord.work_order_id == wo.id,
+                        NCRecord.stage == review.stage
+                    ).order_by(NCRecord.created_at.desc()).first()
+                    if nc:
+                        if req.disposition:
+                            nc.disposition = req.disposition
+                        if v_defect:
+                            nc.defect_code = v_defect
+                    else:
+                        nc_num = next_nc_number(db)
+                        nc_record = NCRecord(
+                            nc_number=nc_num,
+                            work_order_id=wo.id,
+                            stage=review.stage,
+                            defect_code=v_defect or review.reported_defect_code or "DEF-POROSITY",
+                            qty=v_rej,
+                            root_cause=review.review_notes or f"MRB verified rejection at stage {review.stage}",
+                            disposition=req.disposition or "Scrap",
+                            responsibility="Production",
+                            status="Open",
+                            source_type="REJECTION",
+                            date_raised=datetime.now()
+                        )
+                        db.add(nc_record)
 
             review.verified_ok_qty = v_ok
             review.verified_reject_qty = v_rej
@@ -354,16 +380,36 @@ class MRBService:
                 pu.good_qty = new_ok
                 pu.reject_qty = new_rej
 
-        # Sync NC Record if one exists for this rejection
+        # Sync or create NC Record for this rejection
         if diff_rej != 0 and wo:
             nc = db.query(NCRecord).filter(
                 NCRecord.work_order_id == wo.id,
                 NCRecord.stage == review.stage
             ).order_by(NCRecord.created_at.desc()).first()
-            if nc and nc.qty == prior_rej:
+            if nc:
                 nc.qty = new_rej
                 if defect_code:
                     nc.defect_code = defect_code
+                if review.disposition:
+                    nc.disposition = review.disposition
+                if new_rej == 0:
+                    nc.status = "Closed"
+            elif new_rej > 0:
+                nc_num = next_nc_number(db)
+                nc_record = NCRecord(
+                    nc_number=nc_num,
+                    work_order_id=wo.id,
+                    stage=review.stage,
+                    defect_code=defect_code or review.reported_defect_code or "DEF-POROSITY",
+                    qty=new_rej,
+                    root_cause=review.review_notes or f"MRB verified rejection at stage {review.stage}",
+                    disposition=review.disposition or "Scrap",
+                    responsibility="Production",
+                    status="Open",
+                    source_type="REJECTION",
+                    date_raised=datetime.now()
+                )
+                db.add(nc_record)
 
         # Recompute entire WO downstream targets and status
         if wo:
