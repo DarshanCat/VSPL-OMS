@@ -1705,4 +1705,74 @@ export async function adjustMRBReview(
   return data;
 }
 
+// ============================================================================
+// Vendor / Subcontractor Tracking & Inward Reception
+// ============================================================================
+
+export interface VendorDispatchItem {
+  id: string;
+  work_order_id?: string;
+  wo_number: string;
+  oar_number: string;
+  customer_name: string;
+  part_number: string;
+  part_name: string;
+  dispatch_stage: string;
+  vendor_name: string;
+  dc_number: string;
+  dispatched_qty: number;
+  received_qty: number;
+  scrap_qty: number;
+  pending_qty: number;
+  status: "AT_VENDOR" | "PARTIALLY_RECEIVED" | "RECEIVED";
+  dispatched_at: string;
+  received_at?: string;
+  inward_dc_number?: string;
+  remarks?: string;
+  days_at_vendor: number;
+}
+
+export interface VendorSummary {
+  active_dispatches_count: number;
+  completed_dispatches_count: number;
+  total_pieces_at_vendor: number;
+  total_pieces_received: number;
+  active_vendor_count: number;
+}
+
+export async function getVendorDispatches(params?: {
+  status?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<VendorDispatchItem[]> {
+  const { data } = await api.get("/api/v1/vendor/dispatches", { params });
+  return data;
+}
+
+export async function getVendorSummary(): Promise<VendorSummary> {
+  const { data } = await api.get("/api/v1/vendor/summary");
+  return data;
+}
+
+export async function receiveVendorDispatch(payload: {
+  dispatch_id: string;
+  received_qty: number;
+  scrap_qty?: number;
+  inward_dc?: string;
+  remarks?: string;
+}): Promise<{
+  success: boolean;
+  message: string;
+  dispatch_id: string;
+  wo_number: string;
+  received_qty: number;
+  scrap_qty: number;
+  status: string;
+  current_stage: string;
+}> {
+  const { data } = await api.post("/api/v1/vendor/receive", payload);
+  return data;
+}
+
 

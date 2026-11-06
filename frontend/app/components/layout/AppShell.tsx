@@ -123,6 +123,12 @@ const NAV_GROUPS: NavGroup[] = [
         badge: "Floor",
       },
       {
+        name: "Vendor Tracking",
+        href: "/production/vendor",
+        icon: <Truck className="h-4 w-4 text-purple-500" />,
+        badge: "Vendor",
+      },
+      {
         name: "MRB Review Board",
         href: "/quality/mrb",
         icon: <ClipboardCheck className="h-4 w-4 text-amber-500" />,

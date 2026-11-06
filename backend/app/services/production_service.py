@@ -231,7 +231,8 @@ class ProductionService:
         from_idx = route_stage_names.index(matched_from)
         to_idx = route_stage_names.index(matched_to)
 
-        if to_idx != from_idx + 1:
+        is_vendor_f2_to_fi = (matched_from == "F2" and matched_to == "FI")
+        if to_idx != from_idx + 1 and not is_vendor_f2_to_fi:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid stage sequence: Cannot jump directly from '{matched_from}' to '{matched_to}'. Next allowed stage on this Work Order's route is '{route_stage_names[from_idx + 1]}'."
@@ -648,11 +649,40 @@ class ProductionService:
         # allows cumulative OK to run past ent_qty (and past the OMS target derived
         # from it) with no ceiling. This is the same ent/ok/rej accounting the OMS
         # Engine already uses to compute inproc_qty -- not a new formula.
+        is_f1 = matched_stage.upper() == "F1"
+        is_vendor = (req.production_type or "").upper() == "VENDOR"
+
         if total_proc > wip.inproc_qty:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot process {total_proc} pieces ({req.good_qty} Good + {req.rejected_quantity} Rej). Only {wip.inproc_qty} pieces of unprocessed material remain at stage '{matched_stage}' (target consumed: {wip.ok_qty + wip.rejected_qty} of {wip.ent_qty})."
-            )
+            if is_f1:
+                # F1 Excess Production: Expand physical WO quantity, F1 ent_qty, and all downstream route targets
+                excess_qty = total_proc - wip.inproc_qty
+                orig_target = wo.physical_wo_qty or 0
+                wo.physical_wo_qty = orig_target + excess_qty
+                wip.ent_qty = (wip.ent_qty or 0) + excess_qty
+                wip.inproc_qty = total_proc - (wip.ok_qty + wip.rejected_qty)
+                for r in routes:
+                    r.stage_target_qty = wo.physical_wo_qty
+
+                # Trigger In-System & Email Alert for F1 excess
+                try:
+                    from app.services.notification_service import NotificationService
+                    NotificationService.send_f1_excess_alert(
+                        wo=wo,
+                        stage=matched_stage,
+                        planned_qty=orig_target,
+                        produced_qty=total_proc,
+                        excess_qty=excess_qty,
+                        heat_number=req.heat_number or wo.heat_number,
+                        operator_name=req.operator_name or (current_user.full_name if current_user else "Floor Operator"),
+                        reason=req.remarks or "Foundry excess casting / extra mould poured"
+                    )
+                except Exception as _e:
+                    pass
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot process {total_proc} pieces ({req.good_qty} Good + {req.rejected_quantity} Rej). Only {wip.inproc_qty} pieces of unprocessed material remain at stage '{matched_stage}' (target consumed: {wip.ok_qty + wip.rejected_qty} of {wip.ent_qty})."
+                )
 
         wip.ok_qty += req.good_qty
         wip.rejected_qty += req.rejected_quantity
@@ -681,6 +711,7 @@ class ProductionService:
         db.flush()
 
         # Create Material Review Board (MRB) ticket for Quality, Planner, and Admin review
+        # Note: Outside vendor dispatches do not require a pending floor scrap review.
         mrb_num = next_mrb_number(db)
         mrb_ticket = MRBReview(
             mrb_number=mrb_num,
@@ -694,14 +725,31 @@ class ProductionService:
             reported_ok_qty=req.good_qty,
             reported_reject_qty=req.rejected_quantity,
             reported_defect_code=req.defect_code if req.rejected_quantity > 0 else None,
-            floor_remarks=req.remarks,
+            floor_remarks=req.remarks or (f"Dispatched to outside vendor {req.vendor_name} on DC #{req.dc_number}" if is_vendor else None),
             verified_ok_qty=req.good_qty,
             verified_reject_qty=req.rejected_quantity,
             verified_defect_code=req.defect_code if req.rejected_quantity > 0 else None,
-            status="PENDING",
-            disposition="PENDING",
+            status="APPROVED" if is_vendor else "PENDING",
+            disposition="DISPATCHED_TO_VENDOR" if is_vendor else "PENDING",
+            reviewed_by_name="System (Vendor Outward)" if is_vendor else None,
+            reviewed_at=now if is_vendor else None,
         )
         db.add(mrb_ticket)
+
+        # Track outside vendor dispatch in vendor_dispatches table
+        if is_vendor and req.vendor_name and req.dc_number:
+            from app.models.vendor import VendorDispatch
+            v_disp = VendorDispatch(
+                work_order_id=wo.id,
+                dispatch_stage=matched_stage,
+                vendor_name=req.vendor_name.strip(),
+                dc_number=req.dc_number.strip(),
+                dispatched_qty=req.good_qty,
+                status="AT_VENDOR",
+                created_by=current_user.id if current_user else None,
+                remarks=req.remarks
+            )
+            db.add(v_disp)
 
         # Log NC if rejected
         if req.rejected_quantity > 0:

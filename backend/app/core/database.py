@@ -431,6 +431,43 @@ def auto_migrate_schema():
         "CREATE INDEX IF NOT EXISTS ix_customer_returns_customer_code ON customer_returns (customer_code);",
         "CREATE INDEX IF NOT EXISTS ix_customer_returns_return_number ON customer_returns (return_number);",
         "CREATE INDEX IF NOT EXISTS ix_customer_returns_conversion_wo ON customer_returns (conversion_wo_number);",
+
+        # Vendor Dispatches (Outside subcontracting from F2 to FI)
+        "CREATE TABLE IF NOT EXISTS vendor_dispatches ("
+        "    id UUID PRIMARY KEY,"
+        "    work_order_id UUID NOT NULL REFERENCES work_orders(id),"
+        "    dispatch_stage VARCHAR(50) NOT NULL DEFAULT 'F2',"
+        "    vendor_name VARCHAR(200) NOT NULL,"
+        "    dc_number VARCHAR(100) NOT NULL,"
+        "    dispatched_qty INTEGER NOT NULL,"
+        "    received_qty INTEGER NOT NULL DEFAULT 0,"
+        "    scrap_qty INTEGER NOT NULL DEFAULT 0,"
+        "    status VARCHAR(50) NOT NULL DEFAULT 'AT_VENDOR',"
+        "    dispatched_at TIMESTAMPTZ DEFAULT NOW(),"
+        "    received_at TIMESTAMPTZ,"
+        "    inward_dc_number VARCHAR(100),"
+        "    remarks VARCHAR,"
+        "    created_by UUID REFERENCES users(id),"
+        "    created_at TIMESTAMPTZ DEFAULT NOW(),"
+        "    updated_at TIMESTAMPTZ DEFAULT NOW()"
+        ");",
+        "CREATE INDEX IF NOT EXISTS ix_vendor_dispatches_status ON vendor_dispatches (status);",
+        "CREATE INDEX IF NOT EXISTS ix_vendor_dispatches_vendor_name ON vendor_dispatches (vendor_name);",
+        "CREATE INDEX IF NOT EXISTS ix_vendor_dispatches_dc_number ON vendor_dispatches (dc_number);",
+
+        # BSR Finished Goods Stock
+        "CREATE TABLE IF NOT EXISTS bsr_stock ("
+        "    id UUID PRIMARY KEY,"
+        "    part_id UUID NOT NULL REFERENCES parts(id),"
+        "    available_qty INTEGER NOT NULL DEFAULT 0,"
+        "    allocated_qty INTEGER NOT NULL DEFAULT 0,"
+        "    source_wo_id UUID REFERENCES work_orders(id),"
+        "    heat_number VARCHAR,"
+        "    remarks VARCHAR,"
+        "    created_at TIMESTAMPTZ DEFAULT NOW(),"
+        "    updated_at TIMESTAMPTZ DEFAULT NOW()"
+        ");",
+        "CREATE INDEX IF NOT EXISTS ix_bsr_stock_part_id ON bsr_stock (part_id);",
     ]
 
 
