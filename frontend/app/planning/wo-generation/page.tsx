@@ -18,7 +18,10 @@ import {
   Split,
   ChevronRight,
   Edit2,
-  X
+  X,
+  Pencil,
+  Calendar,
+  CalendarClock
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
@@ -31,7 +34,8 @@ import {
   WorkOrderCreatePayload,
   WorkOrderCreateResult,
   updateWorkOrder,
-  WorkOrderUpdatePayload
+  WorkOrderUpdatePayload,
+  updateOAR
 } from "@/lib/api";
 
 function formatDate(dateStr?: string | null): string {
@@ -103,6 +107,8 @@ function WOGenerationContent() {
   const [error, setError] = useState("");
   const [editingWO, setEditingWO] = useState<WorkOrderListItem | null>(null);
   const [editSuccessMsg, setEditSuccessMsg] = useState("");
+  const [editingCommitmentOar, setEditingCommitmentOar] = useState<OARListItem | null>(null);
+  const [commitmentSuccessMsg, setCommitmentSuccessMsg] = useState("");
   const [successResult, setSuccessResult] = useState<WorkOrderCreateResult | null>(null);
 
   // Load next WO number sequence
@@ -161,13 +167,29 @@ function WOGenerationContent() {
     setManualQtys([String(Math.ceil((initialQty || 10) / 2)), String(Math.floor((initialQty || 10) / 2))]);
     // Rule: Same OAR should NOT repeat WO generation. Never auto-enable overrun.
     setAllowOverrun(false);
-    if (oar.delivery_date) {
-      setTargetDate(oar.delivery_date.slice(0, 10));
+    const effDate = oar.effective_commitment_date || oar.revised_commitment_date || oar.commitment_date || oar.delivery_date;
+    if (effDate) {
+      setTargetDate(effDate.slice(0, 10));
     }
     setError("");
     setSuccessResult(null);
     loadNextWoSequence();
     document.getElementById("wo-generator-card")?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const handleCommitmentDateSuccess = (updatedOar: OARListItem) => {
+    setEditingCommitmentOar(null);
+    const eff = updatedOar.effective_commitment_date || updatedOar.revised_commitment_date || updatedOar.commitment_date;
+    setCommitmentSuccessMsg(`Commitment Date for ${updatedOar.oar_number} updated to ${formatDate(eff)}!`);
+    setOars((prev) => prev.map((o) => (o.oar_number === updatedOar.oar_number ? { ...o, ...updatedOar } : o)));
+    if (selectedOar?.oar_number === updatedOar.oar_number) {
+      setSelectedOar((prev) => (prev ? { ...prev, ...updatedOar } : updatedOar));
+      const effDate = updatedOar.effective_commitment_date || updatedOar.revised_commitment_date || updatedOar.commitment_date || updatedOar.delivery_date;
+      if (effDate) {
+        setTargetDate(effDate.slice(0, 10));
+      }
+    }
+    setTimeout(() => setCommitmentSuccessMsg(""), 5000);
   };
 
   const handleToggleStage = (stage: string) => {
@@ -452,6 +474,7 @@ function WOGenerationContent() {
                     <th className="p-3 text-right">Allocated</th>
                     <th className="p-3 text-right">Remaining to Plan</th>
                     <th className="p-3">Delivery Date</th>
+                    <th className="p-3">Commitment Date</th>
                     <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
@@ -505,6 +528,44 @@ function WOGenerationContent() {
                           )}
                         </td>
                         <td className="p-3 text-zinc-500">{formatDate(o.delivery_date)}</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            {o.revised_commitment_date ? (
+                              <div>
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-amber-600 dark:text-amber-400 font-mono">
+                                    {formatDate(o.revised_commitment_date)}
+                                  </span>
+                                  <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                                    Rev #{o.commitment_date_revision_count || 1}
+                                  </span>
+                                </div>
+                                {o.commitment_date && (
+                                  <span className="text-[10px] text-zinc-400 line-through block font-mono">
+                                    Orig: {formatDate(o.commitment_date)}
+                                  </span>
+                                )}
+                              </div>
+                            ) : o.commitment_date ? (
+                              <span className="font-bold text-blue-600 dark:text-blue-400 font-mono">
+                                {formatDate(o.commitment_date)}
+                              </span>
+                            ) : (
+                              <span className="text-zinc-400 italic text-[11px]">—</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCommitmentOar(o);
+                              }}
+                              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                              title={o.commitment_date || o.revised_commitment_date ? "Change / Revise Commitment Date" : "Set Commitment Date"}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </td>
                         <td className="p-3 text-right">
                           <button
                             type="button"
@@ -649,7 +710,7 @@ function WOGenerationContent() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Parent OAR Summary Card */}
-              <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-800 grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Parent OAR</span>
                   <span className="font-mono font-bold text-emerald-600 text-sm">{selectedOar.oar_number}</span>
@@ -679,6 +740,44 @@ function WOGenerationContent() {
                   <span className="font-bold text-emerald-600 font-mono">
                     Remaining: {selectedOar.remaining_qty} pcs
                   </span>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-400 uppercase font-semibold block">Commitment Date</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingCommitmentOar(selectedOar)}
+                      className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Pencil className="h-2.5 w-2.5" /> Edit
+                    </button>
+                  </div>
+                  {selectedOar.revised_commitment_date ? (
+                    <div>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400 block text-sm">
+                        {formatDate(selectedOar.revised_commitment_date)}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-mono block">
+                        Rev #{selectedOar.commitment_date_revision_count || 1}
+                      </span>
+                    </div>
+                  ) : selectedOar.commitment_date ? (
+                    <div>
+                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400 block text-sm">
+                        {formatDate(selectedOar.commitment_date)}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 block font-mono">
+                        PO: {formatDate(selectedOar.delivery_date)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-zinc-400 italic block text-xs">Not committed</span>
+                      <span className="text-[10px] text-zinc-400 block font-mono">
+                        PO: {formatDate(selectedOar.delivery_date)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1231,6 +1330,23 @@ function WOGenerationContent() {
         </div>
       </div>
 
+      {/* Edit Commitment Date Modal */}
+      {editingCommitmentOar && (
+        <EditCommitmentDateModal
+          oar={editingCommitmentOar}
+          onClose={() => setEditingCommitmentOar(null)}
+          onSuccess={handleCommitmentDateSuccess}
+        />
+      )}
+
+      {/* Toast alert for commitment date success */}
+      {commitmentSuccessMsg && (
+        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-blue-600 text-white px-4 py-3 shadow-xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle2 className="h-4 w-4" />
+          <span>{commitmentSuccessMsg}</span>
+        </div>
+      )}
+
       {/* Edit Work Order Modal */}
       {editingWO && (
         <EditWorkOrderModal
@@ -1518,6 +1634,177 @@ function EditWorkOrderModal({ wo, onClose, onSuccess }: EditWorkOrderModalProps)
             >
               {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
               <span>{saving ? "Saving Changes..." : "Save Changes"}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+interface EditCommitmentDateModalProps {
+  oar: OARListItem;
+  onClose: () => void;
+  onSuccess: (updatedOar: OARListItem) => void;
+}
+
+function EditCommitmentDateModal({ oar, onClose, onSuccess }: EditCommitmentDateModalProps) {
+  const isAlreadyCommitted = Boolean(oar.commitment_date || oar.revised_commitment_date);
+  const currentEffDate = oar.effective_commitment_date || oar.revised_commitment_date || oar.commitment_date;
+  const initialDate = currentEffDate
+    ? currentEffDate.slice(0, 10)
+    : oar.delivery_date
+    ? oar.delivery_date.slice(0, 10)
+    : "";
+
+  const [commitmentDate, setCommitmentDate] = useState(initialDate);
+  const [revisionReason, setRevisionReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commitmentDate) {
+      setError("Please select a commitment date.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+
+      const payload: {
+        commitment_date?: string;
+        revised_commitment_date?: string;
+        revision_reason?: string;
+      } = {};
+
+      if (isAlreadyCommitted) {
+        payload.revised_commitment_date = commitmentDate;
+        payload.revision_reason = revisionReason.trim() || undefined;
+      } else {
+        payload.commitment_date = commitmentDate;
+        if (revisionReason.trim()) {
+          payload.revision_reason = revisionReason.trim();
+        }
+      }
+
+      const updated = await updateOAR(oar.oar_number, payload);
+      onSuccess(updated);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update commitment date.";
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-950/70 text-blue-600 dark:text-blue-400">
+              <CalendarClock className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">
+                {isAlreadyCommitted ? "Revise Commitment Date" : "Set Initial Commitment Date"}
+              </h3>
+              <p className="text-[11px] text-zinc-500 font-mono">OAR: {oar.oar_number}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs">
+          {error && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-300 text-xs">
+              {error}
+            </div>
+          )}
+
+          {/* Context details */}
+          <div className="rounded-xl bg-zinc-50 dark:bg-zinc-800/40 p-3 border border-zinc-200 dark:border-zinc-800 space-y-1.5">
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Customer:</span>
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate max-w-[200px]">{oar.customer_name}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Part:</span>
+              <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200">{oar.customer_part_number || oar.part_number}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">PO Delivery Date:</span>
+              <span className="font-mono text-zinc-700 dark:text-zinc-300">{formatDate(oar.delivery_date)}</span>
+            </div>
+            {isAlreadyCommitted && (
+              <div className="flex justify-between pt-1 border-t border-zinc-200 dark:border-zinc-700">
+                <span className="text-amber-600 dark:text-amber-400 font-medium">Current Committed:</span>
+                <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                  {formatDate(currentEffDate)} {oar.commitment_date_revision_count ? `(Rev #${oar.commitment_date_revision_count})` : ""}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Commitment Date Input */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+              {isAlreadyCommitted ? "New Revised Commitment Date *" : "Commitment Date *"}
+            </label>
+            <input
+              type="date"
+              required
+              value={commitmentDate}
+              onChange={(e) => setCommitmentDate(e.target.value)}
+              className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2 text-xs text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none font-mono"
+            />
+          </div>
+
+          {/* Revision Reason */}
+          <div>
+            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+              Revision Reason {isAlreadyCommitted ? "(Recommended)" : "(Optional)"}
+            </label>
+            <input
+              type="text"
+              placeholder={isAlreadyCommitted ? "e.g., Customer requested rescheduling, material delay..." : "Optional notes for commitment"}
+              value={revisionReason}
+              onChange={(e) => setRevisionReason(e.target.value)}
+              className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2 text-xs text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none"
+            />
+            {isAlreadyCommitted && (
+              <p className="text-[10px] text-zinc-400 mt-1">
+                Updating this date will increment the revision count to Rev #{(oar.commitment_date_revision_count || 0) + 1} and record the audit timestamp.
+              </p>
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="px-3.5 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
+            >
+              {saving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              <span>{saving ? "Updating..." : isAlreadyCommitted ? "Save Revision" : "Set Commitment Date"}</span>
             </button>
           </div>
         </form>
