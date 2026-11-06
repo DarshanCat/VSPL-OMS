@@ -60,7 +60,7 @@ class VendorService:
                 "oar_number": order.oar_number if order else "N/A",
                 "customer_name": customer.name if customer else "N/A",
                 "part_number": part.part_number if part else "N/A",
-                "part_name": part.name if part else "N/A",
+                "part_name": (part.description or part.part_number) if part else "N/A",
                 "dispatch_stage": d.dispatch_stage or "F2",
                 "vendor_name": d.vendor_name,
                 "dc_number": d.dc_number,
