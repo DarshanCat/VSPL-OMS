@@ -20,11 +20,14 @@ import {
   CheckSquare,
   FileSpreadsheet,
   FileCheck,
-  Flame
+  Flame,
+  AlertTriangle,
+  X,
+  RotateCcw
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
-import { getWorkOrders, getWorkOrderTracking } from "@/lib/api";
+import { getWorkOrders, getWorkOrderTracking, declareWOShortfall } from "@/lib/api";
 
 export default function WorkOrderTrackingPage() {
   return (
@@ -44,6 +47,15 @@ function WorkOrderTrackingPageInner() {
   const [woData, setWoData] = useState<any>(null);
   const [wosList, setWosList] = useState<any[]>([]);
   const [error, setError] = useState("");
+
+  // Shortfall Modal State
+  const [isShortfallModalOpen, setIsShortfallModalOpen] = useState(false);
+  const [shortfallDeclareQty, setShortfallDeclareQty] = useState<number | "">("");
+  const [shortfallDeclareReason, setShortfallDeclareReason] = useState("");
+  const [createPatchWO, setCreatePatchWO] = useState(true);
+  const [declaringShortfall, setDeclaringShortfall] = useState(false);
+  const [shortfallSuccessMsg, setShortfallSuccessMsg] = useState<string | null>(null);
+  const [patchWONumber, setPatchWONumber] = useState<string | null>(null);
 
   const loadWorkOrders = (cls: "ALL" | "Production" | "NPD") => {
     getWorkOrders({
@@ -84,6 +96,52 @@ function WorkOrderTrackingPageInner() {
       setWoData(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const f1Timeline = woData?.timeline?.find((t: any) => t.stage === "F1");
+  const f1Remaining = f1Timeline
+    ? Math.max((f1Timeline.target_qty || 0) - (f1Timeline.ok_completed_qty || 0) - (f1Timeline.rejected_qty || 0), 0)
+    : 0;
+
+  const handleOpenShortfallModal = () => {
+    setShortfallDeclareQty(f1Remaining);
+    setShortfallDeclareReason("");
+    setCreatePatchWO(true);
+    setIsShortfallModalOpen(true);
+    setShortfallSuccessMsg(null);
+    setPatchWONumber(null);
+  };
+
+  const handleConfirmShortfall = async () => {
+    if (!woData?.wo_number) return;
+    const qty = Number(shortfallDeclareQty);
+    if (!qty || qty <= 0) {
+      alert("Please enter a valid shortfall quantity greater than 0.");
+      return;
+    }
+    if (!shortfallDeclareReason.trim()) {
+      alert("Please enter a mandatory reason for the shortfall.");
+      return;
+    }
+
+    setDeclaringShortfall(true);
+    try {
+      const res = await declareWOShortfall(woData.wo_number, {
+        shortfall_qty: qty,
+        reason: shortfallDeclareReason.trim(),
+        create_patch_wo: createPatchWO,
+        heat_number: woData.heat_number || undefined,
+      });
+
+      setIsShortfallModalOpen(false);
+      setShortfallSuccessMsg(res.message);
+      setPatchWONumber(res.patch_wo_number);
+      await fetchTracking(woData.wo_number);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to declare shortfall.");
+    } finally {
+      setDeclaringShortfall(false);
     }
   };
 
@@ -256,6 +314,17 @@ function WorkOrderTrackingPageInner() {
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-200 border border-rose-300 dark:border-rose-700" title={(woData as any).shortfall_reason || "Shortfall recorded"}>
                           ⚠️ F1 Shortfall: -{(woData as any).shortfall_qty} pcs{(woData as any).shortfall_reason ? ` (${(woData as any).shortfall_reason})` : ""}
                         </span>
+                      )}
+                      {f1Remaining > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleOpenShortfallModal}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition cursor-pointer"
+                          title="Declare shortfall on remaining F1 material and auto-create Patch WO"
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          <span>⚠️ Declare F1 Shortfall ({f1Remaining} pcs)</span>
+                        </button>
                       )}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
@@ -519,6 +588,157 @@ function WorkOrderTrackingPageInner() {
                   No movement or production transactions recorded yet for this Work Order.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Shortfall Success Alert */}
+        {shortfallSuccessMsg && (
+          <div className="rounded-2xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <div>
+                <p className="text-xs font-extrabold text-emerald-900 dark:text-emerald-100">{shortfallSuccessMsg}</p>
+                {patchWONumber && (
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                    New Patch WO: <strong className="font-mono">{patchWONumber}</strong> is now live and auto-released for casting.
+                  </p>
+                )}
+              </div>
+            </div>
+            {patchWONumber && (
+              <button
+                type="button"
+                onClick={() => fetchTracking(patchWONumber)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shrink-0"
+              >
+                Track {patchWONumber}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Shortfall Declaration Modal */}
+        {isShortfallModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 px-6 py-4 bg-amber-50/50 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-zinc-900 dark:text-zinc-50">
+                      Declare F1 Shortfall &amp; Create Patch WO
+                    </h3>
+                    <p className="text-[11px] text-zinc-500">
+                      Work Order: <strong className="font-mono text-zinc-800 dark:text-zinc-200">{woData?.wo_number}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsShortfallModalOpen(false)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 text-xs">
+                <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800 text-center font-mono">
+                  <div>
+                    <span className="text-[10px] text-zinc-400 uppercase font-sans font-bold block">Planned Target</span>
+                    <span className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">{woData?.physical_wo_qty ?? 0} pcs</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-emerald-600 uppercase font-sans font-bold block">F1 OK Done</span>
+                    <span className="font-bold text-emerald-600 text-sm">{f1Timeline?.ok_completed_qty ?? 0} pcs</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-amber-600 uppercase font-sans font-bold block">Remaining</span>
+                    <span className="font-bold text-amber-600 text-sm">{f1Remaining} pcs</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Shortfall Quantity to Close Out (pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={f1Remaining}
+                    value={shortfallDeclareQty}
+                    onChange={(e) => setShortfallDeclareQty(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3.5 py-2.5 text-sm font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:border-amber-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Current WO will be finalized at {Math.max((woData?.physical_wo_qty || 0) - (Number(shortfallDeclareQty) || 0), 0)} pcs.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-rose-600 dark:text-rose-400 mb-1">
+                    Reason for Shortfall / Less Production * (Mandatory)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={shortfallDeclareReason}
+                    onChange={(e) => setShortfallDeclareReason(e.target.value)}
+                    placeholder="e.g. Ladle metal short, mould leak, sand collapse, furnace heat balance ended..."
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-rose-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-purple-200 dark:border-purple-800/80 bg-purple-50/50 dark:bg-purple-950/20">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createPatchWO}
+                      onChange={(e) => setCreatePatchWO(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-purple-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-extrabold text-purple-900 dark:text-purple-200">
+                        Automatically create New Patch Work Order for shortfall quantity
+                      </span>
+                      <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                        Generates a new sequential Work Order ID linked to the same OAR and auto-releases it so the shop floor can immediately cast the remaining pieces.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 border-t border-zinc-100 dark:border-zinc-800 px-6 py-4 bg-zinc-50 dark:bg-zinc-950">
+                <button
+                  type="button"
+                  onClick={() => setIsShortfallModalOpen(false)}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={declaringShortfall || !shortfallDeclareReason.trim()}
+                  onClick={handleConfirmShortfall}
+                  className="rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-5 py-2 text-xs font-extrabold text-white shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  {declaringShortfall ? (
+                    <>
+                      <RotateCcw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Closing &amp; Spawning Patch WO...</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <span>Confirm Shortfall &amp; Create Patch WO</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

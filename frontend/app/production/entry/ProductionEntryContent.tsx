@@ -22,7 +22,8 @@ import {
   ClipboardCheck,
   AlertCircle,
   Flame,
-  Lock
+  Lock,
+  X
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -33,6 +34,7 @@ import {
   getStageState,
   getRejectionTypes,
   recordStageProduction,
+  declareWOShortfall,
   MasterRejectionType,
   getMasterMachines,
   getShifts,
@@ -115,6 +117,13 @@ export function ProductionEntryContent() {
   // Result / Success Modal
   const [successResult, setSuccessResult] = useState<any>(null);
   const [showQRModal, setShowQRModal] = useState(false);
+
+  // Dedicated Shortfall Declaration Modal
+  const [isShortfallModalOpen, setIsShortfallModalOpen] = useState(false);
+  const [shortfallDeclareQty, setShortfallDeclareQty] = useState<number | "">("");
+  const [shortfallDeclareReason, setShortfallDeclareReason] = useState("");
+  const [createPatchWO, setCreatePatchWO] = useState(true);
+  const [declaringShortfall, setDeclaringShortfall] = useState(false);
 
   // Focus Refs for Tally-Style Navigation
   const inputSearchRef = useRef<HTMLInputElement>(null);
@@ -501,6 +510,54 @@ export function ProductionEntryContent() {
   const isF1ExcessActive = isStageF1 && curProcTotal > remainingTargetForStage;
   const f1ExcessAmount = isF1ExcessActive ? curProcTotal - remainingTargetForStage : 0;
 
+  const handleOpenShortfallModal = () => {
+    setShortfallDeclareQty(remainingTargetForStage);
+    setShortfallDeclareReason("");
+    setCreatePatchWO(true);
+    setIsShortfallModalOpen(true);
+  };
+
+  const handleConfirmShortfall = async () => {
+    if (!woData?.wo_number) return;
+    const qty = Number(shortfallDeclareQty);
+    if (!qty || qty <= 0) {
+      alert("Please enter a valid shortfall quantity greater than 0.");
+      return;
+    }
+    if (!shortfallDeclareReason.trim()) {
+      alert("Please enter a mandatory reason for the shortfall.");
+      return;
+    }
+
+    setDeclaringShortfall(true);
+    try {
+      const res = await declareWOShortfall(woData.wo_number, {
+        shortfall_qty: qty,
+        reason: shortfallDeclareReason.trim(),
+        create_patch_wo: createPatchWO,
+        heat_number: heatNumber.trim() || woData.heat_number || undefined,
+        remarks: remarks.trim() || undefined,
+      });
+
+      setIsShortfallModalOpen(false);
+      setSuccessResult({
+        wo_number: res.wo_number,
+        stage: "F1",
+        stage_ok_total: res.new_physical_wo_qty,
+        stage_rejection_total: 0,
+        stage_onhand_available: res.new_physical_wo_qty,
+        stage_inproc_remaining: 0,
+        message: res.message,
+        patch_wo_number: res.patch_wo_number,
+      });
+      await lookupWO(woData.wo_number, "F1");
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "Failed to declare shortfall.");
+    } finally {
+      setDeclaringShortfall(false);
+    }
+  };
+
   return (
       <div className="max-w-5xl mx-auto space-y-6">
         {/* Header */}
@@ -750,6 +807,23 @@ export function ProductionEntryContent() {
                         {activeStage.is_gate_locked ? "0 pcs (Passed)" : `${activeStage.remaining_to_produce ?? activeStage.in_process_qty} pcs`}
                       </span>
                     </div>
+
+                    {isStageF1 && remainingTargetForStage > 0 && (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={handleOpenShortfallModal}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs shadow-sm transition-colors cursor-pointer"
+                          title="Close remaining in-process material at F1 with shortfall and optionally create a New Patch WO"
+                        >
+                          <AlertTriangle className="h-4 w-4" />
+                          <span>⚠️ Declare Shortfall ({remainingTargetForStage} pcs)</span>
+                        </button>
+                        <p className="mt-1 text-[10px] text-zinc-500 text-center">
+                          Closes F1 balance &amp; auto-creates New Patch WO.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -798,7 +872,19 @@ export function ProductionEntryContent() {
                       <ClipboardCheck className="h-4 w-4 text-emerald-600" />
                       <span>Log Production Completion</span>
                     </h3>
-                    <span className="text-[11px] text-zinc-400">Press Enter to navigate fields</span>
+                    <div className="flex items-center gap-2">
+                      {isStageF1 && remainingTargetForStage > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleOpenShortfallModal}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 text-xs font-bold border border-amber-300 dark:border-amber-700 transition cursor-pointer"
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                          <span>Shortfall on Remaining ({remainingTargetForStage} pcs)</span>
+                        </button>
+                      )}
+                      <span className="text-[11px] text-zinc-400">Press Enter to navigate fields</span>
+                    </div>
                   </div>
 
                   {formError && (
@@ -1167,6 +1253,22 @@ export function ProductionEntryContent() {
                 <span>On-Hand Available: <strong className="text-blue-600">{successResult.stage_onhand_available}</strong></span>
                 <span>In-Process Remaining: <strong className="text-amber-600">{successResult.stage_inproc_remaining}</strong></span>
               </div>
+              {successResult.patch_wo_number && (
+                <div className="pt-2">
+                  <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-purple-600 block">Patch Work Order Spawned</span>
+                      <strong className="text-sm font-mono text-purple-900 dark:text-purple-100">{successResult.patch_wo_number}</strong>
+                    </div>
+                    <Link
+                      href={`/production/entry?wo=${encodeURIComponent(successResult.patch_wo_number)}&stage=F1`}
+                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-sm transition"
+                    >
+                      Open Patch WO in F1
+                    </Link>
+                  </div>
+                </div>
+              )}
               {successResult.stage_onhand_available > 0 && (
                 <div className="pt-2">
                   <Link
@@ -1178,6 +1280,144 @@ export function ProductionEntryContent() {
                   </Link>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Shortfall Declaration Modal */}
+        {isShortfallModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="w-full max-w-lg rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 px-6 py-4 bg-amber-50/50 dark:bg-amber-950/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-zinc-900 dark:text-zinc-50">
+                      Declare F1 Shortfall &amp; Create Patch WO
+                    </h3>
+                    <p className="text-[11px] text-zinc-500">
+                      Work Order: <strong className="font-mono text-zinc-800 dark:text-zinc-200">{woData?.wo_number}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsShortfallModalOpen(false)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 text-xs">
+                <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800 text-center font-mono">
+                  <div>
+                    <span className="text-[10px] text-zinc-400 uppercase font-sans font-bold block">Planned Target</span>
+                    <span className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">{woData?.physical_wo_qty ?? 0} pcs</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-emerald-600 uppercase font-sans font-bold block">Produced OK</span>
+                    <span className="font-bold text-emerald-600 text-sm">{activeStage?.ok_completed_qty ?? 0} pcs</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-amber-600 uppercase font-sans font-bold block">Remaining</span>
+                    <span className="font-bold text-amber-600 text-sm">{remainingTargetForStage} pcs</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Shortfall Quantity to Close Out (pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={remainingTargetForStage}
+                    value={shortfallDeclareQty}
+                    onChange={(e) => setShortfallDeclareQty(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3.5 py-2.5 text-sm font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:border-amber-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    Current WO planned qty will be reduced to {Math.max((woData?.physical_wo_qty || 0) - (Number(shortfallDeclareQty) || 0), 0)} good pcs.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-rose-600 dark:text-rose-400 mb-1">
+                    Reason for Shortfall / Less Production * (Mandatory)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={shortfallDeclareReason}
+                    onChange={(e) => setShortfallDeclareReason(e.target.value)}
+                    placeholder="e.g. Ladle metal short, mould leak, sand collapse, furnace heat balance ended..."
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-rose-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                    Heat Number (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={heatNumber}
+                    onChange={(e) => setHeatNumber(e.target.value)}
+                    placeholder={woData?.heat_number || "e.g. H-2026-9021"}
+                    className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-3.5 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                  />
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-purple-200 dark:border-purple-800/80 bg-purple-50/50 dark:bg-purple-950/20">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createPatchWO}
+                      onChange={(e) => setCreatePatchWO(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-purple-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-extrabold text-purple-900 dark:text-purple-200">
+                        Automatically create New Patch Work Order for shortfall quantity
+                      </span>
+                      <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                        Generates a new sequential Work Order ID linked to the same OAR and auto-releases it so the shop floor can immediately cast the remaining pieces.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 border-t border-zinc-100 dark:border-zinc-800 px-6 py-4 bg-zinc-50 dark:bg-zinc-950">
+                <button
+                  type="button"
+                  onClick={() => setIsShortfallModalOpen(false)}
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={declaringShortfall || !shortfallDeclareReason.trim()}
+                  onClick={handleConfirmShortfall}
+                  className="rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-5 py-2 text-xs font-extrabold text-white shadow-md shadow-amber-500/20 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  {declaringShortfall ? (
+                    <>
+                      <RotateCcw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Closing &amp; Spawning Patch WO...</span>
+                    </>
+                  ) : (
+                    <>
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      <span>Confirm Shortfall &amp; Create Patch WO</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

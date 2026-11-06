@@ -188,3 +188,23 @@ class PlantReconciliationResponse(BaseModel):
     total_dispatched_qty: int
     reconciliations: List[ReconciliationItem]
     is_plant_balanced: bool
+
+
+class DeclareShortfallRequest(BaseModel):
+    shortfall_qty: int = Field(..., ge=1, le=1_000_000, description="Quantity of shortfall to declare and close")
+    reason: str = Field(..., min_length=2, max_length=1000, description="Mandatory reason for shortfall")
+    create_patch_wo: bool = Field(True, description="Whether to automatically create a new Patch Work Order for the shortfall quantity")
+    heat_number: Optional[str] = Field(None, max_length=100)
+    remarks: Optional[str] = Field(None, max_length=2000)
+
+class DeclareShortfallResponse(BaseModel):
+    success: bool
+    wo_number: str
+    original_qty: int
+    new_physical_wo_qty: int
+    shortfall_qty: int
+    reason: str
+    patch_wo_id: Optional[str] = None
+    patch_wo_number: Optional[str] = None
+    patch_wo_qty: Optional[int] = None
+    message: str

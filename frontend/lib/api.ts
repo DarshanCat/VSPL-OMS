@@ -452,6 +452,17 @@ export async function recordStageProduction(payload: {
   return data;
 }
 
+export async function declareWOShortfall(woNumber: string, payload: {
+  shortfall_qty: number;
+  reason: string;
+  create_patch_wo?: boolean;
+  heat_number?: string;
+  remarks?: string;
+}) {
+  const { data } = await api.post(`/api/v1/production/wo/${encodeURIComponent(woNumber)}/declare-shortfall`, payload);
+  return data;
+}
+
 export async function moveParts(payload: {
   wo_number: string;
   from_stage: string;

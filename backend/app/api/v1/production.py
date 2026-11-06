@@ -9,7 +9,8 @@ from app.models.work_order import WORoute
 from app.schemas.production import (
     MovePartsRequest, MovementResponse, MovementListItem,
     RecordStageProductionRequest, ProductionEntryResponse,
-    WIPMatrixResponse, PlantReconciliationResponse, StageDashboard
+    WIPMatrixResponse, PlantReconciliationResponse, StageDashboard,
+    DeclareShortfallRequest, DeclareShortfallResponse
 )
 from app.services.production_service import ProductionService
 from app.services.work_order_service import WorkOrderService
@@ -26,6 +27,18 @@ def record_stage_production(
 ):
     """Record production completion (Good Qty & Rejection Qty) at a stage without immediately moving material."""
     return ProductionService.record_stage_production(db, payload, current_user=user)
+
+@router.post("/wo/{wo_number}/declare-shortfall", response_model=DeclareShortfallResponse)
+def declare_wo_shortfall(
+    wo_number: str,
+    payload: DeclareShortfallRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PRODUCTION_ENTRY_ROLES))
+):
+    """Declares a shortfall on an active Work Order at stage F1 (Foundry),
+    closing out remaining in-process pieces, adjusting the WO planned target to
+    actual good pieces produced, and optionally creating a new Patch WO for the shortfall."""
+    return ProductionService.declare_shortfall(db=db, wo_identifier=wo_number, req=payload, current_user=user)
 
 @router.post("/move", response_model=MovementResponse)
 def move_parts(

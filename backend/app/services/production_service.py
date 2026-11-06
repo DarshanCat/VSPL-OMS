@@ -14,7 +14,8 @@ from app.models.mrb import MRBReview, next_mrb_number
 from app.models.user import User
 from app.schemas.production import (
     MovePartsRequest, MovementResponse,
-    RecordStageProductionRequest, ProductionEntryResponse
+    RecordStageProductionRequest, ProductionEntryResponse,
+    DeclareShortfallRequest, DeclareShortfallResponse
 )
 from app.services.rejection_service import validate_active_rejection_type
 from app.services.oms_integration_service import (
@@ -895,4 +896,178 @@ class ProductionService:
             dc_number=entry.dc_number,
             timestamp=now,
             message=f"Successfully recorded stage production for {wo.wo_number} at {matched_stage}: {req.good_qty} Good, {req.rejected_quantity} Rejected."
+        )
+
+    @staticmethod
+    def declare_shortfall(
+        db: Session,
+        wo_identifier: str,
+        req: DeclareShortfallRequest,
+        current_user: Optional[User] = None
+    ) -> DeclareShortfallResponse:
+        """Declares an explicit shortfall on an active Work Order at stage F1 (Foundry),
+        closing out unproduced in-process pieces, adjusting the WO planned target to
+        actual good pieces produced, and optionally spawning a brand-new Patch Work Order
+        for the shortfall quantity under the same OAR."""
+        clean_wo = wo_identifier.strip()
+        try:
+            u = uuid.UUID(clean_wo)
+            wo = db.query(WorkOrder).filter((WorkOrder.id == u) | (WorkOrder.wo_number == clean_wo)).with_for_update().first()
+        except Exception:
+            wo = db.query(WorkOrder).filter(WorkOrder.wo_number == clean_wo).with_for_update().first()
+
+        if not wo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Work Order '{clean_wo}' not found."
+            )
+
+        f1_wip = db.query(StageWIP).filter(
+            StageWIP.work_order_id == wo.id,
+            StageWIP.stage == "F1"
+        ).with_for_update().first()
+
+        if not f1_wip:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stage F1 WIP record not found for Work Order '{wo.wo_number}'."
+            )
+
+        # Remaining unproduced material at F1
+        remaining_inproc = f1_wip.inproc_qty
+        if remaining_inproc <= 0 and wo.physical_wo_qty > (f1_wip.ok_qty + f1_wip.rejected_qty):
+            remaining_inproc = max(wo.physical_wo_qty - (f1_wip.ok_qty + f1_wip.rejected_qty), 0)
+
+        if remaining_inproc <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Work Order '{wo.wo_number}' has no remaining in-process material at F1 (all {wo.physical_wo_qty} planned pieces are accounted for)."
+            )
+
+        if req.shortfall_qty > remaining_inproc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Requested shortfall ({req.shortfall_qty} pcs) exceeds the remaining in-process quantity ({remaining_inproc} pcs) on {wo.wo_number}."
+            )
+
+        now = datetime.now()
+        orig_planned = wo.physical_wo_qty or 0
+        total_good_f1 = f1_wip.ok_qty
+        total_processed_f1 = f1_wip.ok_qty + f1_wip.rejected_qty
+
+        # 1. Close out F1 inproc balance for this Work Order
+        f1_wip.ent_qty = total_processed_f1
+        f1_wip.inproc_qty = 0
+        f1_wip.onhand_qty = total_good_f1
+        f1_wip.available_wip = total_good_f1
+
+        # 2. Adjust Work Order planned quantity and downstream stage targets to the actual good pieces produced
+        wo.physical_wo_qty = max(total_good_f1, 0)
+        wo.shortfall = "YES"
+        wo.shortfall_qty = (getattr(wo, "shortfall_qty", 0) or 0) + req.shortfall_qty
+        wo.shortfall_reason = req.reason.strip()
+
+        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+        for r in routes:
+            r.stage_target_qty = wo.physical_wo_qty
+
+        # Recompute existing WO
+        OMSIntegrationService.recompute_work_order(db, wo)
+
+        db.add(AuditLog(
+            user_id=current_user.id if current_user else None,
+            user_name=current_user.full_name if current_user else "Floor Operator",
+            action="F1_SHORTFALL_PRODUCTION",
+            entity="WorkOrder",
+            entity_id=wo.wo_number,
+            old_value=f"Planned Target: {orig_planned} pcs",
+            new_value=f"Declared Shortfall: {wo.physical_wo_qty} good pcs (-{req.shortfall_qty} pcs Shortfall)",
+            details=f"Reason: {req.reason} (Heat: {req.heat_number or wo.heat_number or 'N/A'})"
+        ))
+
+        # 3. If requested, automatically create New Patch Work Order for the shortfall quantity
+        patch_wo = None
+        if req.create_patch_wo and req.shortfall_qty > 0 and wo.order_id:
+            max_wo_num = 1000
+            for (existing_num,) in db.query(WorkOrder.wo_number).all():
+                if existing_num and existing_num.startswith("WO-") and existing_num[3:].isdigit():
+                    max_wo_num = max(max_wo_num, int(existing_num[3:]))
+            new_wo_num = f"WO-{max_wo_num + 1}"
+
+            patch_wo = WorkOrder(
+                wo_number=new_wo_num,
+                order_id=wo.order_id,
+                physical_wo_qty=req.shortfall_qty,
+                current_stage="F1",
+                projected_final_good=req.shortfall_qty,
+                shortfall="No",
+                status=WOStatus.IN_PRODUCTION,
+                source_wo_id=wo.id,
+                is_replacement=True,
+                replacement_reason=f"Shortfall Patch from {wo.wo_number}: {req.reason.strip()}",
+                heat_number=req.heat_number.strip() if req.heat_number else None,
+                released_by=current_user.full_name if current_user else "Floor Supervisor",
+                release_date=now,
+                engineering_released_by="Auto-Approved (Shortfall Patch)",
+                engineering_released_at=now,
+                manufacturing_released_by="Auto-Approved (Shortfall Patch)",
+                manufacturing_released_at=now,
+            )
+            db.add(patch_wo)
+            db.flush()
+
+            stage_names = [r.stage for r in routes] if routes else ["F1", "F2", "SP", "FI", "PACKING", "DISPATCH"]
+            targets = calculate_stage_targets(req.shortfall_qty, route=stage_names)
+            for seq, stg in enumerate(stage_names, start=1):
+                db.add(WORoute(
+                    work_order_id=patch_wo.id,
+                    stage=stg,
+                    sequence=seq,
+                    stage_target_qty=targets.get(stg, req.shortfall_qty),
+                    cumulative_ent_qty=req.shortfall_qty if seq == 1 else 0,
+                    cumulative_inproc_qty=req.shortfall_qty if seq == 1 else 0,
+                    stage_status="In-Progress" if seq == 1 else "Pending"
+                ))
+            db.add(StageWIP(
+                work_order_id=patch_wo.id,
+                stage="F1",
+                ent_qty=req.shortfall_qty,
+                ok_qty=0,
+                inproc_qty=req.shortfall_qty,
+                onhand_qty=0,
+                rejected_qty=0,
+                received_qty=req.shortfall_qty,
+                available_wip=req.shortfall_qty,
+                moved_out_qty=0
+            ))
+            OMSIntegrationService.recompute_work_order(db, patch_wo)
+
+            db.add(AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "Floor Operator",
+                action="SHORTFALL_PATCH_WO_CREATED",
+                entity="WorkOrder",
+                entity_id=patch_wo.wo_number,
+                old_value=f"Source WO: {wo.wo_number}",
+                new_value=f"New Patch WO: {patch_wo.wo_number} (Qty: {req.shortfall_qty} pcs)",
+                details=f"Spawned from shortfall declaration on {wo.wo_number}. Reason: {req.reason}"
+            ))
+
+        db.commit()
+
+        msg = f"Successfully declared {req.shortfall_qty} pcs shortfall on {wo.wo_number}."
+        if patch_wo:
+            msg += f" New Patch Work Order {patch_wo.wo_number} created for {req.shortfall_qty} pcs."
+
+        return DeclareShortfallResponse(
+            success=True,
+            wo_number=wo.wo_number,
+            original_qty=orig_planned,
+            new_physical_wo_qty=wo.physical_wo_qty,
+            shortfall_qty=req.shortfall_qty,
+            reason=req.reason,
+            patch_wo_id=str(patch_wo.id) if patch_wo else None,
+            patch_wo_number=patch_wo.wo_number if patch_wo else None,
+            patch_wo_qty=patch_wo.physical_wo_qty if patch_wo else None,
+            message=msg
         )
