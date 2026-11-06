@@ -523,7 +523,7 @@ export default function OarWoListPage() {
                               </span>
                             </span>
                           ) : (
-                            <span className="text-amber-600 dark:text-amber-400 font-medium">• Commit: <em>Not set</em></span>
+                            <span className="text-zinc-500 font-medium">• Commit: <span className="font-semibold px-1.5 py-0.2 rounded text-[9px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border border-zinc-200 dark:border-zinc-700">Not Set</span></span>
                           )}
                           {oar.delivery_date && (
                             <span>• Delivery: <strong className="text-zinc-700 dark:text-zinc-300">{formatDate(oar.delivery_date)}</strong></span>

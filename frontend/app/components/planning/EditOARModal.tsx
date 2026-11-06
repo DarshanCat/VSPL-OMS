@@ -29,8 +29,6 @@ export function EditOARModal({ oar, onClose, onSuccess }: EditOARModalProps) {
   const currentEffDate = oar.effective_commitment_date || oar.revised_commitment_date || oar.commitment_date;
   const initialCommitmentDate = currentEffDate
     ? currentEffDate.slice(0, 10)
-    : oar.delivery_date
-    ? oar.delivery_date.slice(0, 10)
     : "";
   const initialDeliveryDate = oar.delivery_date ? oar.delivery_date.slice(0, 10) : "";
 
@@ -210,9 +208,14 @@ export function EditOARModal({ oar, onClose, onSuccess }: EditOARModalProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1 flex items-center gap-1">
-                <CalendarClock className="h-3.5 w-3.5 text-blue-500" />
-                <span>Commitment Date</span>
+              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <CalendarClock className="h-3.5 w-3.5 text-blue-500" />
+                  <span>Commitment Date</span>
+                </span>
+                {!isAlreadyCommitted && (
+                  <span className="text-[10px] text-zinc-400 font-normal italic">(Currently: Not Set)</span>
+                )}
               </label>
               <input
                 type="date"

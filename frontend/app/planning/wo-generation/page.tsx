@@ -585,7 +585,9 @@ function WOGenerationContent() {
                                 {formatDate(o.commitment_date)}
                               </span>
                             ) : (
-                              <span className="text-zinc-400 italic text-[11px]">—</span>
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                                Not Set
+                              </span>
                             )}
                             <button
                               type="button"
@@ -816,7 +818,9 @@ function WOGenerationContent() {
                     </div>
                   ) : (
                     <div>
-                      <span className="text-zinc-400 italic block text-xs">Not committed</span>
+                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 mb-0.5">
+                        Not Set
+                      </span>
                       <span className="text-[10px] text-zinc-400 block font-mono">
                         PO: {formatDate(selectedOar.delivery_date)}
                       </span>
@@ -1529,12 +1533,17 @@ function EditCommitmentDateModal({ oar, onClose, onSuccess }: EditCommitmentDate
               <span className="text-zinc-500">PO Delivery Date:</span>
               <span className="font-mono text-zinc-700 dark:text-zinc-300">{formatDate(oar.delivery_date)}</span>
             </div>
-            {isAlreadyCommitted && (
+            {isAlreadyCommitted ? (
               <div className="flex justify-between pt-1 border-t border-zinc-200 dark:border-zinc-700">
                 <span className="text-amber-600 dark:text-amber-400 font-medium">Current Committed:</span>
                 <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
                   {formatDate(currentEffDate)} {oar.commitment_date_revision_count ? `(Rev #${oar.commitment_date_revision_count})` : ""}
                 </span>
+              </div>
+            ) : (
+              <div className="flex justify-between pt-1 border-t border-zinc-200 dark:border-zinc-700">
+                <span className="text-zinc-500 font-medium">Current Status:</span>
+                <span className="font-semibold text-zinc-500">Not Set</span>
               </div>
             )}
           </div>

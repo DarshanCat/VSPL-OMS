@@ -896,20 +896,20 @@ function WOReleaseSearchContent() {
                           </div>
                           <div className="text-[11px] text-zinc-400 flex items-center gap-3 flex-wrap">
                             <span>Delivery: <strong className="text-zinc-600 dark:text-zinc-300">{formatDate(wo.delivery_date)}</strong></span>
-                            {(wo.revised_commitment_date || wo.commitment_date) && (
-                              <span className="flex items-center gap-1 font-mono text-[10px]">
-                                <span className="text-zinc-400">Commit:</span>
-                                {wo.revised_commitment_date ? (
-                                  <span className="font-bold text-amber-600 dark:text-amber-400">
-                                    {formatDate(wo.revised_commitment_date)} (Rev #{wo.commitment_date_revision_count || 1})
-                                  </span>
-                                ) : (
-                                  <span className="font-bold text-blue-600 dark:text-blue-400">
-                                    {formatDate(wo.commitment_date)}
-                                  </span>
-                                )}
-                              </span>
-                            )}
+                            <span className="flex items-center gap-1 font-mono text-[10px]">
+                              <span className="text-zinc-400">Commit:</span>
+                              {wo.revised_commitment_date ? (
+                                <span className="font-bold text-amber-600 dark:text-amber-400">
+                                  {formatDate(wo.revised_commitment_date)} (Rev #{wo.commitment_date_revision_count || 1})
+                                </span>
+                              ) : wo.commitment_date ? (
+                                <span className="font-bold text-blue-600 dark:text-blue-400">
+                                  {formatDate(wo.commitment_date)}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-400 italic font-semibold">Not Set</span>
+                              )}
+                            </span>
                           </div>
                         </div>
 
@@ -1026,7 +1026,22 @@ function WOReleaseSearchContent() {
                         </span>
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap text-zinc-500">
-                        {formatDate(wo.delivery_date)}
+                        <div>{formatDate(wo.delivery_date)}</div>
+                        {(wo.revised_commitment_date || wo.commitment_date) ? (
+                          <div className="text-[10px] font-mono">
+                            {wo.revised_commitment_date ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-bold">
+                                Commit: {formatDate(wo.revised_commitment_date)} (Rev #{wo.commitment_date_revision_count || 1})
+                              </span>
+                            ) : (
+                              <span className="text-blue-600 dark:text-blue-400 font-bold">
+                                Commit: {formatDate(wo.commitment_date)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-zinc-400 italic font-semibold">Commit: Not Set</div>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center gap-1.5 justify-end">

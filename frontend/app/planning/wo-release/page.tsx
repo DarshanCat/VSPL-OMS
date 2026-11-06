@@ -939,7 +939,7 @@ function WOReleasePageInner() {
                     {formatDate(selectedWODetail.commitment_date)}
                   </span>
                 ) : (
-                  <span className="text-zinc-400 italic text-[11px] block">—</span>
+                  <span className="text-zinc-400 italic font-semibold text-[11px] block">Not Set</span>
                 )}
               </div>
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
