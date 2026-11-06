@@ -26,7 +26,8 @@ import {
   FileSpreadsheet,
   Flame,
   Filter,
-  BarChart3
+  BarChart3,
+  Pencil
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
@@ -52,7 +53,8 @@ import {
   manufacturingReleaseWorkOrder,
   getPlanningSummary,
   WorkOrderListItem,
-  PlanningSummary
+  PlanningSummary,
+  updateWorkOrder
 } from "@/lib/api";
 
 const ALL_POSSIBLE_STAGES = [
@@ -113,6 +115,11 @@ function WOReleasePageInner() {
   const [planningSummary, setPlanningSummary] = useState<PlanningSummary | null>(null);
   const [heatNumber, setHeatNumber] = useState<string>("");
   const [exportingExcel, setExportingExcel] = useState<boolean>(false);
+  const [showHeatModal, setShowHeatModal] = useState<boolean>(false);
+  const [quickEditHeatVal, setQuickEditHeatVal] = useState<string>("");
+  const [savingHeat, setSavingHeat] = useState<boolean>(false);
+  const [heatError, setHeatError] = useState<string>("");
+  const [heatSuccessMsg, setHeatSuccessMsg] = useState<string>("");
 
   const [physicalQty, setPhysicalQty] = useState<number | "">("");
   const [castingProcess, setCastingProcess] = useState<"CENTRIFUGAL" | "CONTINUOUS" | "">("CENTRIFUGAL");
@@ -584,6 +591,7 @@ function WOReleasePageInner() {
         physical_wo_qty: qty,
         route_stages: selectedStages,
         casting_process: castingProcess || undefined,
+        heat_number: heatNumber.trim() || undefined,
         remarks: remarks,
       });
 
@@ -924,7 +932,21 @@ function WOReleasePageInner() {
                 </span>
               </div>
               <div className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/60 border border-blue-100 dark:border-blue-900/40">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold block">6. Heat Number</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[9px] text-zinc-400 uppercase font-bold block">6. Heat Number</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickEditHeatVal(selectedWODetail.heat_number || "");
+                      setHeatError("");
+                      setShowHeatModal(true);
+                    }}
+                    className="text-[10px] text-orange-600 dark:text-orange-400 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
+                    title="Assign or edit Heat Number / Batch #"
+                  >
+                    <Pencil className="h-2.5 w-2.5" /> Edit
+                  </button>
+                </div>
                 <span className="font-mono font-bold text-xs text-orange-600 dark:text-orange-400 flex items-center gap-1">
                   <Flame className="h-3 w-3 text-orange-500 shrink-0" />
                   <span className="truncate">{selectedWODetail.heat_number || "Not Assigned"}</span>
@@ -1755,19 +1777,39 @@ function WOReleasePageInner() {
                 )}
               </div>
 
-              {/* Released Physical WO Quantity */}
-              <div>
-                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                  Released Physical WO Quantity (pcs) *
-                </label>
-                <input
-                  type="number"
-                  required
-                  min={1}
-                  value={physicalQty}
-                  onChange={(e) => setPhysicalQty(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 shadow-xs"
-                />
+              {/* Released Physical WO Quantity & Heat Number / Batch Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Released Physical WO Quantity (pcs) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    value={physicalQty}
+                    onChange={(e) => setPhysicalQty(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="mt-1.5 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-bold font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 shadow-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Flame className="h-3.5 w-3.5 text-orange-500" />
+                      <span>Heat Number / Batch #</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-normal">Melt / continuous casting</span>
+                  </label>
+                  <div className="relative mt-1.5">
+                    <input
+                      type="text"
+                      placeholder="e.g. HN-2026-088, CAST-01"
+                      value={heatNumber}
+                      onChange={(e) => setHeatNumber(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2.5 text-xs font-mono font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 shadow-xs uppercase"
+                    />
+                  </div>
+                </div>
               </div>
 
           {/* Material Source & Casting Process Selector */}
@@ -1935,6 +1977,104 @@ function WOReleasePageInner() {
             </div>
           </div>
         </form>
+
+        {/* Quick Edit / Assign Heat Number Modal */}
+        {showHeatModal && selectedWODetail && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-orange-100 dark:bg-orange-950/70 text-orange-600 dark:text-orange-400">
+                    <Flame className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      Assign / Edit Heat Number
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 font-mono">WO: {selectedWODetail.wo_number}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHeatModal(false)}
+                  className="p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 block mb-1">
+                    Heat Number / Cast Batch #
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. HN-2026-088, CAST-012"
+                    value={quickEditHeatVal}
+                    onChange={(e) => setQuickEditHeatVal(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2 font-mono font-bold text-zinc-900 dark:text-zinc-50 focus:border-blue-500 focus:outline-none uppercase"
+                  />
+                  <p className="text-[10px] text-zinc-400 mt-1">
+                    Melt or continuous casting metallurgical batch number for traceability.
+                  </p>
+                </div>
+
+                {heatError && (
+                  <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-300 text-xs">
+                    {heatError}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowHeatModal(false)}
+                    disabled={savingHeat}
+                    className="px-3.5 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingHeat}
+                    onClick={async () => {
+                      try {
+                        setSavingHeat(true);
+                        setHeatError("");
+                        const trimmed = quickEditHeatVal.trim();
+                        await updateWorkOrder(selectedWODetail.wo_number, { heat_number: trimmed });
+                        setHeatNumber(trimmed);
+                        setSelectedWODetail((prev) => (prev ? { ...prev, heat_number: trimmed } : null));
+                        setWos((prev) => prev.map((w) => (w.wo_number === selectedWODetail.wo_number ? { ...w, heat_number: trimmed } : w)));
+                        setShowHeatModal(false);
+                        setHeatSuccessMsg(`Heat number updated to "${trimmed || "Not Assigned"}"!`);
+                        setTimeout(() => setHeatSuccessMsg(""), 4000);
+                      } catch (err: unknown) {
+                        const msg = err instanceof Error ? err.message : "Failed to update heat number";
+                        setHeatError(msg);
+                      } finally {
+                        setSavingHeat(false);
+                      }
+                    }}
+                    className="px-4 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                  >
+                    {savingHeat ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    <span>{savingHeat ? "Saving..." : "Save Heat Number"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Toast alert for heat update */}
+        {heatSuccessMsg && (
+          <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-orange-600 text-white px-4 py-3 shadow-xl flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{heatSuccessMsg}</span>
+          </div>
+        )}
       </div>
     </AppShell>
   );
