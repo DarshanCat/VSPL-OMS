@@ -480,6 +480,8 @@ class WorkOrderService:
             for idx2, stg2 in enumerate(route_stages):
                 if idx2 + 1 >= len(route_stages):
                     break
+                if stage_filter and stage_filter.strip().upper() != "ALL" and stg2.upper() != stage_filter.strip().upper():
+                    continue
                 wr = wip_records.get(stg2)
                 onhand = wr.onhand_qty if wr else 0
                 at_vendor = sum(
@@ -1129,7 +1131,7 @@ class WorkOrderService:
         )
 
     @staticmethod
-    def list_movable_work_orders(db: Session, limit: int = 50) -> List[MovableWorkOrderItem]:
+    def list_movable_work_orders(db: Session, limit: int = 50, stage_filter: Optional[str] = None) -> List[MovableWorkOrderItem]:
         """Returns active work orders that currently have produced parts / WIP waiting
         at an origin stage to be moved to the next stage along the sequential route.
         Sorted priority-wise by earliest delivery date and largest waiting quantity."""

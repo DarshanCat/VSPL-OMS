@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
+import { StageGateFilter } from "@/app/components/ui/StageGateFilter";
+import { resolveAssignedStage } from "@/lib/userStage";
 import {
   getWorkOrders,
   getWorkOrderTracking,
@@ -42,6 +44,7 @@ import {
   MasterMachine,
   MasterShift,
   MasterOperator,
+  getCurrentUser,
 } from "@/lib/api";
 
 const MACHINES = [
@@ -88,6 +91,9 @@ export function ProductionEntryContent() {
   const [searchError, setSearchError] = useState("");
   const [formError, setFormError] = useState("");
   const [availableWOs, setAvailableWOs] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [activeGate, setActiveGate] = useState<string>("ALL");
+  const [isGateLocked, setIsGateLocked] = useState<boolean>(false);
 
   // Selected WO and Route Data
   const [woData, setWoData] = useState<any>(null);
@@ -137,8 +143,30 @@ export function ProductionEntryContent() {
   const inputRemarksRef = useRef<HTMLInputElement>(null);
   const btnSubmitRef = useRef<HTMLButtonElement>(null);
 
+  const handleSelectGate = (gate: string) => {
+    setActiveGate(gate);
+    if (gate !== "ALL") {
+      setSelectedStage(gate);
+    }
+  };
+
   // Load available WOs and active masters on mount
   useEffect(() => {
+    getCurrentUser()
+      .then((user) => {
+        setCurrentUser(user);
+        const resolved = resolveAssignedStage(user);
+        if (resolved.stage && resolved.isLocked) {
+          setActiveGate(resolved.stage);
+          setIsGateLocked(true);
+          setSelectedStage(resolved.stage);
+        } else if (queryStage) {
+          setActiveGate(queryStage.toUpperCase());
+          setSelectedStage(queryStage.toUpperCase());
+        }
+      })
+      .catch(() => {});
+
     getWorkOrders({ limit: 100, exclude_dispatched: true })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -590,6 +618,14 @@ export function ProductionEntryContent() {
           </div>
         </div>
 
+        {/* Shop Floor Gate Filter -- F1, F2, F3, SP, FI, Packing, Dispatch */}
+        <StageGateFilter
+          currentGate={activeGate}
+          onSelectGate={handleSelectGate}
+          isLocked={isGateLocked}
+          userStageName={currentUser?.department}
+        />
+
         {/* WO Search & Scanner Input Bar */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm">
           <div className="flex flex-col md:flex-row items-center gap-3">
@@ -627,7 +663,7 @@ export function ProductionEntryContent() {
                   onChange={(e) => lookupWO(e.target.value)}
                   className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-mono font-bold focus:outline-none"
                 >
-                  {availableWOs.map((w) => (
+                  {availableWOs.filter((w) => activeGate === "ALL" || w.current_stage === activeGate).map((w) => (
                     <option key={w.wo_number} value={w.wo_number}>
                       {w.wo_number} — {w.current_stage} ({w.customer_code})
                     </option>

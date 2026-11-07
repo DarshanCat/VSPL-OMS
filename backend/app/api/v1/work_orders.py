@@ -18,12 +18,13 @@ router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
 @router.get("/movable", response_model=List[MovableWorkOrderItem])
 def list_movable_work_orders(
     limit: int = Query(50, ge=1, le=200),
+    stage: Optional[str] = Query(None, description="Filter movable work orders by origin stage e.g. F1, F2, F3..."),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
     """Retrieve all work orders that have produced parts / WIP waiting at a stage
     to be moved to the next sequential stage, sorted priority-wise."""
-    return WorkOrderService.list_movable_work_orders(db, limit=limit)
+    return WorkOrderService.list_movable_work_orders(db, limit=limit, stage_filter=stage)
 
 @router.get("/planning-summary", response_model=PlanningSummaryResponse)
 def get_planning_summary(

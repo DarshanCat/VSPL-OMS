@@ -747,9 +747,12 @@ export interface MovableWorkOrderItem {
   mrb_pending_qty?: number;
 }
 
-export async function getMovableWorkOrders(limit?: number): Promise<MovableWorkOrderItem[]> {
+export async function getMovableWorkOrders(limit?: number, stage?: string): Promise<MovableWorkOrderItem[]> {
   const { data } = await api.get("/api/v1/work-orders/movable", {
-    params: limit ? { limit } : undefined,
+    params: {
+      ...(limit ? { limit } : {}),
+      ...(stage && stage !== "ALL" ? { stage } : {})
+    },
   });
   return data;
 }

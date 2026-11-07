@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import { Badge, getRAGVariant } from "@/app/components/ui/Badge";
+import { StageGateFilter } from "@/app/components/ui/StageGateFilter";
+import { resolveAssignedStage } from "@/lib/userStage";
 import { Modal } from "@/app/components/ui/Modal";
 import {
   getWorkOrders,
@@ -45,6 +47,7 @@ import {
   MasterMachine,
   MasterShift,
   MasterOperator,
+  getCurrentUser,
 } from "@/lib/api";
 
 
@@ -75,6 +78,9 @@ export function MovePartsContent() {
   const [searchError, setSearchError] = useState("");
   const [movableWOs, setMovableWOs] = useState<MovableWorkOrderItem[]>([]);
   const [loadingMovable, setLoadingMovable] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [activeGate, setActiveGate] = useState<string>("ALL");
+  const [isGateLocked, setIsGateLocked] = useState<boolean>(false);
 
   // Form State
   const [quantityToMove, setQuantityToMove] = useState<number | "">("");
@@ -107,10 +113,11 @@ export function MovePartsContent() {
   const inputRemarksRef = useRef<HTMLInputElement>(null);
   const btnSubmitRef = useRef<HTMLButtonElement>(null);
 
-  const loadMovableWOs = async () => {
+  const loadMovableWOs = async (targetGate: string = activeGate) => {
     setLoadingMovable(true);
     try {
-      const data = await getMovableWorkOrders(25);
+      const stageParam = targetGate && targetGate !== "ALL" ? targetGate : undefined;
+      const data = await getMovableWorkOrders(25, stageParam);
       setMovableWOs(data);
     } catch {
       setMovableWOs([]);
@@ -119,9 +126,32 @@ export function MovePartsContent() {
     }
   };
 
+  const handleSelectGate = (gate: string) => {
+    setActiveGate(gate);
+    loadMovableWOs(gate);
+  };
+
   // Fetch quick selectable active WOs and movable queue from backend on load
   useEffect(() => {
-    loadMovableWOs();
+    getCurrentUser()
+      .then((user) => {
+        setCurrentUser(user);
+        const resolved = resolveAssignedStage(user);
+        if (resolved.stage && resolved.isLocked) {
+          setActiveGate(resolved.stage);
+          setIsGateLocked(true);
+          loadMovableWOs(resolved.stage);
+        } else if (urlStage) {
+          setActiveGate(urlStage.toUpperCase());
+          loadMovableWOs(urlStage.toUpperCase());
+        } else {
+          loadMovableWOs("ALL");
+        }
+      })
+      .catch(() => {
+        loadMovableWOs("ALL");
+      });
+
     getWorkOrders({ limit: 50, exclude_dispatched: true })
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
@@ -413,7 +443,7 @@ export function MovePartsContent() {
 
       setShowSuccessModal(true);
       lookupWO(woData.wo_number, originStageNow);
-      loadMovableWOs();
+      loadMovableWOs(activeGate);
     } catch (err: any) {
       let detailMsg = "Transfer failed. Please check route and WIP balance.";
       if (err?.response?.data?.detail) {
@@ -472,6 +502,14 @@ export function MovePartsContent() {
           </div>
         </div>
 
+        {/* Shop Floor Gate Filter -- F1, F2, F3, SP, FI, Packing, Dispatch */}
+        <StageGateFilter
+          currentGate={activeGate}
+          onSelectGate={handleSelectGate}
+          isLocked={isGateLocked}
+          userStageName={currentUser?.department}
+        />
+
         {/* Priority Queue: Pending Parts Waiting to Move */}
         <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-r from-amber-50/60 to-orange-50/40 dark:from-amber-950/20 dark:to-orange-950/10 p-5 shadow-sm space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -495,7 +533,7 @@ export function MovePartsContent() {
 
             <button
               type="button"
-              onClick={loadMovableWOs}
+              onClick={() => loadMovableWOs(activeGate)}
               disabled={loadingMovable}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-amber-200 dark:border-amber-900/60 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition self-start sm:self-auto cursor-pointer"
             >
@@ -643,7 +681,10 @@ export function MovePartsContent() {
           {availableWOs.length > 0 && (
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 overflow-x-auto text-[11px]">
               <span className="text-zinc-400 whitespace-nowrap">Quick Select:</span>
-              {availableWOs.filter((wo) => !wo.is_at_vendor).slice(0, 8).map((wo) => (
+              {availableWOs
+                .filter((wo) => !wo.is_at_vendor && (activeGate === "ALL" || wo.current_stage === activeGate))
+                .slice(0, 8)
+                .map((wo) => (
                 <button
                   key={wo.wo_number}
                   type="button"
