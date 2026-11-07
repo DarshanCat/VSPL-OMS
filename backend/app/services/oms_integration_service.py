@@ -165,6 +165,8 @@ class OMSIntegrationService:
         route_names = [r.stage for r in routes]
         wip_map = {w.stage: w for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
         pr = db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first()
+        from app.models.vendor import VendorDispatch
+        vendor_dispatches = db.query(VendorDispatch).filter(VendorDispatch.work_order_id == wo.id).all()
 
         # 1. Flow calculations along the route
         for i, r in enumerate(routes):
@@ -202,16 +204,37 @@ class OMSIntegrationService:
             # OMS Flow Formula: In-Process (net) = max(Ent - OK - Rej, 0)
             std_inproc = max(ent - ok - rej, 0)
 
-            # OMS Flow Formula: On-Hand = max(OK - Ent(next), 0)
+            # Vendor outflow from this stage:
+            # 1. Pieces currently at vendor (not yet received or scrapped)
+            active_at_vendor = sum(
+                max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0)
+                for d in vendor_dispatches
+                if d.dispatch_stage == stg and d.status in ("AT_VENDOR", "PARTIALLY_RECEIVED")
+            )
+            # 2. Pieces that were received into a downstream stage != stg (e.g. directly into FI, bypassing subsequent stages)
+            received_downstream = sum(
+                (d.received_qty or 0)
+                for d in vendor_dispatches
+                if d.dispatch_stage == stg and (d.received_stage or d.target_return_stage or "FI") != stg
+            )
+            # 3. Pieces scrapped at vendor
+            scrapped_at_vendor = sum(
+                (d.scrap_qty or 0)
+                for d in vendor_dispatches
+                if d.dispatch_stage == stg
+            )
+            vendor_outflow = active_at_vendor + received_downstream + scrapped_at_vendor
+
+            # OMS Flow Formula: On-Hand = max(OK - Ent(next) - vendor_outflow, 0)
             nxt_ent = 0
             if i + 1 < len(routes):
                 nxt_stg = routes[i + 1].stage
                 nxt_wip = wip_map.get(nxt_stg)
                 nxt_ent = nxt_wip.ent_qty if nxt_wip else 0
-                std_on_hand = max(ok - nxt_ent, 0)
+                std_on_hand = max(ok - nxt_ent - vendor_outflow, 0)
             else:
                 dispatched_total = sum(d.dispatched_qty or 0 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all())
-                std_on_hand = max(ok - dispatched_total, 0)
+                std_on_hand = max(ok - dispatched_total - vendor_outflow, 0)
 
             if stg.upper() == "DISPATCH":
                 dispatched_total = sum(d.dispatched_qty or 0 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all())
@@ -241,7 +264,10 @@ class OMSIntegrationService:
             # Gate lock status: If all entered material has been produced (net_ip == 0) and all good product moved out (on_hand == 0):
             is_completed_gate = bool(ent > 0 and net_ip == 0 and on_hand == 0 and (ok + rej) > 0)
             if is_completed_gate:
-                r.stage_status = "Completed"
+                if active_at_vendor > 0:
+                    r.stage_status = "At Vendor"
+                else:
+                    r.stage_status = "Completed"
             else:
                 r.stage_status = calculate_rag_status(ok, rej, net_ip, tgt)
 

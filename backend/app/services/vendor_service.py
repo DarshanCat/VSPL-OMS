@@ -69,6 +69,8 @@ class VendorService:
                 "scrap_qty": d.scrap_qty or 0,
                 "pending_qty": max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0),
                 "status": d.status,
+                "target_return_stage": d.target_return_stage or "FI",
+                "received_stage": d.received_stage,
                 "dispatched_at": d.dispatched_at,
                 "received_at": d.received_at,
                 "inward_dc_number": d.inward_dc_number,
@@ -104,13 +106,15 @@ class VendorService:
         dispatch_id: str,
         received_qty: int,
         scrap_qty: int = 0,
+        destination_stage: str = "FI",
         inward_dc: Optional[str] = None,
         remarks: Optional[str] = None,
         current_user: Optional[User] = None
     ) -> Dict[str, Any]:
         """Receives material returned from an outside subcontractor and lands it
-        DIRECTLY into FI (Final Inspection) StageWIP, ready for inspection and move to BSR."""
+        into the designated stage (e.g. FI for final QA, or F2 for in-house finishing)."""
         now = datetime.now()
+        target_stage = (destination_stage or "FI").strip().upper()
         
         dispatch = db.query(VendorDispatch).filter(VendorDispatch.id == dispatch_id).with_for_update().first()
         if not dispatch:
@@ -150,6 +154,7 @@ class VendorService:
         # 1. Update VendorDispatch record
         dispatch.received_qty = (dispatch.received_qty or 0) + received_qty
         dispatch.scrap_qty = (dispatch.scrap_qty or 0) + scrap_qty
+        dispatch.received_stage = target_stage
         dispatch.inward_dc_number = inward_dc.strip() if inward_dc and inward_dc.strip() else dispatch.inward_dc_number
         if remarks and remarks.strip():
             dispatch.remarks = f"{dispatch.remarks or ''} | Inward: {remarks.strip()}".strip(" | ")
@@ -160,65 +165,67 @@ class VendorService:
         else:
             dispatch.status = "PARTIALLY_RECEIVED"
 
-        # 2. Consume from F2 onhand_qty
-        f2_wip = db.query(StageWIP).filter(
-            StageWIP.work_order_id == wo.id,
-            StageWIP.stage == dispatch.dispatch_stage
-        ).with_for_update().first()
-        if f2_wip:
-            f2_wip.onhand_qty = max(f2_wip.onhand_qty - total_incoming, 0)
-            f2_wip.available_wip = max(f2_wip.available_wip - total_incoming, 0)
-
-        # 3. Land directly in FI (Final Inspection) StageWIP
-        # Intermediate in-house stages (such as SP) are bypassed because vendor finished external machining
-        routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
-        route_stages = [r.stage for r in routes]
-        
-        # Ensure FI exists in route
-        if "FI" not in route_stages:
-            max_seq = max((r.sequence for r in routes), default=0)
-            fi_route = WORoute(
-                work_order_id=wo.id,
-                stage="FI",
-                sequence=max_seq + 1,
-                stage_target_qty=wo.physical_wo_qty,
-                stage_status="In-Progress"
-            )
-            db.add(fi_route)
-            db.flush()
-
-        fi_wip = db.query(StageWIP).filter(
-            StageWIP.work_order_id == wo.id,
-            StageWIP.stage == "FI"
-        ).with_for_update().first()
-        
-        if not fi_wip:
-            fi_wip = StageWIP(
-                work_order_id=wo.id,
-                stage="FI",
-                ent_qty=received_qty,
-                ok_qty=0,
-                inproc_qty=received_qty,
-                onhand_qty=0,
-                rejected_qty=0,
-                available_wip=received_qty,
-                received_qty=received_qty
-            )
-            db.add(fi_wip)
+        # 2. Land material into target stage (FI or returned back to F2)
+        if target_stage == dispatch.dispatch_stage:
+            # Material returned back to origin stage (e.g. F2) for further in-house operations
+            origin_wip = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage == dispatch.dispatch_stage
+            ).with_for_update().first()
+            if origin_wip and scrap_qty > 0:
+                origin_wip.rejected_qty += scrap_qty
+                origin_wip.ok_qty = max(origin_wip.ok_qty - scrap_qty, 0)
+            
+            wo.current_stage = target_stage
         else:
-            fi_wip.ent_qty += received_qty
-            fi_wip.inproc_qty += received_qty
-            fi_wip.available_wip += received_qty
-            fi_wip.received_qty += received_qty
+            # Material lands in downstream stage (e.g. FI for final QA, bypassing intermediate in-house stages)
+            routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
+            route_stages = [r.stage for r in routes]
+            
+            # Ensure target_stage exists in route
+            if target_stage not in route_stages:
+                max_seq = max((r.sequence for r in routes), default=0)
+                new_route = WORoute(
+                    work_order_id=wo.id,
+                    stage=target_stage,
+                    sequence=max_seq + 1,
+                    stage_target_qty=wo.physical_wo_qty,
+                    stage_status="In-Progress"
+                )
+                db.add(new_route)
+                db.flush()
 
-        # Set Work Order current stage to FI
-        wo.current_stage = "FI"
+            dst_wip = db.query(StageWIP).filter(
+                StageWIP.work_order_id == wo.id,
+                StageWIP.stage == target_stage
+            ).with_for_update().first()
+            
+            if not dst_wip:
+                dst_wip = StageWIP(
+                    work_order_id=wo.id,
+                    stage=target_stage,
+                    ent_qty=received_qty,
+                    ok_qty=0,
+                    inproc_qty=received_qty,
+                    onhand_qty=0,
+                    rejected_qty=0,
+                    available_wip=received_qty,
+                    received_qty=received_qty
+                )
+                db.add(dst_wip)
+            else:
+                dst_wip.ent_qty += received_qty
+                dst_wip.inproc_qty += received_qty
+                dst_wip.available_wip += received_qty
+                dst_wip.received_qty += received_qty
 
-        # 4. Record Immutable ProductionMovement ledger row
+            wo.current_stage = target_stage
+
+        # 3. Record Immutable ProductionMovement ledger row
         mov = ProductionMovement(
             work_order_id=wo.id,
             from_stage=f"{dispatch.dispatch_stage} (VENDOR)",
-            to_stage="FI",
+            to_stage=target_stage,
             quantity_moved=received_qty,
             rejected_quantity=scrap_qty,
             production_type="VENDOR",
@@ -228,25 +235,25 @@ class VendorService:
             movement_date=str(now.date()),
             movement_time=now.strftime("%H:%M:%S"),
             heat_number=wo.heat_number,
-            remarks=f"Inward from Vendor '{dispatch.vendor_name}' (Out DC #{dispatch.dc_number}, In DC #{inward_dc or 'N/A'}) directly to FI.",
+            remarks=f"Inward from Vendor '{dispatch.vendor_name}' (Out DC #{dispatch.dc_number}, In DC #{inward_dc or 'N/A'}) to {target_stage}.",
             created_by=current_user.id if current_user else None
         )
         db.add(mov)
 
-        # 5. Audit Log
+        # 4. Audit Log
         audit = AuditLog(
             user_id=current_user.id if current_user else None,
             user_name=current_user.full_name if current_user else "Store / Quality Receiver",
-            action="VENDOR_MATERIAL_RECEIVED_TO_FI",
+            action=f"VENDOR_MATERIAL_RECEIVED_TO_{target_stage}",
             entity="WorkOrder",
             entity_id=wo.wo_number,
             old_value=f"At Vendor: {dispatch.vendor_name} (DC #{dispatch.dc_number})",
-            new_value=f"Received: {received_qty} pcs, Scrap: {scrap_qty} pcs -> Landed in FI",
-            details=f"Inward reception from vendor {dispatch.vendor_name} to Final Inspection. Inward DC: {inward_dc or 'N/A'}"
+            new_value=f"Received: {received_qty} pcs, Scrap: {scrap_qty} pcs -> Landed in {target_stage}",
+            details=f"Inward reception from vendor {dispatch.vendor_name} to {target_stage}. Inward DC: {inward_dc or 'N/A'}"
         )
         db.add(audit)
 
-        # 6. Recompute Work Order
+        # 5. Recompute Work Order
         OMSIntegrationService.recompute_work_order(db, wo)
         
         db.commit()
@@ -254,11 +261,11 @@ class VendorService:
         
         return {
             "success": True,
-            "message": f"Successfully received {received_qty} pcs from {dispatch.vendor_name} directly into Final Inspection (FI).",
+            "message": f"Successfully received {received_qty} pcs from {dispatch.vendor_name} into {target_stage}.",
             "dispatch_id": str(dispatch.id),
             "wo_number": wo.wo_number,
             "received_qty": received_qty,
             "scrap_qty": scrap_qty,
             "status": dispatch.status,
-            "current_stage": "FI"
+            "current_stage": target_stage
         }

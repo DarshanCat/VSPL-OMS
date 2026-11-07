@@ -471,12 +471,24 @@ class WorkOrderService:
         movable_to_stage = None
         movable_wip_qty = 0
         if wo.status not in (WOStatus.DISPATCHED, WOStatus.CLOSED):
+            from app.models.vendor import VendorDispatch
+            v_dispatches = db.query(VendorDispatch).filter(
+                VendorDispatch.work_order_id == wo.id,
+                VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+            ).all()
+
             for idx2, stg2 in enumerate(route_stages):
                 if idx2 + 1 >= len(route_stages):
                     break
                 wr = wip_records.get(stg2)
                 onhand = wr.onhand_qty if wr else 0
-                if onhand > 0:
+                at_vendor = sum(
+                    max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0)
+                    for d in v_dispatches
+                    if d.dispatch_stage == stg2
+                )
+                effective_onhand = max(onhand - at_vendor, 0)
+                if effective_onhand > 0:
                     movable_from_stage = stg2
                     movable_wip_qty = onhand
                     movable_to_stage = route_stages[idx2 + 1]
@@ -620,7 +632,12 @@ class WorkOrderService:
             classification=getattr(wo, "classification", None) or getattr(order, "order_type", None) or "Production",
             excess_qty=getattr(wo, "excess_qty", 0) or 0,
             shortfall_qty=getattr(wo, "shortfall_qty", 0) or 0,
-            shortfall_reason=getattr(wo, "shortfall_reason", None)
+            shortfall_reason=getattr(wo, "shortfall_reason", None),
+            is_at_vendor=is_at_vendor,
+            active_vendor_name=active_vendor_name,
+            active_vendor_dc=active_vendor_dc,
+            active_vendor_qty=active_vendor_qty,
+            active_vendor_stage=active_vendor_stage
         )
 
     @staticmethod

@@ -104,7 +104,14 @@ class ProductionService:
         yet_to_produce = max(target - produced, 0)
         # Remaining Movable = completed good sitting on-hand, not yet moved
         # downstream (StageWIP.onhand_qty) -- rejected quantity is never included.
-        remaining_movable = wip.onhand_qty if wip else 0
+        from app.models.vendor import VendorDispatch
+        v_dispatches = db.query(VendorDispatch).filter(
+            VendorDispatch.work_order_id == wo.id,
+            VendorDispatch.dispatch_stage == matched_stage,
+            VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+        ).all()
+        at_vendor_qty = sum(max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0) for d in v_dispatches)
+        remaining_movable = max((wip.onhand_qty if wip else 0) - at_vendor_qty, 0)
 
         # Compute MRB approval status (Option 2)
         from app.services.mrb_service import MRBService
@@ -280,8 +287,24 @@ class ProductionService:
         # 5. Validate Available Movable WIP at Source Stage
         # Physical shop floor rule: parts MUST be produced (via Production Entry) before they can be moved downstream.
         # Only completed good parts on-hand (onhand_qty) awaiting transfer are eligible for movement.
-        max_movable = from_wip.onhand_qty if from_wip else 0
+        from app.models.vendor import VendorDispatch
+        v_dispatches = db.query(VendorDispatch).filter(
+            VendorDispatch.work_order_id == wo.id,
+            VendorDispatch.dispatch_stage == matched_from,
+            VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+        ).all()
+        at_vendor_qty = sum(max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0) for d in v_dispatches)
+        max_movable = max((from_wip.onhand_qty if from_wip else 0) - at_vendor_qty, 0)
         if max_movable <= 0:
+            if at_vendor_qty > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Cannot move parts from stage '{matched_from}'. "
+                        f"All {at_vendor_qty} pieces are currently dispatched to outside vendor '{v_dispatches[0].vendor_name}' (DC #{v_dispatches[0].dc_number}). "
+                        f"Material must be inwarded back on the Vendor Tracking screen (/production/vendor) before moving on the shop floor."
+                    )
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
@@ -797,11 +820,13 @@ class ProductionService:
         # Track outside vendor dispatch in vendor_dispatches table
         if is_vendor and req.vendor_name and req.dc_number:
             from app.models.vendor import VendorDispatch
+            target_ret = getattr(req, "target_return_stage", None) or "FI"
             v_disp = VendorDispatch(
                 work_order_id=wo.id,
                 dispatch_stage=matched_stage,
                 vendor_name=req.vendor_name.strip(),
                 dc_number=req.dc_number.strip(),
+                target_return_stage=target_ret.strip().upper(),
                 dispatched_qty=req.good_qty,
                 status="AT_VENDOR",
                 created_by=current_user.id if current_user else None,

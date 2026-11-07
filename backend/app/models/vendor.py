@@ -15,6 +15,8 @@ class VendorDispatch(Base):
     dispatch_stage = Column(String(50), default="F2", nullable=False)
     vendor_name = Column(String(200), nullable=False, index=True)
     dc_number = Column(String(100), nullable=False, index=True)
+    target_return_stage = Column(String(50), default="FI", nullable=True)
+    received_stage = Column(String(50), nullable=True)
     dispatched_qty = Column(Integer, nullable=False)
     received_qty = Column(Integer, default=0, nullable=False)
     scrap_qty = Column(Integer, default=0, nullable=False)

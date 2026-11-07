@@ -47,13 +47,14 @@ def receive_from_vendor(
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*MATERIAL_MOVEMENT_ROLES))
 ):
-    """Receives subcontracted parts returned from a vendor and lands them directly
-    into FI (Final Inspection) StageWIP, bypassing intermediate in-house stages."""
+    """Receives subcontracted parts returned from a vendor and lands them
+    into the designated stage (e.g. FI for final QA, or F2 for in-house finishing)."""
     return VendorService.receive_from_vendor(
         db=db,
         dispatch_id=payload.dispatch_id,
         received_qty=payload.received_qty,
         scrap_qty=payload.scrap_qty,
+        destination_stage=payload.destination_stage or "FI",
         inward_dc=payload.inward_dc,
         remarks=payload.remarks,
         current_user=user

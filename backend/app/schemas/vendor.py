@@ -7,6 +7,7 @@ class VendorReceiveRequest(BaseModel):
     dispatch_id: str = Field(..., description="UUID of the vendor dispatch record")
     received_qty: int = Field(..., ge=1, description="Quantity of good parts received from vendor")
     scrap_qty: int = Field(0, ge=0, description="Quantity of rejected / scrap parts reported from vendor")
+    destination_stage: Optional[str] = Field("FI", description="Stage where material lands: 'FI' or 'F2'")
     inward_dc: Optional[str] = Field(None, max_length=100, description="Inward Delivery Challan / Invoice / Gate Pass #")
     remarks: Optional[str] = Field(None, max_length=1000, description="Inward remarks / inspection condition")
 
@@ -38,6 +39,8 @@ class VendorDispatchItem(BaseModel):
     scrap_qty: int
     pending_qty: int
     status: str
+    target_return_stage: Optional[str] = "FI"
+    received_stage: Optional[str] = None
     dispatched_at: datetime
     received_at: Optional[datetime]
     inward_dc_number: Optional[str]

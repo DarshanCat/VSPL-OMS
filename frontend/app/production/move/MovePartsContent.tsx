@@ -126,7 +126,7 @@ export function MovePartsContent() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableWOs(data);
-          const initialTarget = urlWO || data[0].wo_number;
+          const initialTarget = urlWO || (data.find((w: any) => !w.is_at_vendor) || data[0])?.wo_number;
           lookupWO(initialTarget, urlStage || undefined);
         } else {
           setAvailableWOs([]);
@@ -643,7 +643,7 @@ export function MovePartsContent() {
           {availableWOs.length > 0 && (
             <div className="flex items-center gap-2 mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 overflow-x-auto text-[11px]">
               <span className="text-zinc-400 whitespace-nowrap">Quick Select:</span>
-              {availableWOs.slice(0, 8).map((wo) => (
+              {availableWOs.filter((wo) => !wo.is_at_vendor).slice(0, 8).map((wo) => (
                 <button
                   key={wo.wo_number}
                   type="button"
@@ -812,6 +812,43 @@ export function MovePartsContent() {
                     <span className="block text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">Remaining to Produce</span>
                     <span className="font-mono font-extrabold text-amber-700 dark:text-amber-400 text-sm">{stageState.in_process_qty} pcs</span>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Outside Vendor Banner */}
+            {woData?.is_at_vendor && (
+              <div className="rounded-2xl border border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 p-4 shadow-sm flex items-start gap-3">
+                <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 shrink-0">
+                  <Truck className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-purple-900 dark:text-purple-200">
+                      Material Dispatched to Outside Subcontractor / Vendor
+                    </h4>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-purple-200 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200">
+                      {woData.active_vendor_qty} pcs at vendor
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-800/90 dark:text-purple-300/90 mt-1">
+                    Dispatched to vendor <strong>{woData.active_vendor_name}</strong> on Delivery Challan #<strong>{woData.active_vendor_dc}</strong> from stage <strong>{woData.active_vendor_stage || "F2"}</strong>.
+                  </p>
+                  <p className="text-[11px] text-zinc-500 mt-1">
+                    {availableAtOrigin <= 0 ? (
+                      <span>
+                        These parts cannot be moved on the shop floor while at the vendor. Once returned, inward them on{" "}
+                        <Link href="/production/vendor" className="font-bold text-purple-700 dark:text-purple-400 underline">
+                          Vendor Tracking &amp; Subcontractor Inward (/production/vendor)
+                        </Link>{" "}
+                        to land in Final Inspection (FI) or back to F2.
+                      </span>
+                    ) : (
+                      <span>
+                        {availableAtOrigin} pieces are available on the shop floor for movement, while {woData.active_vendor_qty} pieces remain with the vendor.
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
             )}
@@ -1248,12 +1285,19 @@ export function MovePartsContent() {
                         type="submit"
                         disabled={submitting || availableAtOrigin <= 0 || !destStage || isMrbLocked}
                         className={`flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold text-white shadow-lg transition-all ${
-                          isMrbLocked
+                          availableAtOrigin <= 0 && woData?.is_at_vendor
+                            ? "bg-purple-600/60 dark:bg-purple-900/40 cursor-not-allowed opacity-75"
+                            : isMrbLocked
                             ? "bg-zinc-400 dark:bg-zinc-700 cursor-not-allowed opacity-75"
                             : "bg-blue-600 hover:bg-blue-500 shadow-blue-500/25 cursor-pointer"
                         }`}
                       >
-                        {isMrbLocked ? (
+                        {availableAtOrigin <= 0 && woData?.is_at_vendor ? (
+                          <>
+                            <Truck className="h-4 w-4" />
+                            <span>Material is at Outside Vendor ({woData.active_vendor_qty} pcs at {woData.active_vendor_name})</span>
+                          </>
+                        ) : isMrbLocked ? (
                           <>
                             <Lock className="h-4 w-4" />
                             <span>Movement Locked Pending MRB Approval</span>

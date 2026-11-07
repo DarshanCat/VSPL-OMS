@@ -143,6 +143,11 @@ class WorkOrderTrackingDetail(BaseModel):
     created_at: datetime
     heat_number: Optional[str] = None
     classification: Optional[str] = "Production"
+    is_at_vendor: Optional[bool] = False
+    active_vendor_name: Optional[str] = None
+    active_vendor_dc: Optional[str] = None
+    active_vendor_qty: Optional[int] = 0
+    active_vendor_stage: Optional[str] = None
 
 class OARWorkOrderSummary(BaseModel):
     wo_id: str

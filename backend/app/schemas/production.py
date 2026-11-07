@@ -16,6 +16,7 @@ class MovePartsRequest(BaseModel):
     production_type: Optional[str] = Field('IN_HOUSE', description='Production mode: IN_HOUSE | VENDOR')
     vendor_name: Optional[str] = Field(None, max_length=200, description='Vendor name if processed at outside vendor')
     dc_number: Optional[str] = Field(None, max_length=100, description='Delivery Challan number if processed at outside vendor')
+    target_return_stage: Optional[str] = Field("FI", description="Expected return stage if processed at outside vendor: 'FI' | 'F2'")
     heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Unique client idempotency token to prevent double submissions")
@@ -33,6 +34,7 @@ class RecordStageProductionRequest(BaseModel):
     production_type: Optional[str] = Field('IN_HOUSE', description='Production mode: IN_HOUSE | VENDOR')
     vendor_name: Optional[str] = Field(None, max_length=200, description='Vendor name if processed at outside vendor')
     dc_number: Optional[str] = Field(None, max_length=100, description='Delivery Challan number if processed at outside vendor')
+    target_return_stage: Optional[str] = Field("FI", description="Expected return stage if processed at outside vendor: 'FI' | 'F2'")
     heat_number: Optional[str] = Field(None, max_length=100, description="Heat Number from which parts are being produced")
     remarks: Optional[str] = Field(None, max_length=2000)
     client_request_id: Optional[str] = Field(None, description="Idempotency token")
@@ -55,6 +57,7 @@ class ProductionEntryResponse(BaseModel):
     production_type: Optional[str] = 'IN_HOUSE'
     vendor_name: Optional[str] = None
     dc_number: Optional[str] = None
+    target_return_stage: Optional[str] = None
     timestamp: datetime
     message: str
 
@@ -75,6 +78,7 @@ class MovementResponse(BaseModel):
     production_type: Optional[str] = 'IN_HOUSE'
     vendor_name: Optional[str] = None
     dc_number: Optional[str] = None
+    target_return_stage: Optional[str] = None
     timestamp: datetime
     message: str
 

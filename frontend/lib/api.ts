@@ -445,6 +445,7 @@ export async function recordStageProduction(payload: {
   production_type?: "IN_HOUSE" | "VENDOR";
   vendor_name?: string;
   dc_number?: string;
+  target_return_stage?: string;
   is_f1_shortfall_closure?: boolean;
   shortfall_reason?: string;
 }) {
@@ -1743,6 +1744,8 @@ export interface VendorDispatchItem {
   scrap_qty: number;
   pending_qty: number;
   status: "AT_VENDOR" | "PARTIALLY_RECEIVED" | "RECEIVED";
+  target_return_stage?: string;
+  received_stage?: string | null;
   dispatched_at: string;
   received_at?: string;
   inward_dc_number?: string;
@@ -1777,6 +1780,7 @@ export async function receiveVendorDispatch(payload: {
   dispatch_id: string;
   received_qty: number;
   scrap_qty?: number;
+  destination_stage?: string;
   inward_dc?: string;
   remarks?: string;
 }): Promise<{
