@@ -467,21 +467,24 @@ class WorkOrderService:
         # onhand_qty > 0 (completed good parts awaiting transfer) and has a next stage to move into.
         # Note: parts MUST be produced (via Production Entry) before they can be moved downstream.
         # Unproduced material (inproc_qty) requires production entry first!
+        from app.models.vendor import VendorDispatch
+        v_dispatches = db.query(VendorDispatch).filter(
+            VendorDispatch.work_order_id == wo.id,
+            VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+        ).all()
+        is_at_vendor = len(v_dispatches) > 0
+        active_vendor_name = v_dispatches[0].vendor_name if is_at_vendor else None
+        active_vendor_dc = v_dispatches[0].dc_number if is_at_vendor else None
+        active_vendor_qty = sum(max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0) for d in v_dispatches) if is_at_vendor else None
+        active_vendor_stage = v_dispatches[0].dispatch_stage if is_at_vendor else None
+
         movable_from_stage = None
         movable_to_stage = None
         movable_wip_qty = 0
         if wo.status not in (WOStatus.DISPATCHED, WOStatus.CLOSED):
-            from app.models.vendor import VendorDispatch
-            v_dispatches = db.query(VendorDispatch).filter(
-                VendorDispatch.work_order_id == wo.id,
-                VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
-            ).all()
-
             for idx2, stg2 in enumerate(route_stages):
                 if idx2 + 1 >= len(route_stages):
                     break
-                if stage_filter and stage_filter.strip().upper() != "ALL" and stg2.upper() != stage_filter.strip().upper():
-                    continue
                 wr = wip_records.get(stg2)
                 onhand = wr.onhand_qty if wr else 0
                 at_vendor = sum(
