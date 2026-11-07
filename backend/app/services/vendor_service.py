@@ -172,9 +172,12 @@ class VendorService:
                 StageWIP.work_order_id == wo.id,
                 StageWIP.stage == dispatch.dispatch_stage
             ).with_for_update().first()
-            if origin_wip and scrap_qty > 0:
-                origin_wip.rejected_qty += scrap_qty
-                origin_wip.ok_qty = max(origin_wip.ok_qty - scrap_qty, 0)
+            if origin_wip:
+                # Returned parts land back in inproc_qty so shop floor operators can log in-house production entry.
+                # Deduct received_qty from ok_qty so that in-house operators can record completed good pieces.
+                origin_wip.ok_qty = max(origin_wip.ok_qty - received_qty, 0)
+                if scrap_qty > 0:
+                    origin_wip.rejected_qty += scrap_qty
             
             wo.current_stage = target_stage
         else:

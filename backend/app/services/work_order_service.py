@@ -335,6 +335,12 @@ class WorkOrderService:
             for p in po_records:
                 po_map[(p.customer_id, p.po_number.strip())] = p.po_date or (p.created_at.date() if p.created_at else None)
 
+        from app.models.vendor import VendorDispatch
+        active_vendor_dispatches = db.query(VendorDispatch.work_order_id).filter(
+            VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+        ).distinct().all()
+        active_vendor_wo_ids = {d[0] for d in active_vendor_dispatches if d[0]}
+
         results = []
 
         for wo in wos:
@@ -421,7 +427,8 @@ class WorkOrderService:
                 revised_commitment_date=oar_revised_commit_date,
                 effective_commitment_date=oar_effective_commit_date,
                 commitment_date_revision_count=oar_commit_rev_count,
-                route_stages=route_stages
+                route_stages=route_stages,
+                is_at_vendor=(wo.id in active_vendor_wo_ids)
             ))
 
         return results
@@ -495,7 +502,7 @@ class WorkOrderService:
                 effective_onhand = max(onhand - at_vendor, 0)
                 if effective_onhand > 0:
                     movable_from_stage = stg2
-                    movable_wip_qty = onhand
+                    movable_wip_qty = effective_onhand
                     movable_to_stage = route_stages[idx2 + 1]
                     break
 
@@ -1149,18 +1156,35 @@ class WorkOrderService:
             )
             .all()
         )
+        from app.models.vendor import VendorDispatch
+        active_dispatches = db.query(VendorDispatch).filter(
+            VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
+        ).all()
+        vendor_dispatch_map = {}
+        for d in active_dispatches:
+            vendor_dispatch_map.setdefault(d.work_order_id, []).append(d)
+
         items = []
         for wo in active_wos:
             routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
             route_stages = [r.stage for r in routes] if routes else ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
             wip_records = {w.stage: w for w in db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).all()}
+            wo_vendor_dispatches = vendor_dispatch_map.get(wo.id, [])
 
             for idx2, stg2 in enumerate(route_stages):
                 if idx2 + 1 >= len(route_stages):
                     break
+                if stage_filter and stage_filter.upper() != "ALL" and stg2.upper() != stage_filter.strip().upper():
+                    continue
                 wr = wip_records.get(stg2)
                 onhand = wr.onhand_qty if wr else 0
-                if onhand > 0:
+                at_vendor = sum(
+                    max(d.dispatched_qty - (d.received_qty or 0) - (d.scrap_qty or 0), 0)
+                    for d in wo_vendor_dispatches
+                    if d.dispatch_stage == stg2
+                )
+                effective_onhand = max(onhand - at_vendor, 0)
+                if effective_onhand > 0:
                     dest_stage = route_stages[idx2 + 1]
                     order = wo.order
 
@@ -1171,7 +1195,7 @@ class WorkOrderService:
                         db=db,
                         work_order_id=wo.id,
                         stage=stg2,
-                        onhand_qty=onhand,
+                        onhand_qty=effective_onhand,
                         already_moved=already_moved
                     )
 
@@ -1191,7 +1215,7 @@ class WorkOrderService:
                         part_name=order.part.description if (order and order.part) else None,
                         from_stage=stg2,
                         to_stage=dest_stage,
-                        movable_wip=onhand,
+                        movable_wip=effective_onhand,
                         current_stage=wo.current_stage or stg2,
                         heat_number=wo.heat_number,
                         delivery_date=order.delivery_date if order else None,

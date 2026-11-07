@@ -59,6 +59,7 @@ class WorkOrderListItem(BaseModel):
     effective_commitment_date: Optional[date] = None
     commitment_date_revision_count: int = 0
     route_stages: Optional[List[str]] = None
+    is_at_vendor: bool = False
 
 class StageTimelineStep(BaseModel):
     stage: str
