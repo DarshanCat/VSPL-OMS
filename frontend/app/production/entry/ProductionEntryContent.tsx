@@ -115,7 +115,7 @@ export function ProductionEntryContent() {
   const [productionType, setProductionType] = useState<"IN_HOUSE" | "VENDOR">("IN_HOUSE");
   const [vendorName, setVendorName] = useState("");
   const [dcNumber, setDcNumber] = useState("");
-  const [targetReturnStage, setTargetReturnStage] = useState<"FI" | "F2">("FI");
+  const [targetReturnStage, setTargetReturnStage] = useState<string>("FI");
   const [rejectionTypes, setRejectionTypes] = useState<MasterRejectionType[]>([]);
   const [machinesList, setMachinesList] = useState<MasterMachine[]>([]);
   const [operatorsList, setOperatorsList] = useState<MasterOperator[]>([]);
@@ -1085,7 +1085,7 @@ export function ProductionEntryContent() {
                               <ArrowRight className="h-3.5 w-3.5 text-purple-600" />
                               EXPECTED RETURN DESTINATION (WHERE DOES MATERIAL GO WHEN RECEIVED?) *
                             </label>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                               <button
                                 type="button"
                                 onClick={() => setTargetReturnStage("FI")}
@@ -1097,10 +1097,46 @@ export function ProductionEntryContent() {
                               >
                                 <div className="flex items-center gap-1.5 mb-0.5">
                                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                  <span className="font-extrabold text-xs">Return Directly to FI (Final Inspection)</span>
+                                  <span className="font-extrabold text-xs">Return to FI</span>
                                 </div>
                                 <p className="text-[10px] text-zinc-500 leading-tight">
-                                  Vendor completes external machining/coating. Parts arrive directly to FI for CMM/QA and packing.
+                                  Final QA & CMM. Vendor completes machining.
+                                </p>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setTargetReturnStage("F3")}
+                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                                  targetReturnStage === "F3"
+                                    ? "border-sky-600 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-100 ring-2 ring-sky-500/20"
+                                    : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="w-2 h-2 rounded-full bg-sky-500" />
+                                  <span className="font-extrabold text-xs">Return to F3</span>
+                                </div>
+                                <p className="text-[10px] text-zinc-500 leading-tight">
+                                  CNC precision machining. Vendor did roughing/heat treat.
+                                </p>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setTargetReturnStage("SP")}
+                                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                                  targetReturnStage === "SP"
+                                    ? "border-amber-600 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 ring-2 ring-amber-500/20"
+                                    : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                                }`}
+                              >
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                  <span className="font-extrabold text-xs">Return to SP</span>
+                                </div>
+                                <p className="text-[10px] text-zinc-500 leading-tight">
+                                  Surface treatment, shot blasting, or painting.
                                 </p>
                               </button>
 
@@ -1115,10 +1151,10 @@ export function ProductionEntryContent() {
                               >
                                 <div className="flex items-center gap-1.5 mb-0.5">
                                   <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                                  <span className="font-extrabold text-xs">Return to F2 (Fettling & Finishing)</span>
+                                  <span className="font-extrabold text-xs">Return to F2</span>
                                 </div>
                                 <p className="text-[10px] text-zinc-500 leading-tight">
-                                  Intermediate outside process. Parts return to F2 for in-house grinding, fettling, or finishing.
+                                  Intermediate outside process. Returns to F2 for in-house ops.
                                 </p>
                               </button>
                             </div>

@@ -497,7 +497,7 @@ export default function VendorTrackingPage() {
                       {receiveModalItem.target_return_stage ? `planned: ${receiveModalItem.target_return_stage}` : ""}
                     </span>
                   </label>
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     <button
                       type="button"
                       onClick={() => setDestinationStage("FI")}
@@ -514,7 +514,47 @@ export default function VendorTrackingPage() {
                         </span>
                       </div>
                       <p className="text-[10px] text-zinc-500 leading-tight">
-                        Vendor machining done. Lands in FI for inspection & BSR packing.
+                        Machining done. Lands in FI for QA & packing.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDestinationStage("F3")}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        destinationStage === "F3"
+                          ? "border-sky-600 bg-sky-50/80 dark:bg-sky-950/40 text-sky-900 dark:text-sky-100 ring-2 ring-sky-500/20"
+                          : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="font-extrabold text-xs">Stage F3</span>
+                        <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300">
+                          Precision
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-tight">
+                        Lands in F3 for CNC finish machining.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setDestinationStage("SP")}
+                      className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                        destinationStage === "SP"
+                          ? "border-amber-600 bg-amber-50/80 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 ring-2 ring-amber-500/20"
+                          : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="font-extrabold text-xs">Stage SP</span>
+                        <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
+                          Surface
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-tight">
+                        Lands in SP for blasting, plating, or painting.
                       </p>
                     </button>
 
@@ -530,11 +570,11 @@ export default function VendorTrackingPage() {
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="font-extrabold text-xs">Stage F2</span>
                         <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
-                          Fettling / Finishing
+                          Fettling
                         </span>
                       </div>
                       <p className="text-[10px] text-zinc-500 leading-tight">
-                        Returns to F2 for in-house grinding, fettling, or further ops.
+                        Returns to F2 for in-house finishing & entry.
                       </p>
                     </button>
                   </div>
@@ -603,14 +643,22 @@ export default function VendorTrackingPage() {
                 <div className={`p-3 rounded-xl border text-[11px] font-medium flex items-start gap-2 ${
                   destinationStage === "FI"
                     ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200"
+                    : destinationStage === "F3"
+                    ? "bg-sky-50/70 dark:bg-sky-950/30 border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-200"
+                    : destinationStage === "SP"
+                    ? "bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200"
                     : "bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200"
                 }`}>
                   <ArrowRight className="h-4 w-4 shrink-0 mt-0.5 text-purple-600" />
                   <span>
                     {destinationStage === "FI" ? (
-                      <>Confirming this inward will automatically land the material directly in <strong>FI (Final Inspection)</strong>, bypassing intermediate stages. From FI, parts move to <strong>BSR / Packing</strong>.</>
+                      <>Confirming this inward will land the material directly in <strong>FI (Final Inspection)</strong>, bypassing intermediate stages. From FI, parts move to <strong>BSR / Packing</strong>.</>
+                    ) : destinationStage === "F3" ? (
+                      <>Confirming this inward will land the material in <strong>Stage F3 (Precision CNC Machining)</strong>. F3 operators will log precision machining, then move along the sequential route.</>
+                    ) : destinationStage === "SP" ? (
+                      <>Confirming this inward will land the material in <strong>Stage SP (Surface Treatment)</strong> for blasting, coating, or plating before moving to FI.</>
                     ) : (
-                      <>Confirming this inward will return the material to <strong>Stage F2 (Fettling & In-House Finishing)</strong> on the shop floor. Parts will be available on-hand at F2 for in-house operations and floor stage movement.</>
+                      <>Confirming this inward will return the material to <strong>Stage F2 (Fettling & In-House Finishing)</strong> on the shop floor. Parts will be available in-process at F2 for in-house operations and floor stage movement.</>
                     )}
                   </span>
                 </div>
@@ -628,7 +676,13 @@ export default function VendorTrackingPage() {
                     type="submit"
                     disabled={submitting}
                     className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50 ${
-                      destinationStage === "FI" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-indigo-600 hover:bg-indigo-700"
+                      destinationStage === "FI"
+                        ? "bg-emerald-600 hover:bg-emerald-700"
+                        : destinationStage === "F3"
+                        ? "bg-sky-600 hover:bg-sky-700"
+                        : destinationStage === "SP"
+                        ? "bg-amber-600 hover:bg-amber-700"
+                        : "bg-indigo-600 hover:bg-indigo-700"
                     }`}
                   >
                     {submitting ? (
@@ -639,7 +693,7 @@ export default function VendorTrackingPage() {
                     ) : (
                       <>
                         <PackageCheck className="h-3.5 w-3.5" />
-                        <span>Confirm Receive to {destinationStage === "FI" ? "Final Inspection (FI)" : "Stage F2"}</span>
+                        <span>Confirm Receive to {destinationStage === "FI" ? "Final Inspection (FI)" : `Stage ${destinationStage}`}</span>
                       </>
                     )}
                   </button>
