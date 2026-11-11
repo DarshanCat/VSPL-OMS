@@ -18,6 +18,7 @@ import {
   Split,
   ChevronRight,
   Edit2,
+  Trash2,
   X,
   Pencil,
   Calendar,
@@ -30,6 +31,7 @@ import {
   getOarList,
   OARListItem,
   getWorkOrders,
+  deleteWorkOrder,
   WorkOrderListItem,
   getNextSequences,
   createWorkOrder,
@@ -112,6 +114,7 @@ function WOGenerationContent() {
   const [error, setError] = useState("");
   const [editingWO, setEditingWO] = useState<WorkOrderListItem | null>(null);
   const [editSuccessMsg, setEditSuccessMsg] = useState("");
+  const [deletingWoNumber, setDeletingWoNumber] = useState<string | null>(null);
   const [editingCommitmentOar, setEditingCommitmentOar] = useState<OARListItem | null>(null);
   const [editingOarModal, setEditingOarModal] = useState<OARListItem | null>(null);
   const [commitmentSuccessMsg, setCommitmentSuccessMsg] = useState("");
@@ -176,6 +179,28 @@ function WOGenerationContent() {
       setRecentWOs([]);
     } finally {
       setLoadingWOs(false);
+    }
+  };
+
+  const handleDeleteWO = async (wo: WorkOrderListItem) => {
+    const confirmed = window.confirm(
+      `Delete unreleased Work Order ${wo.wo_number} (${wo.physical_wo_qty} pcs)?\n\n` +
+        `Parent OAR (${wo.oar_number || "N/A"}) will remain intact and ${wo.physical_wo_qty} pcs will return to unallocated OAR quantity.`
+    );
+    if (!confirmed) return;
+
+    setDeletingWoNumber(wo.wo_number);
+    setError("");
+    try {
+      const res = await deleteWorkOrder(wo.wo_number);
+      setEditSuccessMsg(res.message || `Work Order ${wo.wo_number} deleted.`);
+      await Promise.all([loadRecentWOs(), loadOars(), loadNextWoSequence()]);
+      setTimeout(() => setEditSuccessMsg(""), 5000);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || `Failed to delete ${wo.wo_number}.`;
+      setError(String(detail));
+    } finally {
+      setDeletingWoNumber(null);
     }
   };
 
@@ -1482,6 +1507,18 @@ function WOGenerationContent() {
                             <Edit2 className="h-3 w-3" />
                             <span>Edit</span>
                           </button>
+                          {!wo.is_released && !wo.release_date && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteWO(wo)}
+                              disabled={deletingWoNumber === wo.wo_number}
+                              className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 transition flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-50"
+                              title="Temporary: Delete unreleased Work Order"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span>{deletingWoNumber === wo.wo_number ? "Deleting..." : "Delete"}</span>
+                            </button>
+                          )}
                           {!wo.is_released ? (
                             <Link
                               href={`/planning/wo-release?wo=${encodeURIComponent(wo.wo_number)}`}

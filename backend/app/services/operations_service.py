@@ -581,6 +581,120 @@ class OperationsService:
         }
 
     @staticmethod
+    def delete_work_order(
+        db: Session,
+        wo_identifier: str,
+        current_user: Optional[User] = None
+    ) -> dict:
+        """Safely delete an unreleased Work Order with zero shop-floor/child activity, freeing its qty back to parent OAR."""
+        clean_id = (wo_identifier or "").strip()
+        if not clean_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Work Order identifier is required."
+            )
+
+        wo = None
+        try:
+            u = uuid.UUID(clean_id)
+            wo = db.query(WorkOrder).filter(WorkOrder.id == u).first()
+        except Exception:
+            pass
+
+        if not wo:
+            wo = db.query(WorkOrder).filter(WorkOrder.wo_number == clean_id).first()
+        if not wo:
+            wo = db.query(WorkOrder).filter(func.upper(WorkOrder.wo_number) == clean_id.upper()).first()
+
+        if not wo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Work Order '{clean_id}' not found."
+            )
+
+        if wo.released_by or wo.release_date or wo.manufacturing_released_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot delete Work Order '{wo.wo_number}' because it has already been released."
+            )
+
+        from app.models.production import ProductionUpdate
+        from app.models.production_movement import ProductionMovement
+        from app.models.dispatch import Dispatch
+        from app.models.mrb import MRBReview
+        from app.models.packing import PackingRecord, PackingTransaction
+        from app.models.vendor import VendorDispatch
+        from app.models.continuous_casting import ContinuousCastingRouting, ContinuousCastingCutRecord
+        from app.models.conversion import Conversion
+        from app.models.customer_return import CustomerReturn
+        from app.models.bsr_stock import BSRStock
+
+        blockers = []
+        if db.query(ProductionUpdate).filter(ProductionUpdate.work_order_id == wo.id).first() is not None:
+            blockers.append("production updates")
+        if db.query(ProductionMovement).filter(ProductionMovement.work_order_id == wo.id).first() is not None:
+            blockers.append("stage movements")
+        if db.query(VendorDispatch).filter(VendorDispatch.work_order_id == wo.id).first() is not None:
+            blockers.append("vendor dispatches")
+        if db.query(NCRecord).filter(NCRecord.work_order_id == wo.id).first() is not None:
+            blockers.append("NC records")
+        if db.query(MRBReview).filter(MRBReview.work_order_id == wo.id).first() is not None:
+            blockers.append("MRB reviews")
+        if db.query(PackingRecord).filter(PackingRecord.work_order_id == wo.id).first() is not None:
+            blockers.append("packing records")
+        if db.query(PackingTransaction).filter(PackingTransaction.work_order_id == wo.id).first() is not None:
+            blockers.append("packing transactions")
+        if db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).first() is not None:
+            blockers.append("dispatches")
+        if db.query(ContinuousCastingRouting).filter(ContinuousCastingRouting.work_order_id == wo.id).first() is not None:
+            blockers.append("CC routings")
+        if db.query(ContinuousCastingCutRecord).filter(ContinuousCastingCutRecord.work_order_id == wo.id).first() is not None:
+            blockers.append("CC cut records")
+        if db.query(Conversion).filter(or_(Conversion.source_wo_id == wo.id, Conversion.conversion_wo_id == wo.id)).first() is not None:
+            blockers.append("conversions")
+        if db.query(CustomerReturn).filter(or_(CustomerReturn.original_wo_id == wo.id, CustomerReturn.conversion_wo_id == wo.id)).first() is not None:
+            blockers.append("customer returns")
+        if db.query(BSRStock).filter(BSRStock.source_wo_id == wo.id).first() is not None:
+            blockers.append("BSR stock")
+        if db.query(WorkOrder).filter(WorkOrder.source_wo_id == wo.id).first() is not None:
+            blockers.append("replacement work orders")
+
+        if blockers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot delete Work Order '{wo.wo_number}' because it has recorded {', '.join(blockers)}."
+            )
+
+        wo_id_str = str(wo.id)
+        wo_num = wo.wo_number
+        qty = wo.physical_wo_qty or 0
+        order = db.query(Order).filter(Order.id == wo.order_id).first()
+        oar_num = order.oar_number if order else None
+
+        db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete(synchronize_session=False)
+        db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete(synchronize_session=False)
+        db.delete(wo)
+
+        audit = AuditLog(
+            user_id=current_user.id if current_user else None,
+            user_name=(getattr(current_user, "full_name", None) or getattr(current_user, "email", None) or "System"),
+            action="WO_DELETED",
+            entity="WorkOrder",
+            entity_id=wo_id_str,
+            details=f"Deleted unreleased Work Order {wo_num} (Qty: {qty}, OAR: {oar_num or 'N/A'})"
+        )
+        db.add(audit)
+        db.commit()
+
+        return {
+            "success": True,
+            "wo_number": wo_num,
+            "oar_number": oar_num,
+            "freed_qty": qty,
+            "message": f"Work Order '{wo_num}' deleted successfully and {qty} pcs freed back to {oar_num or 'parent OAR'}."
+        }
+
+    @staticmethod
     def create_work_order(
         db: Session,
         req: WorkOrderCreatePayload,

@@ -1157,6 +1157,13 @@ export async function deleteOAR(oarNumber: string): Promise<{ success: boolean; 
   return data;
 }
 
+export async function deleteWorkOrder(
+  woIdentifier: string
+): Promise<{ success: boolean; wo_number: string; oar_number?: string | null; freed_qty: number; message: string }> {
+  const { data } = await api.delete(`/api/v1/work-orders/${encodeURIComponent(woIdentifier)}`);
+  return data;
+}
+
 export async function releaseWorkOrder(payload: {
   wo_number: string;
   physical_wo_qty: number;

@@ -131,3 +131,12 @@ def get_stage_state(
             detail=f"Work Order '{wo_identifier}' or Stage '{stage_name}' not found."
         )
     return state_data
+
+@router.delete("/{wo_identifier}")
+def delete_work_order(
+    wo_identifier: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Safely delete an unreleased Work Order with zero shop-floor/child activity."""
+    return OperationsService.delete_work_order(db, wo_identifier, current_user=user)
