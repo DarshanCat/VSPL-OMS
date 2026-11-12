@@ -8,8 +8,9 @@ function extractErrorMessage(err: any, fallback: string): string {
   return err?.message || fallback;
 }
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { RejectionAnalyticsDashboard } from "./RejectionAnalyticsDashboard";
 import {
   AlertTriangle,
   Search,
@@ -61,6 +62,12 @@ export default function RejectionTrackingPage() {
   const [search, setSearch] = useState("");
   const [sourceTypeFilter, setSourceTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [reasonFilter, setReasonFilter] = useState("");
+  const [datePreset, setDatePreset] = useState<"all" | "today" | "7d" | "30d" | "custom">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
   // Detail drawer
   const [selectedNC, setSelectedNC] = useState<string | null>(null);
@@ -107,7 +114,9 @@ export default function RejectionTrackingPage() {
           search: search.trim() || undefined,
           source_type: sourceTypeFilter || undefined,
           status: statusFilter || undefined,
-          limit: 500
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          limit: 2000
         }),
         getRejectionSummary().catch(() => null),
         getWorkOrders({ limit: 100 }).catch(() => [] as any[])
@@ -115,17 +124,54 @@ export default function RejectionTrackingPage() {
       setRecords(Array.isArray(recData) ? recData : []);
       if (sumData) setSummary(sumData);
       setWos(Array.isArray(wData) ? wData : []);
+      setLastUpdatedAt(new Date());
     } catch (err: any) {
       setError(extractErrorMessage(err, "Failed to load Rejection Tracking data."));
     } finally {
       setLoading(false);
     }
-  }, [search, sourceTypeFilter, statusFilter]);
+  }, [search, sourceTypeFilter, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadData]);
+
+  const applyDatePreset = (preset: "all" | "today" | "7d" | "30d") => {
+    setDatePreset(preset);
+    if (preset === "all") {
+      setDateFrom("");
+      setDateTo("");
+      return;
+    }
+    const now = new Date();
+    const toISO = (d: Date) =>
+      new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        timeZone: "Asia/Kolkata",
+      }).format(d);
+    const todayStr = toISO(now);
+    const start = new Date(now);
+    if (preset === "7d") start.setDate(start.getDate() - 6);
+    if (preset === "30d") start.setDate(start.getDate() - 29);
+    setDateFrom(toISO(start));
+    setDateTo(todayStr);
+  };
+
+  const displayedRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (stageFilter) {
+        const st = (r.stage || "UNASSIGNED").trim() || "UNASSIGNED";
+        if (st !== stageFilter) return false;
+      }
+      if (reasonFilter) {
+        const rs = (r.reason || "Unspecified").trim() || "Unspecified";
+        if (rs !== reasonFilter) return false;
+      }
+      return true;
+    });
+  }, [records, stageFilter, reasonFilter]);
 
   const openDetail = async (ncNumber: string) => {
     setSelectedNC(ncNumber);
@@ -322,52 +368,113 @@ export default function RejectionTrackingPage() {
           </div>
         )}
 
-        {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              loadData();
-            }}
-            className="relative md:col-span-2"
-          >
-            <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search Rejection ID, WO, OAR, Customer..."
-              className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-10 pr-4 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:border-rose-500 focus:outline-none font-medium"
-            />
-          </form>
-          <select
-            value={sourceTypeFilter}
-            onChange={(e) => {
-              setSourceTypeFilter(e.target.value);
-            }}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
-          >
-            <option value="">All Source Types</option>
-            {SOURCE_TYPES.map((s) => (
-              <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
-            ))}
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
-          >
-            <option value="">All Statuses</option>
-            <option value="Open">Open</option>
-            <option value="Closed">Closed</option>
-          </select>
-          <button
-            onClick={loadData}
-            className="md:col-span-4 justify-self-start rounded-xl bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 text-white px-4 py-2 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
-          >
-            Apply Filters
-          </button>
+        {/* Filters & Timestamp Range */}
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                loadData();
+              }}
+              className="relative md:col-span-2"
+            >
+              <Search className="absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search Rejection ID, WO, OAR, Customer..."
+                className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 pl-10 pr-4 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:border-rose-500 focus:outline-none font-medium"
+              />
+            </form>
+            <select
+              value={sourceTypeFilter}
+              onChange={(e) => {
+                setSourceTypeFilter(e.target.value);
+              }}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
+            >
+              <option value="">All Source Types</option>
+              {SOURCE_TYPES.map((s) => (
+                <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold focus:outline-none"
+            >
+              <option value="">All Statuses</option>
+              <option value="Open">Open</option>
+              <option value="Closed">Closed</option>
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: "all", label: "All Dates" },
+                  { id: "today", label: "Today" },
+                  { id: "7d", label: "Last 7 Days" },
+                  { id: "30d", label: "Last 30 Days" },
+                ] as const
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyDatePreset(p.id)}
+                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors cursor-pointer ${
+                    datePreset === p.id
+                      ? "bg-rose-600 text-white"
+                      : "border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <div className="flex items-center gap-1.5 ml-1">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDatePreset("custom");
+                    setDateFrom(e.target.value);
+                  }}
+                  aria-label="From date"
+                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-200"
+                />
+                <span className="text-[11px] text-zinc-400">to</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDatePreset("custom");
+                    setDateTo(e.target.value);
+                  }}
+                  aria-label="To date"
+                  className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-200"
+                />
+              </div>
+            </div>
+            <button
+              onClick={loadData}
+              className="rounded-xl bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 text-white px-4 py-2 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              Apply Filters
+            </button>
+          </div>
         </div>
+
+        {/* Rejection Analytics Dashboard */}
+        <RejectionAnalyticsDashboard
+          records={records}
+          selectedStage={stageFilter}
+          onSelectStage={setStageFilter}
+          selectedReason={reasonFilter}
+          onSelectReason={setReasonFilter}
+          lastUpdatedAt={lastUpdatedAt}
+        />
 
         {error && (
           <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-xs text-rose-500 font-semibold">
@@ -399,12 +506,12 @@ export default function RejectionTrackingPage() {
                   <tr>
                     <td colSpan={11} className="py-10 text-center text-zinc-400">Loading...</td>
                   </tr>
-                ) : records.length === 0 ? (
+                ) : displayedRecords.length === 0 ? (
                   <tr>
                     <td colSpan={11} className="py-10 text-center text-zinc-400">No records match your search.</td>
                   </tr>
                 ) : (
-                  records.map((r) => (
+                  displayedRecords.map((r) => (
                     <tr key={r.nc_number} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
                       <td className="py-2.5 px-3 font-mono font-bold text-zinc-900 dark:text-zinc-100">{r.nc_number}</td>
                       <td className="py-2.5 px-3 font-mono text-zinc-700 dark:text-zinc-300">{r.wo_number}</td>
@@ -425,8 +532,16 @@ export default function RejectionTrackingPage() {
                         </Badge>
                       </td>
                       <td className="py-2.5 px-3 text-zinc-500">{r.disposition || "—"}</td>
-                      <td className="py-2.5 px-3 text-zinc-400 whitespace-nowrap">
-                        {new Date(r.date_raised).toLocaleDateString("en-GB")}
+                      <td className="py-2.5 px-3 text-zinc-500 dark:text-zinc-400 whitespace-nowrap font-mono text-[11px] tabular-nums">
+                        {new Date(r.date_raised).toLocaleString("en-IN", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                          timeZone: "Asia/Kolkata",
+                        })}
                       </td>
                       <td className="py-2.5 px-3">
                         <button
@@ -478,6 +593,20 @@ export default function RejectionTrackingPage() {
                 <div><span className="text-zinc-400">Source Type:</span> <Badge variant={sourceTypeBadge(detail.source.source_type) as any} size="sm">{detail.source.source_type.replace(/_/g, " ")}</Badge></div>
                 <div><span className="text-zinc-400">Original Qty:</span> <span className="font-mono font-bold">{detail.source.original_quantity}</span></div>
                 <div><span className="text-zinc-400">Reason:</span> <span className="font-bold">{detail.source.reason || "—"}</span></div>
+                <div className="col-span-2">
+                  <span className="text-zinc-400">Raised At:</span>{" "}
+                  <span className="font-mono font-bold">
+                    {new Date(detail.source.date_raised).toLocaleString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                      timeZone: "Asia/Kolkata",
+                    })} IST
+                  </span>
+                </div>
               </div>
             </div>
 
