@@ -32,6 +32,7 @@ import {
   OARListItem,
   getWorkOrders,
   deleteWorkOrder,
+  createMergedWorkOrder,
   WorkOrderListItem,
   getNextSequences,
   createWorkOrder,
@@ -104,6 +105,8 @@ function WOGenerationContent() {
   const [remarks, setRemarks] = useState("Planned by Production Planning department.");
 
   // Divide Quantity State
+  const [generationMode, setGenerationMode] = useState<"single" | "merge">("single");
+  const [mergeSelections, setMergeSelections] = useState<Record<string, number>>({});
   const [splitMode, setSplitMode] = useState<"single" | "auto" | "manual">("single");
   const [batchSize, setBatchSize] = useState<number | "">(10);
   const [manualQtys, setManualQtys] = useState<string[]>(["", ""]);
@@ -325,6 +328,87 @@ function WOGenerationContent() {
   }, [woNumber, recentWOs]);
 
   const isOarFullyPlanned = selectedOar ? selectedOar.remaining_qty <= 0 : false;
+
+  const mergedOarList = oars.filter((o) => mergeSelections[o.order_id] !== undefined);
+  const mergeAnchor = mergedOarList[0] || null;
+  const mergeTotalQty = mergedOarList.reduce((sum, o) => sum + (Number(mergeSelections[o.order_id]) || 0), 0);
+
+  const toggleMergeOar = (oar: OARListItem) => {
+    setError("");
+    setSuccessResult(null);
+    setMergeSelections((prev) => {
+      if (prev[oar.order_id] !== undefined) {
+        const next = { ...prev };
+        delete next[oar.order_id];
+        return next;
+      }
+      if (mergeAnchor) {
+        if (oar.customer_code !== mergeAnchor.customer_code) {
+          setError(`Cannot merge ${oar.oar_number}: Customer (${oar.customer_code}) does not match ${mergeAnchor.customer_code}.`);
+          return prev;
+        }
+        if (oar.part_number !== mergeAnchor.part_number) {
+          setError(`Cannot merge ${oar.oar_number}: Part (${oar.part_number}) does not match ${mergeAnchor.part_number}.`);
+          return prev;
+        }
+      }
+      if (oar.remaining_qty <= 0) {
+        setError(`OAR ${oar.oar_number} has 0 remaining quantity to plan.`);
+        return prev;
+      }
+      return { ...prev, [oar.order_id]: oar.remaining_qty };
+    });
+  };
+
+  const handleMergeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (mergedOarList.length < 2) {
+      setError("Please select at least 2 OARs with the same Customer & Part Number to merge.");
+      return;
+    }
+    for (const o of mergedOarList) {
+      const q = Number(mergeSelections[o.order_id]);
+      if (!q || q <= 0) {
+        setError(`Please enter a valid positive quantity for ${o.oar_number}.`);
+        return;
+      }
+      if (!allowOverrun && q > o.remaining_qty) {
+        setError(`Requested qty (${q}) for ${o.oar_number} exceeds remaining balance (${o.remaining_qty} pcs).`);
+        return;
+      }
+    }
+    if (isDuplicateWoNumber) {
+      setError(`Work Order ID "${woNumber.trim()}" already exists in the system.`);
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await createMergedWorkOrder({
+        oar_allocations: mergedOarList.map((o) => ({
+          oar_number: o.oar_number,
+          qty: Number(mergeSelections[o.order_id]),
+        })),
+        wo_number: woNumber.trim() || undefined,
+        allow_overrun: allowOverrun,
+        wo_date: woDate || undefined,
+        target_date: targetDate || undefined,
+        casting_process: castingProcess,
+        route_stages: routeStages,
+        remarks: remarks.trim() || undefined,
+      });
+      setSuccessResult(res);
+      setMergeSelections({});
+      loadOars();
+      loadRecentWOs();
+      loadNextWoSequence();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Failed to create merged Work Order.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Manual split helpers
   const updateManualQty = (idx: number, val: string) => {
@@ -597,6 +681,13 @@ function WOGenerationContent() {
                 <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                   {filteredOars.map((o) => {
                     const isSelected = selectedOar?.order_id === o.order_id;
+                    const isMergeChecked = mergeSelections[o.order_id] !== undefined;
+                    const mergeIncompatible =
+                      generationMode === "merge" &&
+                      !isMergeChecked &&
+                      (o.remaining_qty <= 0 ||
+                        (mergeAnchor !== null &&
+                          (o.customer_code !== mergeAnchor.customer_code || o.part_number !== mergeAnchor.part_number)));
                     return (
                       <tr
                         key={o.order_id || o.oar_number}
@@ -700,17 +791,39 @@ function WOGenerationContent() {
                           </div>
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleSelectOar(o)}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
-                              isSelected
-                                ? "bg-emerald-700 text-white"
-                                : "bg-emerald-600 text-white hover:bg-emerald-700"
-                            }`}
-                          >
-                            {isSelected ? "Selected" : "Select & Divide Qty"}
-                          </button>
+                          {generationMode === "merge" ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleMergeOar(o)}
+                              disabled={mergeIncompatible}
+                              title={
+                                mergeIncompatible
+                                  ? "Must have remaining qty and match Customer & Part of selected OARs"
+                                  : isMergeChecked
+                                  ? "Remove from merge"
+                                  : "Add to merge"
+                              }
+                              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                                isMergeChecked
+                                  ? "bg-purple-700 text-white"
+                                  : "bg-purple-600 text-white hover:bg-purple-700"
+                              }`}
+                            >
+                              {isMergeChecked ? "✓ In Merge" : "+ Add to Merge"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSelectOar(o)}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                                isSelected
+                                  ? "bg-emerald-700 text-white"
+                                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+                              }`}
+                            >
+                              {isSelected ? "Selected" : "Select & Divide Qty"}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -741,11 +854,43 @@ function WOGenerationContent() {
                 Divide the quantity into one or multiple Work Orders, assign IDs, and proceed to Step 2 (Release).
               </p>
             </div>
-            {selectedOar && (
-              <span className="px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold font-mono self-start sm:self-auto">
-                Parent: {selectedOar.oar_number}
-              </span>
-            )}
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              <div className="inline-flex rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenerationMode("single");
+                    setError("");
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                    generationMode === "single"
+                      ? "bg-white dark:bg-zinc-900 text-emerald-700 dark:text-emerald-400 shadow-xs"
+                      : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  }`}
+                >
+                  Single OAR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenerationMode("merge");
+                    setError("");
+                  }}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                    generationMode === "merge"
+                      ? "bg-purple-600 text-white shadow-xs"
+                      : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  }`}
+                >
+                  Merge OARs ({mergedOarList.length})
+                </button>
+              </div>
+              {generationMode === "single" && selectedOar && (
+                <span className="px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold font-mono">
+                  Parent: {selectedOar.oar_number}
+                </span>
+              )}
+            </div>
           </div>
 
           {error && (
@@ -836,7 +981,159 @@ function WOGenerationContent() {
             </div>
           )}
 
-          {!selectedOar ? (
+          {generationMode === "merge" ? (
+            mergedOarList.length === 0 ? (
+              <div className="py-12 text-center border-2 border-dashed border-purple-200 dark:border-purple-900/50 rounded-xl bg-purple-50/30 dark:bg-purple-950/10">
+                <Layers className="h-9 w-9 text-purple-400 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Merge Multiple OARs into 1 Work Order ID
+                </p>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Click <strong>+ Add to Merge</strong> on 2 or more OARs above that share the same <strong>Customer &amp; Part Number</strong>.
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleMergeSubmit} className="space-y-5">
+                <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/40 dark:bg-purple-950/20 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs">
+                      <span className="font-bold text-purple-800 dark:text-purple-300">
+                        Selected OARs to Merge ({mergedOarList.length})
+                      </span>
+                      {mergeAnchor && (
+                        <span className="ml-2 text-zinc-500 font-mono">
+                          {mergeAnchor.customer_code} • {mergeAnchor.customer_part_number || mergeAnchor.part_number}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-lg bg-purple-600 text-white text-xs font-bold font-mono">
+                        Combined WO Qty: {mergeTotalQty} pcs
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setMergeSelections({})}
+                        className="text-xs font-semibold text-zinc-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-purple-200/70 dark:divide-purple-900/60 rounded-lg border border-purple-200 dark:border-purple-900 bg-white dark:bg-zinc-900">
+                    {mergedOarList.map((o) => (
+                      <div key={o.order_id} className="p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div>
+                          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{o.oar_number}</span>
+                          <span className="ml-2 text-zinc-500 font-mono">PO: {o.customer_po || "—"}</span>
+                          <span className="ml-2 text-zinc-400">Remaining: {o.remaining_qty} pcs</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[11px] font-semibold text-zinc-500">Qty from OAR:</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={allowOverrun ? undefined : o.remaining_qty}
+                            value={mergeSelections[o.order_id] ?? ""}
+                            onChange={(e) =>
+                              setMergeSelections((prev) => ({
+                                ...prev,
+                                [o.order_id]: Math.max(0, Number(e.target.value) || 0),
+                              }))
+                            }
+                            className="w-24 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2.5 py-1 font-mono font-bold text-right"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => toggleMergeOar(o)}
+                            className="p-1 text-zinc-400 hover:text-rose-600 cursor-pointer"
+                            title="Remove OAR"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                      Single Merged Work Order ID
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={woNumber}
+                        onChange={(e) => setWoNumber(e.target.value)}
+                        placeholder="e.g. WO-17921"
+                        className="flex-1 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 font-mono font-bold"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={loadNextWoSequence}
+                        className="px-2.5 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 font-semibold cursor-pointer"
+                        title="Auto-fill Next WO ID"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-zinc-700 dark:text-zinc-300 mb-1">WO Date</label>
+                    <input
+                      type="date"
+                      value={woDate}
+                      onChange={(e) => setWoDate(e.target.value)}
+                      className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-zinc-700 dark:text-zinc-300 mb-1">Casting Process</label>
+                    <select
+                      value={castingProcess}
+                      onChange={(e) => setCastingProcess(e.target.value as "CENTRIFUGAL" | "CONTINUOUS")}
+                      className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 font-semibold"
+                    >
+                      <option value="CENTRIFUGAL">CENTRIFUGAL (Starts F1)</option>
+                      <option value="CONTINUOUS">CONTINUOUS (Starts F2)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">Remarks</label>
+                  <input
+                    type="text"
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                  <span className="text-xs text-zinc-400">
+                    {mergedOarList.length < 2
+                      ? "Add at least 1 more OAR of the same Customer & Part to merge."
+                      : `Will create 1 WO (${woNumber || "Auto"}) combining ${mergedOarList.length} OARs = ${mergeTotalQty} pcs.`}
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={submitting || mergedOarList.length < 2 || mergeTotalQty <= 0 || isDuplicateWoNumber}
+                    className="px-6 py-2.5 text-xs font-bold rounded-xl bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition flex items-center gap-2 shadow-sm cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>
+                      {submitting
+                        ? "Generating Merged WO..."
+                        : `Step 1: Generate Merged WO (${mergeTotalQty} pcs)`}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            )
+          ) : !selectedOar ? (
             <div className="py-8 text-center text-xs text-zinc-400 bg-zinc-50 dark:bg-zinc-950 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800">
               Please click <strong>"Select &amp; Divide Qty"</strong> on an OAR from the table above to start.
             </div>

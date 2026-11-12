@@ -12,7 +12,7 @@ from app.schemas.operations import (
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
     ReleaseEvidenceCreate,
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
-    WorkOrderCreatePayload, WorkOrderCreateResponse, WorkOrderUpdatePayload,
+    WorkOrderCreatePayload, MergedWorkOrderCreatePayload, WorkOrderCreateResponse, WorkOrderUpdatePayload,
     NextSequencesResponse, OARUpdate
 )
 from app.schemas.work_order import OARListItem, OARGenealogyResponse, WorkOrderListItem
@@ -52,6 +52,15 @@ def create_work_order(
     """Step 2: Planner generates Work Order(s) from a created OAR with custom date,
     quantity, and process route."""
     return OperationsService.create_work_order(db, payload, current_user=user)
+
+@router.post("/work-orders/merge", response_model=WorkOrderCreateResponse)
+def create_merged_work_order(
+    payload: MergedWorkOrderCreatePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PLANNING_ROLES))
+):
+    """Merge 2+ OARs (same Customer & same Part Number) into 1 single Work Order ID."""
+    return OperationsService.create_merged_work_order(db, payload, current_user=user)
 
 @router.put("/work-orders/{wo_identifier}", response_model=WorkOrderListItem)
 @router.patch("/work-orders/{wo_identifier}", response_model=WorkOrderListItem)

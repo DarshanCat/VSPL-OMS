@@ -12,8 +12,8 @@ from app.models.production_movement import StageWIP
 from app.models.packing import PackingRecord
 from app.models.dispatch import Dispatch
 from app.models.customer_return import CustomerReturn, next_return_number
-from app.models.order import Order, Customer, Part
-from app.models.master_data import POMaster, POLine, ScheduleMaster
+from app.models.order import Order, Customer, Part, OrderStatus
+from app.models.master_data import POMaster, POLine, ScheduleMaster, POStatus
 from app.models.audit import AuditLog
 from app.models.user import User
 from app.schemas.dispatch import (
@@ -173,8 +173,12 @@ class DispatchService:
         dispatch_wip.moved_out_qty += req.dispatched_quantity
 
         # Commercial Value & Pricing Resolution
-        order = wo.order
-        customer_po = req.customer_po or (order.customer_po if order else "N/A")
+        from app.services.work_order_service import get_wo_oar_allocations
+        allocs = get_wo_oar_allocations(db, wo)
+        linked_orders = [a.order for a in allocs if a.order] if allocs else ([wo.order] if wo.order else [])
+        order = linked_orders[0] if linked_orders else wo.order
+        unique_pos = list(dict.fromkeys(o.customer_po.strip() for o in linked_orders if o and o.customer_po))
+        customer_po = req.customer_po or (", ".join(unique_pos) if unique_pos else "N/A")
         now = datetime.now()
 
         unit_price = 0.0
@@ -217,6 +221,10 @@ class DispatchService:
         db.add(dispatch_entry)
 
         OMSIntegrationService.recompute_work_order(db, wo)
+
+        # Auto-close any linked POMaster whose OARs/PO lines are now 100% dispatched
+        if linked_orders:
+            DispatchService._auto_close_fulfilled_pos(db, linked_orders, current_user)
 
         audit = AuditLog(
             user_id=current_user.id if current_user else None,
@@ -272,6 +280,88 @@ class DispatchService:
             wo_status=wo.status.value,
             message=f"Successfully dispatched {req.dispatched_quantity} pieces under Invoice '{req.invoice_number}' (Value: ₹{total_invoice_val:,.2f}, Payment: {payment_status})."
         )
+
+    @staticmethod
+    def _auto_close_fulfilled_pos(
+        db: Session,
+        linked_orders: List[Order],
+        current_user: Optional[User] = None,
+    ) -> None:
+        """Close any POMaster whose PO lines are 100% dispatched across its linked OARs/WOs."""
+        from app.services.work_order_service import get_order_wo_links, get_wo_qty_share_for_order
+
+        db.flush()
+        candidate_pos: dict = {}
+        for ord_obj in linked_orders:
+            if not ord_obj:
+                continue
+            if ord_obj.po_line and getattr(ord_obj.po_line, "po", None):
+                po_obj = ord_obj.po_line.po
+                candidate_pos[po_obj.id] = po_obj
+            elif ord_obj.customer_id and ord_obj.customer_po:
+                po_obj = (
+                    db.query(POMaster)
+                    .filter(
+                        POMaster.customer_id == ord_obj.customer_id,
+                        POMaster.po_number == ord_obj.customer_po.strip(),
+                    )
+                    .first()
+                )
+                if po_obj:
+                    candidate_pos[po_obj.id] = po_obj
+
+        for po_obj in candidate_pos.values():
+            if getattr(po_obj, "status", None) in (POStatus.CLOSED, POStatus.CANCELLED):
+                continue
+            lines = po_obj.lines or []
+            if not lines:
+                continue
+
+            all_lines_fulfilled = True
+            for line in lines:
+                line_orders = [
+                    o for o in (line.orders or [])
+                    if getattr(o, "status", None) != OrderStatus.REJECT
+                ]
+                if not line_orders and po_obj.customer_id and po_obj.po_number:
+                    line_orders = (
+                        db.query(Order)
+                        .filter(
+                            Order.customer_id == po_obj.customer_id,
+                            Order.part_id == line.part_id,
+                            Order.customer_po == po_obj.po_number,
+                            Order.status != OrderStatus.REJECT,
+                        )
+                        .all()
+                    )
+                line_dispatched = 0
+                for o in line_orders:
+                    line_dispatched += getattr(o, "fulfilled_from_stock_qty", 0) or 0
+                    for wo_item, _ in get_order_wo_links(db, o):
+                        wo_disp = sum(
+                            d.dispatched_qty or 0
+                            for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo_item.id).all()
+                        )
+                        line_dispatched += get_wo_qty_share_for_order(db, wo_item, o.id, wo_disp)
+                if line_dispatched < (line.po_qty or 0):
+                    all_lines_fulfilled = False
+                    break
+
+            if all_lines_fulfilled:
+                old_st = po_obj.status.value if hasattr(po_obj.status, "value") else str(po_obj.status)
+                po_obj.status = POStatus.CLOSED
+                db.add(
+                    AuditLog(
+                        user_id=current_user.id if current_user else None,
+                        user_name=current_user.full_name if current_user else "Dispatch Officer",
+                        action="PO_AUTO_CLOSED",
+                        entity="POMaster",
+                        entity_id=po_obj.po_number,
+                        old_value=old_st,
+                        new_value=POStatus.CLOSED.value,
+                        details=f"PO {po_obj.po_number} automatically closed upon full dispatch.",
+                    )
+                )
 
     @staticmethod
     def get_dispatch_history(db: Session, limit: int = 200, offset: int = 0) -> List[DispatchHistoryItem]:

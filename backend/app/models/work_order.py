@@ -81,6 +81,21 @@ class WorkOrder(Base):
     production_updates = relationship("ProductionUpdate", back_populates="work_order")
     nc_records = relationship("NCRecord", back_populates="work_order")
     dispatches = relationship("Dispatch", back_populates="work_order")
+    oar_allocations = relationship("WorkOrderOARAllocation", back_populates="work_order", cascade="all, delete-orphan")
+
+
+class WorkOrderOARAllocation(Base):
+    """Links a clubbed/merged Work Order to multiple OARs (same customer & part) with per-OAR qty."""
+    __tablename__ = "work_order_oar_allocations"
+
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    work_order_id = Column(GUID, ForeignKey("work_orders.id"), nullable=False, index=True)
+    order_id = Column(GUID, ForeignKey("orders.id"), nullable=False, index=True)
+    allocated_qty = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    work_order = relationship("WorkOrder", back_populates="oar_allocations")
+    order = relationship("Order", back_populates="wo_allocations")
 
 class WORoute(Base):
     """Ordered stage sequence + per-stage target for a WO (back-calculated from yield)."""

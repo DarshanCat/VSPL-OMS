@@ -377,6 +377,13 @@ export interface WorkOrderListItem {
   heat_number?: string | null;
   classification?: string | null;
   route_stages?: string[] | null;
+  is_merged?: boolean;
+  merged_oars?: {
+    oar_number: string;
+    order_id: string;
+    customer_po?: string | null;
+    allocated_qty: number;
+  }[];
 }
 
 export interface PlanningSummary {
@@ -699,10 +706,29 @@ export interface WorkOrderCreateResult {
   release_status: string;
   created_at: string;
   message: string;
+  merged_oars?: { oar_number: string; customer_po?: string | null; qty: number }[];
+}
+
+export interface MergedWorkOrderCreatePayload {
+  oar_allocations: { oar_number: string; qty: number }[];
+  wo_number?: string;
+  allow_overrun?: boolean;
+  classification?: string;
+  wo_date?: string;
+  target_date?: string;
+  casting_process?: "CENTRIFUGAL" | "CONTINUOUS" | string;
+  heat_number?: string;
+  route_stages?: string[];
+  remarks?: string;
 }
 
 export async function createWorkOrder(payload: WorkOrderCreatePayload): Promise<WorkOrderCreateResult> {
   const { data } = await api.post("/api/v1/operations/work-orders", payload);
+  return data;
+}
+
+export async function createMergedWorkOrder(payload: MergedWorkOrderCreatePayload): Promise<WorkOrderCreateResult> {
+  const { data } = await api.post("/api/v1/operations/work-orders/merge", payload);
   return data;
 }
 

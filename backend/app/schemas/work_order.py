@@ -15,6 +15,13 @@ class WORouteItem(BaseModel):
     cumulative_onhand_qty: int
     stage_status: str
 
+class MergedOARAllocationOut(BaseModel):
+    oar_number: str
+    order_id: str
+    customer_po: Optional[str] = None
+    allocated_qty: int
+
+
 class WorkOrderListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,6 +67,8 @@ class WorkOrderListItem(BaseModel):
     commitment_date_revision_count: int = 0
     route_stages: Optional[List[str]] = None
     is_at_vendor: bool = False
+    is_merged: bool = False
+    merged_oars: List[MergedOARAllocationOut] = []
 
 class StageTimelineStep(BaseModel):
     stage: str

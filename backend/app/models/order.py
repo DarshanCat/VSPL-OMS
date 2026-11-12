@@ -90,5 +90,6 @@ class Order(Base):
     customer = relationship("Customer", back_populates="orders")
     part = relationship("Part", back_populates="orders")
     work_orders = relationship("WorkOrder", back_populates="order")
+    wo_allocations = relationship("WorkOrderOARAllocation", back_populates="order")
     po_line = relationship("POLine", back_populates="orders")
     schedule = relationship("ScheduleMaster", back_populates="orders")

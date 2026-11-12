@@ -7,7 +7,7 @@ from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 from app.models.order import Order, Customer, Part, OrderStatus
 from app.models.master_data import POLine, ScheduleMaster, ScheduleStatus, POStatus, POMaster
-from app.models.work_order import WorkOrder, WORoute, WOStatus
+from app.models.work_order import WorkOrder, WORoute, WOStatus, WorkOrderOARAllocation
 from app.models.production_movement import StageWIP
 from app.models.conversion import Conversion
 from app.models.nc import NCRecord, next_nc_number
@@ -20,7 +20,7 @@ from app.schemas.operations import (
     NCRecordCreate, NCRecordUpdate, NCRecordOut,
     EngineeringReleaseResponse, ManufacturingReleaseResponse,
     ReleaseEvidenceCreate,
-    WorkOrderCreatePayload, WorkOrderCreateResponse,
+    WorkOrderCreatePayload, MergedWorkOrderCreatePayload, WorkOrderCreateResponse,
     NextSequencesResponse, MovableWorkOrderItem,
     OARUpdate
 )
@@ -668,9 +668,15 @@ class OperationsService:
         wo_id_str = str(wo.id)
         wo_num = wo.wo_number
         qty = wo.physical_wo_qty or 0
-        order = db.query(Order).filter(Order.id == wo.order_id).first()
-        oar_num = order.oar_number if order else None
+        allocs = db.query(WorkOrderOARAllocation).filter(WorkOrderOARAllocation.work_order_id == wo.id).all()
+        if allocs:
+            oar_nums = [a.order.oar_number for a in allocs if a.order]
+            oar_num = " + ".join(oar_nums) if oar_nums else None
+        else:
+            order = db.query(Order).filter(Order.id == wo.order_id).first()
+            oar_num = order.oar_number if order else None
 
+        db.query(WorkOrderOARAllocation).filter(WorkOrderOARAllocation.work_order_id == wo.id).delete(synchronize_session=False)
         db.query(WORoute).filter(WORoute.work_order_id == wo.id).delete(synchronize_session=False)
         db.query(StageWIP).filter(StageWIP.work_order_id == wo.id).delete(synchronize_session=False)
         db.delete(wo)
@@ -739,7 +745,8 @@ class OperationsService:
         total_requested = sum(quantities)
 
         # Validate unallocated balance
-        allocated_qty = sum(wo.physical_wo_qty for wo in order.work_orders)
+        from app.services.work_order_service import get_order_allocated_wo_qty
+        allocated_qty = get_order_allocated_wo_qty(db, order)
         available_qty = max(order.po_qty - allocated_qty, 0)
 
         # Rule: Same OAR should NOT repeat Work Order generation once fully planned
@@ -909,6 +916,217 @@ class OperationsService:
             release_status="AWAITING_ENG_RELEASE",
             created_at=wo_created_dt,
             message=f"{len(created_wos)} Work Order(s) generated successfully: {', '.join(created_wos)} for OAR {order.oar_number}."
+        )
+
+    @staticmethod
+    def create_merged_work_order(
+        db: Session,
+        req: MergedWorkOrderCreatePayload,
+        current_user: Optional[User] = None
+    ) -> WorkOrderCreateResponse:
+        """Merge 2+ OARs (same Customer & same Part Number) into 1 single Work Order ID."""
+        if not req.oar_allocations or len(req.oar_allocations) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Select at least 2 OARs to create a merged Work Order."
+            )
+
+        from app.services.work_order_service import get_order_allocated_wo_qty
+
+        resolved_items: List[tuple[Order, int]] = []
+        seen_order_ids = set()
+
+        for item in req.oar_allocations:
+            raw_oar = item.oar_number.strip()
+            norm_oar = _normalize_oar_code(raw_oar)
+            order = db.query(Order).filter(
+                or_(Order.oar_number == raw_oar, Order.oar_number == norm_oar)
+            ).first()
+            if not order:
+                try:
+                    u = uuid.UUID(raw_oar)
+                    order = db.query(Order).filter(Order.id == u).first()
+                except (ValueError, AttributeError):
+                    pass
+            if not order:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"OAR '{item.oar_number}' not found."
+                )
+            if order.id in seen_order_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Duplicate OAR '{order.oar_number}' in merge selection."
+                )
+            seen_order_ids.add(order.id)
+
+            if getattr(order, "status", None) == OrderStatus.REJECT:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot merge rejected OAR '{order.oar_number}'."
+                )
+
+            allocated_qty = get_order_allocated_wo_qty(db, order)
+            available_qty = max(order.po_qty - allocated_qty, 0)
+            if not req.allow_overrun and item.qty > available_qty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Requested qty ({item.qty}) for OAR '{order.oar_number}' exceeds its "
+                        f"available unallocated balance ({available_qty} pcs)."
+                    )
+                )
+            resolved_items.append((order, item.qty))
+
+        first_cust_id = resolved_items[0][0].customer_id
+        first_part_id = resolved_items[0][0].part_id
+        for order, _ in resolved_items[1:]:
+            if order.customer_id != first_cust_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="All merged OARs must belong to the same Customer."
+                )
+            if order.part_id != first_part_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="All merged OARs must be for the same Part Number."
+                )
+
+        # Primary order = earliest delivery date (then created_at)
+        sorted_items = sorted(
+            resolved_items,
+            key=lambda pair: (
+                pair[0].delivery_date or date.max,
+                pair[0].created_at or datetime.min,
+                str(pair[0].id),
+            ),
+        )
+        primary_order = sorted_items[0][0]
+        total_qty = sum(q for _, q in sorted_items)
+
+        if req.route_stages and len(req.route_stages) > 0:
+            route_stages = [s.strip().upper() for s in req.route_stages if s.strip()]
+        elif req.casting_process == "CONTINUOUS":
+            route_stages = ["F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+        else:
+            route_stages = ["F1", "F2", "F3", "SP", "FI", "PACKING", "DISPATCH"]
+
+        wo_created_dt = (
+            datetime.combine(req.wo_date, datetime.min.time())
+            if req.wo_date
+            else datetime.now()
+        )
+
+        if req.wo_number and req.wo_number.strip():
+            candidate = _normalize_wo_code(req.wo_number.strip())
+            raw_wo = req.wo_number.strip()
+            num = extract_wo_number(candidate)
+            query_conds = [WorkOrder.wo_number == candidate, WorkOrder.wo_number == raw_wo]
+            if num is not None:
+                query_conds.extend([
+                    WorkOrder.wo_number == f"WO-{num}",
+                    WorkOrder.wo_number == f"WO {num}",
+                    WorkOrder.wo_number == str(num),
+                ])
+            exists = db.query(WorkOrder).filter(or_(*query_conds)).first()
+            if exists:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Work Order ID '{candidate}' already exists in the system (WO: {exists.wo_number})."
+                )
+            wo_num = candidate
+        else:
+            wo_num = next_wo_sequence(db)
+
+        wo = WorkOrder(
+            wo_number=wo_num,
+            order_id=primary_order.id,
+            physical_wo_qty=total_qty,
+            current_stage=route_stages[0],
+            projected_final_good=total_qty,
+            shortfall="No",
+            status=WOStatus.PLANNED,
+            casting_process=req.casting_process or "CENTRIFUGAL",
+            heat_number=req.heat_number,
+            classification=req.classification or primary_order.order_type or "Production",
+            created_at=wo_created_dt,
+        )
+        db.add(wo)
+        db.flush()
+
+        for ord_obj, item_qty in sorted_items:
+            db.add(
+                WorkOrderOARAllocation(
+                    work_order_id=wo.id,
+                    order_id=ord_obj.id,
+                    allocated_qty=item_qty,
+                )
+            )
+
+        targets = calculate_stage_targets(total_qty, route=route_stages)
+        for seq, stg in enumerate(route_stages, start=1):
+            db.add(
+                WORoute(
+                    work_order_id=wo.id,
+                    stage=stg,
+                    sequence=seq,
+                    stage_target_qty=targets.get(stg, total_qty),
+                    cumulative_ent_qty=total_qty if seq == 1 else 0,
+                    cumulative_inproc_qty=total_qty if seq == 1 else 0,
+                    stage_status="In-Progress" if seq == 1 else "Pending",
+                )
+            )
+
+        db.add(
+            StageWIP(
+                work_order_id=wo.id,
+                stage=route_stages[0],
+                ent_qty=total_qty,
+                ok_qty=0,
+                inproc_qty=total_qty,
+                onhand_qty=0,
+                rejected_qty=0,
+                received_qty=total_qty,
+                available_wip=total_qty,
+                moved_out_qty=0,
+            )
+        )
+
+        merged_summary = [
+            {"oar_number": o.oar_number, "customer_po": o.customer_po, "qty": q}
+            for o, q in sorted_items
+        ]
+        oar_desc = ", ".join(f"{o.oar_number} ({q} pcs)" for o, q in sorted_items)
+        db.add(
+            AuditLog(
+                user_id=current_user.id if current_user else None,
+                user_name=current_user.full_name if current_user else "Planner",
+                action="WO_MERGED_CREATED",
+                entity="WorkOrder",
+                entity_id=wo_num,
+                new_value=f"Merged OARs: {oar_desc}, Total Qty: {total_qty}",
+                details=f"Merged {len(sorted_items)} OARs into {wo_num}. Route: {'->'.join(route_stages)}. Notes: {req.remarks or ''}",
+            )
+        )
+        db.commit()
+
+        joined_oars = " + ".join(o.oar_number for o, _ in sorted_items)
+        return WorkOrderCreateResponse(
+            success=True,
+            wo_number=wo_num,
+            wos_created=[wo_num],
+            wo_quantities=[total_qty],
+            order_id=str(primary_order.id),
+            oar_number=joined_oars,
+            customer_code=primary_order.customer.customer_code,
+            part_number=primary_order.part.part_number,
+            physical_wo_qty=total_qty,
+            current_stage=route_stages[0],
+            status=WOStatus.PLANNED.value,
+            release_status="AWAITING_ENG_RELEASE",
+            created_at=wo_created_dt,
+            message=f"Merged Work Order {wo_num} ({total_qty} pcs) created for {oar_desc}.",
+            merged_oars=merged_summary,
         )
 
     @staticmethod

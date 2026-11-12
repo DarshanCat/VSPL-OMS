@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, cast, String
-from app.models.work_order import WorkOrder, WORoute, WOStatus
+from app.models.work_order import WorkOrder, WORoute, WOStatus, WorkOrderOARAllocation
 from app.models.production_movement import ProductionMovement, StageWIP
 from app.models.production import ProductionUpdate
 from app.models.order import Order, Customer, Part
@@ -15,7 +15,7 @@ from app.schemas.work_order import (
     WorkOrderListItem, WorkOrderTrackingDetail, StageTimelineStep,
     WorkOrderRouteResponse, TransactionHistoryItem,
     OARListItem, OARWorkOrderSummary, OARGenealogyResponse,
-    PlanningSummaryResponse, MovableWorkOrderItem
+    PlanningSummaryResponse, MovableWorkOrderItem, MergedOARAllocationOut
 )
 from app.schemas.production import WIPMatrixResponse, WOWIPRow
 from app.services.oms_integration_service import (
@@ -36,6 +36,89 @@ SCHEDULE_KEYWORDS_REGEX = re.compile(
 )
 
 STANDARD_STAGES = ["F1", "F2", "F3", "SP", "FI", "PACKING / BSR", "DISPATCH"]
+
+
+def get_wo_oar_allocations(db: Session, wo: WorkOrder) -> List[WorkOrderOARAllocation]:
+    """Return ordered OAR allocations for a Work Order (empty for single-OAR WOs)."""
+    allocs = (
+        db.query(WorkOrderOARAllocation)
+        .filter(WorkOrderOARAllocation.work_order_id == wo.id)
+        .all()
+    )
+    if len(allocs) > 1:
+        allocs.sort(
+            key=lambda a: (
+                (a.order.delivery_date if (a.order and a.order.delivery_date) else date.max),
+                (a.order.created_at if (a.order and a.order.created_at) else datetime.min),
+                str(a.order_id),
+            )
+        )
+    return allocs
+
+
+def get_order_wo_links(db: Session, order: Order, exclude_closed: bool = False) -> List[tuple[WorkOrder, int]]:
+    """Return deduplicated [(WorkOrder, allocated_qty_for_this_order)] for an OAR,
+    accounting for both direct single-OAR WOs and merged multi-OAR WOs."""
+    links_by_wo_id: dict = {}
+
+    # 1. Explicit allocation rows targeting this OAR
+    alloc_rows = (
+        db.query(WorkOrderOARAllocation)
+        .filter(WorkOrderOARAllocation.order_id == order.id)
+        .all()
+    )
+    for a in alloc_rows:
+        wo = a.work_order
+        if not wo:
+            continue
+        if exclude_closed and getattr(wo, "status", None) == WOStatus.CLOSED:
+            continue
+        links_by_wo_id[wo.id] = (wo, a.allocated_qty)
+
+    # 2. Direct WOs whose primary order_id is this OAR (and have no explicit allocation table rows)
+    for wo in (order.work_orders or []):
+        if exclude_closed and getattr(wo, "status", None) == WOStatus.CLOSED:
+            continue
+        if wo.id in links_by_wo_id:
+            continue
+        has_any_alloc = (
+            db.query(WorkOrderOARAllocation.id)
+            .filter(WorkOrderOARAllocation.work_order_id == wo.id)
+            .first()
+            is not None
+        )
+        if not has_any_alloc:
+            links_by_wo_id[wo.id] = (wo, wo.physical_wo_qty)
+
+    result = list(links_by_wo_id.values())
+    result.sort(key=lambda pair: (pair[0].created_at or datetime.min, pair[0].wo_number))
+    return result
+
+
+def get_order_allocated_wo_qty(db: Session, order: Order, exclude_closed: bool = False) -> int:
+    """Total WO quantity allocated to this OAR across single and merged Work Orders."""
+    return sum(qty for _, qty in get_order_wo_links(db, order, exclude_closed=exclude_closed))
+
+
+def get_wo_qty_share_for_order(db: Session, wo: WorkOrder, order_id, total_wo_output: int) -> int:
+    """Attribute a Work Order's output (final_good or dispatched_qty) to a specific OAR
+    in deterministic FIFO order when the WO merges multiple OARs."""
+    if total_wo_output <= 0:
+        return 0
+    allocs = get_wo_oar_allocations(db, wo)
+    if not allocs:
+        return total_wo_output if wo.order_id == order_id else 0
+
+    remaining = total_wo_output
+    for idx, alloc in enumerate(allocs):
+        if idx == len(allocs) - 1:
+            take = remaining
+        else:
+            take = min(remaining, max(alloc.allocated_qty, 0))
+        remaining -= take
+        if alloc.order_id == order_id:
+            return take
+    return 0
 
 def compute_po_coverage_status(order: Optional[Order]) -> str:
     """Determines authoritative PO coverage status for an Order (OAR):
@@ -208,7 +291,12 @@ class WorkOrderService:
                     Order.customer_po.ilike(s),
                     cast(WorkOrder.created_at, String).ilike(s),
                     cast(WorkOrder.release_date, String).ilike(s),
-                    cast(Order.delivery_date, String).ilike(s)
+                    cast(Order.delivery_date, String).ilike(s),
+                    WorkOrder.oar_allocations.any(
+                        WorkOrderOARAllocation.order.has(
+                            or_(Order.oar_number.ilike(s), Order.customer_po.ilike(s))
+                        )
+                    ),
                 )
             )
 
@@ -386,20 +474,48 @@ class WorkOrderService:
             is_rel = bool(wo.released_by or wo.release_date or wo.status in (WOStatus.RELEASED, WOStatus.IN_PRODUCTION, WOStatus.DISPATCHED, WOStatus.CLOSED))
             ready_prod = bool(is_rel or rel_status in ("RELEASED", "AWAITING_WO_RELEASE") or wo.status in (WOStatus.OPEN, WOStatus.PLANNED))
 
+            allocs = get_wo_oar_allocations(db, wo)
+            is_merged_wo = len(allocs) > 1
+            merged_oar_items = [
+                MergedOARAllocationOut(
+                    oar_number=a.order.oar_number,
+                    order_id=str(a.order_id),
+                    customer_po=a.order.customer_po,
+                    allocated_qty=a.allocated_qty,
+                )
+                for a in allocs
+                if a.order
+            ]
+            display_oar_number = (
+                " + ".join(item.oar_number for item in merged_oar_items)
+                if is_merged_wo and merged_oar_items
+                else (order.oar_number if order else None)
+            )
+            display_cust_po = (
+                ", ".join(dict.fromkeys(item.customer_po for item in merged_oar_items if item.customer_po))
+                if is_merged_wo and merged_oar_items
+                else cust_po
+            )
+            display_order_qty = (
+                sum(a.order.po_qty for a in allocs if a.order)
+                if is_merged_wo
+                else (order.po_qty if order else wo.physical_wo_qty)
+            )
+
             results.append(WorkOrderListItem(
                 id=str(wo.id),
                 wo_number=wo.wo_number,
-                oar_number=order.oar_number if order else None,
+                oar_number=display_oar_number,
                 customer_code=order.customer.customer_code if (order and order.customer) else "N/A",
                 customer_name=order.customer.name if (order and order.customer) else "VSPL Internal",
-                customer_po=cust_po,
+                customer_po=display_cust_po or cust_po,
                 source_type=src_type,
                 po_coverage_status=po_cov_status,
                 part_number=order.part.part_number if (order and order.part) else "N/A",
                 customer_part_number=resolve_order_customer_part_number(db, order),
                 part_name=order.part.description if (order and order.part) else None,
                 grade=order.part.grade if (order and order.part) else None,
-                order_qty=order.po_qty if order else wo.physical_wo_qty,
+                order_qty=display_order_qty,
                 physical_wo_qty=wo.physical_wo_qty,
                 casting_process=getattr(wo, "casting_process", None),
                 match_size=order.max_batch_size if order else None,
@@ -428,7 +544,9 @@ class WorkOrderService:
                 effective_commitment_date=oar_effective_commit_date,
                 commitment_date_revision_count=oar_commit_rev_count,
                 route_stages=route_stages,
-                is_at_vendor=(wo.id in active_vendor_wo_ids)
+                is_at_vendor=(wo.id in active_vendor_wo_ids),
+                is_merged=is_merged_wo,
+                merged_oars=merged_oar_items,
             ))
 
         return results
@@ -720,7 +838,8 @@ class WorkOrderService:
                     Customer.customer_code.ilike(s),
                     Customer.name.ilike(s),
                     Part.part_number.ilike(s),
-                    Order.work_orders.any(WorkOrder.wo_number.ilike(s))
+                    Order.work_orders.any(WorkOrder.wo_number.ilike(s)),
+                    Order.wo_allocations.any(WorkOrderOARAllocation.work_order.has(WorkOrder.wo_number.ilike(s)))
                 )
             )
 
@@ -743,7 +862,7 @@ class WorkOrderService:
         Rolls up all Original and Patch/Replacement WOs created under this OAR,
         including all production, stage rejections, final good contributions,
         total OAR fulfillment, and remaining shortfall without double-counting."""
-        wos = db.query(WorkOrder).filter(WorkOrder.order_id == order.id).order_by(WorkOrder.created_at.asc(), WorkOrder.wo_number.asc()).all()
+        wo_links = get_order_wo_links(db, order)
 
         oar_commit_date = order.commitment_date
         oar_revised_commit_date = getattr(order, "revised_commitment_date", None)
@@ -755,8 +874,8 @@ class WorkOrderService:
         wo_summaries: List[OARWorkOrderSummary] = []
         allocated_total = 0
 
-        for wo in wos:
-            allocated_total += wo.physical_wo_qty
+        for wo, alloc_qty in wo_links:
+            allocated_total += alloc_qty
 
             routes = db.query(WORoute).filter(WORoute.work_order_id == wo.id).order_by(WORoute.sequence).all()
             route_stages = [r.stage for r in routes] if routes else STANDARD_STAGES
@@ -819,6 +938,8 @@ class WorkOrderService:
                 d.dispatched_qty or 0
                 for d in db.query(Dispatch).filter(Dispatch.work_order_id == wo.id).all()
             )
+            oar_final_good = get_wo_qty_share_for_order(db, wo, order.id, final_good)
+            oar_dispatched = get_wo_qty_share_for_order(db, wo, order.id, dispatched_total)
 
             good_qty = max(launched_qty - rejected_qty, 0)
 
@@ -845,11 +966,11 @@ class WorkOrderService:
                 source_wo_id=str(wo.source_wo_id) if wo.source_wo_id else None,
                 source_wo_number=source_wo_num,
                 replacement_qty=wo.physical_wo_qty if wo.is_replacement else 0,
-                allocated_qty=wo.physical_wo_qty,
+                allocated_qty=alloc_qty,
                 production_qty=produced_qty,
                 good_qty=good_qty,
                 rejected_qty=rejected_qty,
-                final_good_contribution=final_good,
+                final_good_contribution=oar_final_good,
                 release_status=rel_status,
                 current_stage=cur_stage,
                 wo_status=wo.status.value,
@@ -857,7 +978,7 @@ class WorkOrderService:
                 ok_completed=good_qty,
                 rejected=rejected_qty,
                 movable_wip=movable_wip,
-                dispatched_qty=dispatched_total,
+                dispatched_qty=oar_dispatched,
                 wo_date=wo.created_at,
                 created_at=wo.created_at,
                 release_date=wo.release_date,
@@ -921,7 +1042,7 @@ class WorkOrderService:
             oar_qty=order.po_qty,
             allocated_qty=allocated_total,
             remaining_qty=max(order.po_qty - allocated_total, 0),
-            num_wos=len(wos),
+            num_wos=len(wo_links),
             num_original_wos=num_orig,
             num_patch_wos=num_patch,
             total_produced=tot_produced,

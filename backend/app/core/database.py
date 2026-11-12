@@ -472,6 +472,15 @@ def auto_migrate_schema():
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall_qty INTEGER DEFAULT 0;",
         "ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS shortfall_reason VARCHAR;",
         "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfilled_from_stock_qty INTEGER DEFAULT 0;",
+        "CREATE TABLE IF NOT EXISTS work_order_oar_allocations ("
+        "    id UUID PRIMARY KEY,"
+        "    work_order_id UUID NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,"
+        "    order_id UUID NOT NULL REFERENCES orders(id),"
+        "    allocated_qty INTEGER NOT NULL,"
+        "    created_at TIMESTAMPTZ DEFAULT NOW()"
+        ");",
+        "CREATE INDEX IF NOT EXISTS ix_wo_oar_alloc_wo_id ON work_order_oar_allocations (work_order_id);",
+        "CREATE INDEX IF NOT EXISTS ix_wo_oar_alloc_order_id ON work_order_oar_allocations (order_id);",
     ]
 
 

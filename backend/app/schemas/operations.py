@@ -74,6 +74,24 @@ class WorkOrderCreatePayload(BaseModel):
     route_stages: Optional[List[str]] = Field(None, description="Optional custom stages e.g. ['F1', 'F2', 'F3', 'SP', 'FI', 'PACKING', 'DISPATCH']")
     remarks: Optional[str] = Field(None, max_length=2000)
 
+class MergedOARItem(BaseModel):
+    oar_number: str = Field(..., max_length=100)
+    qty: int = Field(..., gt=0, le=1_000_000)
+
+
+class MergedWorkOrderCreatePayload(BaseModel):
+    oar_allocations: List[MergedOARItem] = Field(..., min_length=2)
+    wo_number: Optional[str] = Field(None, max_length=100)
+    allow_overrun: bool = False
+    classification: Optional[str] = Field(None, max_length=50)
+    wo_date: Optional[date] = None
+    target_date: Optional[date] = None
+    casting_process: Optional[str] = Field("CENTRIFUGAL", max_length=50)
+    heat_number: Optional[str] = Field(None, max_length=100)
+    route_stages: Optional[List[str]] = Field(None)
+    remarks: Optional[str] = Field(None, max_length=2000)
+
+
 class WorkOrderUpdatePayload(BaseModel):
     wo_number: Optional[str] = Field(None, max_length=100, description="New Work Order ID")
     physical_wo_qty: Optional[int] = Field(None, gt=0, le=1_000_000, description="Updated quantity")
@@ -100,6 +118,7 @@ class WorkOrderCreateResponse(BaseModel):
     release_status: str
     created_at: datetime
     message: str
+    merged_oars: List[dict] = []
 
 class NextSequencesResponse(BaseModel):
     next_oar_number: str
