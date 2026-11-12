@@ -15,7 +15,7 @@ from app.models.user import User
 from app.services.work_order_service import compute_po_coverage_status, compute_wo_release_status
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    POMasterCreate, POMasterUpdate, POMasterOut, POLineOut, POLineUpdate,
+    POMasterCreate, POMasterUpdate, POMasterOut, POLineOut, POLineUpdate, POMergeRequest,
     POLineOrderSummary, POLineWorkOrderSummary,
     ScheduleCreate, ScheduleUpdate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
@@ -919,6 +919,93 @@ class POMasterService:
 
         db.refresh(po)
         return POMasterService._po_out(po)
+
+    @staticmethod
+    def merge_pos(db: Session, req: POMergeRequest, current_user: Optional[User] = None) -> POMasterOut:
+        """Move all PO lines and linked OARs from source_po_id into target_po_id and delete source_po_id."""
+        if req.source_po_id == req.target_po_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Source and target PO must be different.",
+            )
+
+        # Lock both POs in deterministic order to avoid deadlocks
+        ordered_ids = sorted([str(req.source_po_id), str(req.target_po_id)])
+        locked = {
+            str(p.id): p
+            for p in db.query(POMaster)
+            .filter(POMaster.id.in_(ordered_ids))
+            .order_by(POMaster.id)
+            .with_for_update()
+            .all()
+        }
+        source_po = locked.get(str(req.source_po_id))
+        target_po = locked.get(str(req.target_po_id))
+        if not source_po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source PO not found.")
+        if not target_po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target PO not found.")
+        if source_po.customer_id != target_po.customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot merge POs belonging to different customers.",
+            )
+        if source_po.status == POStatus.CANCELLED or target_po.status == POStatus.CANCELLED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot merge cancelled Purchase Orders.",
+            )
+
+        source_lines = db.query(POLine).filter(POLine.po_id == source_po.id).with_for_update().all()
+        db.query(POLine).filter(POLine.po_id == target_po.id).with_for_update().all()
+
+        source_line_ids = [l.id for l in source_lines]
+        for line in source_lines:
+            line.po_id = target_po.id
+
+        # Update any OARs linked to source_po so customer_po points to target_po.po_number
+        linked_orders = db.query(Order).filter(
+            (Order.po_line_id.in_(source_line_ids) if source_line_ids else False) |
+            ((Order.customer_id == source_po.customer_id) & (Order.customer_po == source_po.po_number))
+        ).all()
+        moved_oars = []
+        for ord_item in linked_orders:
+            if ord_item.customer_po != target_po.po_number:
+                ord_item.customer_po = target_po.po_number
+            moved_oars.append(ord_item.oar_number)
+
+        if req.update_validity_date and source_po.validity_date:
+            if target_po.validity_date is None or source_po.validity_date > target_po.validity_date:
+                target_po.validity_date = source_po.validity_date
+
+        db.flush()
+        db.expire(target_po, ["lines"])
+        target_po.total_value = round(
+            sum(
+                getattr(l, "line_total", 0.0) or (l.po_qty * (getattr(l, "unit_price", 0.0) or 0.0))
+                for l in target_po.lines
+            ),
+            2,
+        )
+
+        details = (
+            f"Merged source PO '{source_po.po_number}' ({source_po.id}, {len(source_lines)} lines) "
+            f"into '{target_po.po_number}' ({target_po.id}); updated OARs: {moved_oars or 'none'}"
+        )
+        _audit(db, current_user, "PO_MERGED", "POMaster", str(target_po.id), details=details)
+
+        db.delete(source_po)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Could not merge POs due to a database integrity or concurrency conflict.",
+            )
+
+        db.refresh(target_po)
+        return POMasterService._po_out(target_po)
 
     @staticmethod
     def delete_po(db: Session, po_id: str, current_user: Optional[User] = None) -> dict:

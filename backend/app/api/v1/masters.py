@@ -8,7 +8,7 @@ from app.models.user import User
 from app.core.roles import PLANNING_ROLES, PO_MASTER_VIEW_ROLES, PO_MASTER_EDIT_ROLES
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    POMasterCreate, POMasterUpdate, POMasterOut,
+    POMasterCreate, POMasterUpdate, POMasterOut, POMergeRequest,
     ScheduleCreate, ScheduleUpdate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
@@ -87,6 +87,15 @@ def create_po(
     user: User = Depends(require_roles(*PLANNING_ROLES)),
 ):
     return POMasterService.create_po(db, payload, current_user=user)
+
+
+@router.post("/pos/merge", response_model=POMasterOut)
+def merge_pos(
+    payload: POMergeRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    return POMasterService.merge_pos(db, payload, current_user=user)
 
 
 @router.put("/pos/{po_id}", response_model=POMasterOut)

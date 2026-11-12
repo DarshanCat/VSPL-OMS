@@ -156,6 +156,12 @@ class POMasterUpdate(BaseModel):
     lines: Optional[List[POLineUpdate]] = None
 
 
+class POMergeRequest(BaseModel):
+    source_po_id: str = Field(..., min_length=1, max_length=100)
+    target_po_id: str = Field(..., min_length=1, max_length=100)
+    update_validity_date: Optional[bool] = True
+
+
 
 # ---------------------------------------------------------------------------
 # Schedule Master
