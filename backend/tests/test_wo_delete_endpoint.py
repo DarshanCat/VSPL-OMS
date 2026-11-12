@@ -182,6 +182,22 @@ def test_delete_wo_blocks_released_activity_and_unauthorized(client, db_session)
     assert rel_res.status_code == 400
     assert "released" in rel_res.json()["detail"].lower()
 
+    # Non-admin cannot use force_unstarted_release=true (403)
+    non_admin_force = client.delete(
+        "/api/v1/work-orders/WO-DEL-REL?force_unstarted_release=true",
+        headers={"Authorization": f"Bearer {planner_token}"},
+    )
+    assert non_admin_force.status_code == 403
+
+    # Admin can delete unstarted released WO with force_unstarted_release=true
+    admin_token = _get_token(db_session, "admin_wo_del@vspl.com", UserRole.ADMIN)
+    admin_force = client.delete(
+        "/api/v1/work-orders/WO-DEL-REL?force_unstarted_release=true",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert admin_force.status_code == 200, admin_force.text
+    assert db_session.query(WorkOrder).filter(WorkOrder.wo_number == "WO-DEL-REL").first() is None
+
     # Add ProductionUpdate -> blocked (400)
     wo_prod = db_session.query(WorkOrder).filter(WorkOrder.wo_number == "WO-DEL-PROD").first()
     pu = ProductionUpdate(

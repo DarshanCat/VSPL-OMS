@@ -584,9 +584,10 @@ class OperationsService:
     def delete_work_order(
         db: Session,
         wo_identifier: str,
-        current_user: Optional[User] = None
+        current_user: Optional[User] = None,
+        force_unstarted_release: bool = False,
     ) -> dict:
-        """Safely delete an unreleased Work Order with zero shop-floor/child activity, freeing its qty back to parent OAR."""
+        """Safely delete an unreleased Work Order (or ADMIN-forced unstarted released WO) with zero shop-floor/child activity."""
         clean_id = (wo_identifier or "").strip()
         if not clean_id:
             raise HTTPException(
@@ -612,7 +613,7 @@ class OperationsService:
                 detail=f"Work Order '{clean_id}' not found."
             )
 
-        if wo.released_by or wo.release_date or wo.manufacturing_released_at:
+        if not force_unstarted_release and (wo.released_by or wo.release_date or wo.manufacturing_released_at):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot delete Work Order '{wo.wo_number}' because it has already been released."

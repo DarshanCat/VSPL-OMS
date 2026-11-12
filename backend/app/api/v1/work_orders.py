@@ -135,8 +135,18 @@ def get_stage_state(
 @router.delete("/{wo_identifier}")
 def delete_work_order(
     wo_identifier: str,
+    force_unstarted_release: bool = False,
     db: Session = Depends(get_db),
     user: User = Depends(require_roles(*PLANNING_ROLES))
 ):
-    """Safely delete an unreleased Work Order with zero shop-floor/child activity."""
-    return OperationsService.delete_work_order(db, wo_identifier, current_user=user)
+    """Safely delete an unreleased Work Order (or ADMIN-forced unstarted released WO) with zero shop-floor/child activity."""
+    if force_unstarted_release:
+        from app.models.user import UserRole
+        if getattr(user, "role", None) != UserRole.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only ADMIN can force-delete a released unstarted Work Order."
+            )
+    return OperationsService.delete_work_order(
+        db, wo_identifier, current_user=user, force_unstarted_release=force_unstarted_release
+    )
