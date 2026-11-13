@@ -225,8 +225,15 @@ class VendorService:
             wo.current_stage = target_stage
 
         # 3. Record Immutable ProductionMovement ledger row
+        from app.services.production_service import _get_next_movement_id
+
+        part_id = wo.order.part_id if wo.order else None
+        movement_id = _get_next_movement_id(db)
+
         mov = ProductionMovement(
+            movement_id=movement_id,
             work_order_id=wo.id,
+            part_id=part_id,
             from_stage=f"{dispatch.dispatch_stage} (VENDOR)",
             to_stage=target_stage,
             quantity_moved=received_qty,
