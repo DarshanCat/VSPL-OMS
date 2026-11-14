@@ -332,6 +332,15 @@ function WOGenerationContent() {
   const mergedOarList = oars.filter((o) => mergeSelections[o.order_id] !== undefined);
   const mergeAnchor = mergedOarList[0] || null;
   const mergeTotalQty = mergedOarList.reduce((sum, o) => sum + (Number(mergeSelections[o.order_id]) || 0), 0);
+  const compatibleUnselectedOars = mergeAnchor
+    ? oars.filter(
+        (o) =>
+          mergeSelections[o.order_id] === undefined &&
+          o.remaining_qty > 0 &&
+          o.customer_code === mergeAnchor.customer_code &&
+          o.part_number === mergeAnchor.part_number
+      )
+    : [];
 
   const toggleMergeOar = (oar: OARListItem) => {
     setError("");
@@ -1021,14 +1030,30 @@ function WOGenerationContent() {
                   </div>
                   <div className="divide-y divide-purple-200/70 dark:divide-purple-900/60 rounded-lg border border-purple-200 dark:border-purple-900 bg-white dark:bg-zinc-900">
                     {mergedOarList.map((o) => (
-                      <div key={o.order_id} className="p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <div>
-                          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{o.oar_number}</span>
-                          <span className="ml-2 text-zinc-500 font-mono">PO: {o.customer_po || "—"}</span>
-                          <span className="ml-2 text-zinc-400">Remaining: {o.remaining_qty} pcs</span>
+                      <div key={o.order_id} className="p-3.5 flex flex-wrap items-center justify-between gap-4 text-xs">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">{o.oar_number}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                              PO: {o.customer_po || "—"}
+                            </span>
+                          </div>
+                          <p className="text-zinc-600 dark:text-zinc-300 text-[11px]">
+                            <strong>{o.customer_code}</strong> ({o.customer_name}) • Part: <strong className="font-mono">{o.customer_part_number || o.part_number}</strong>
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3 text-[10px] text-zinc-500 font-mono">
+                            <span>Total Ordered: <strong>{o.oar_qty} pcs</strong></span>
+                            <span>Remaining: <strong className="text-emerald-600">{o.remaining_qty} pcs</strong></span>
+                            {o.commitment_date && (
+                              <span>Commit: {formatDate(o.revised_commitment_date || o.commitment_date)}</span>
+                            )}
+                            {o.delivery_date && (
+                              <span>Delivery: {formatDate(o.delivery_date)}</span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <label className="text-[11px] font-semibold text-zinc-500">Qty from OAR:</label>
+                          <label className="text-[11px] font-semibold text-zinc-500 whitespace-nowrap">Qty from OAR:</label>
                           <input
                             type="number"
                             min={1}
@@ -1040,12 +1065,12 @@ function WOGenerationContent() {
                                 [o.order_id]: Math.max(0, Number(e.target.value) || 0),
                               }))
                             }
-                            className="w-24 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2.5 py-1 font-mono font-bold text-right"
+                            className="w-24 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-2.5 py-1.5 font-mono font-bold text-right"
                           />
                           <button
                             type="button"
                             onClick={() => toggleMergeOar(o)}
-                            className="p-1 text-zinc-400 hover:text-rose-600 cursor-pointer"
+                            className="p-1.5 text-zinc-400 hover:text-rose-600 cursor-pointer rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
                             title="Remove OAR"
                           >
                             <X className="h-4 w-4" />
@@ -1054,6 +1079,71 @@ function WOGenerationContent() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Matching OARs Available to Add Directly */}
+                  {compatibleUnselectedOars.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-purple-200 dark:border-purple-800">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 text-purple-600" />
+                          <span>Matching OARs Available to Add ({compatibleUnselectedOars.length})</span>
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          Same Customer ({mergeAnchor?.customer_code}) &amp; Part ({mergeAnchor?.customer_part_number || mergeAnchor?.part_number})
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {compatibleUnselectedOars.map((o) => (
+                          <div
+                            key={o.order_id}
+                            className="p-2.5 rounded-lg border border-purple-200 dark:border-purple-800 bg-white dark:bg-zinc-900 flex items-center justify-between gap-2 shadow-2xs"
+                          >
+                            <div>
+                              <span className="font-mono font-bold text-emerald-600 text-xs block">{o.oar_number}</span>
+                              <span className="text-[10px] text-zinc-500 block">
+                                PO: {o.customer_po || "—"} | Remaining: <strong>{o.remaining_qty} pcs</strong>
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => toggleMergeOar(o)}
+                              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white transition flex items-center gap-1 cursor-pointer shrink-0"
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>Add</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Notice if only 1 OAR is selected and no other matching OAR exists in the system */}
+                  {mergedOarList.length === 1 && compatibleUnselectedOars.length === 0 && mergeAnchor && (
+                    <div className="mt-3 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-amber-900 dark:text-amber-200">
+                            Only 1 OAR exists for {mergeAnchor.customer_code} • {mergeAnchor.customer_part_number || mergeAnchor.part_number}
+                          </p>
+                          <p className="text-amber-800 dark:text-amber-300 text-[11px] mt-0.5">
+                            There are no other pending OARs for this Customer &amp; Part Number in the system to merge with. To generate a Work Order for <strong>{mergeAnchor.oar_number}</strong> ({mergeAnchor.remaining_qty} pcs), please switch to <strong>Single OAR</strong> mode.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGenerationMode("single");
+                          setSelectedOar(mergeAnchor);
+                        }}
+                        className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs whitespace-nowrap self-start sm:self-auto transition cursor-pointer shadow-xs"
+                      >
+                        Switch to Single OAR &rarr;
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
