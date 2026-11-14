@@ -424,10 +424,27 @@ class WorkOrderService:
                 po_map[(p.customer_id, p.po_number.strip())] = p.po_date or (p.created_at.date() if p.created_at else None)
 
         from app.models.vendor import VendorDispatch
-        active_vendor_dispatches = db.query(VendorDispatch.work_order_id).filter(
+        active_vendor_dispatches = db.query(VendorDispatch).filter(
             VendorDispatch.status.in_(["AT_VENDOR", "PARTIALLY_RECEIVED"])
-        ).distinct().all()
-        active_vendor_wo_ids = {d[0] for d in active_vendor_dispatches if d[0]}
+        ).order_by(VendorDispatch.created_at.desc()).all()
+        
+        vendor_info_map = {}
+        for vd in active_vendor_dispatches:
+            if not vd.work_order_id:
+                continue
+            wid = vd.work_order_id
+            pend = max(vd.dispatched_qty - (vd.received_qty or 0) - (vd.scrap_qty or 0), 0)
+            if wid not in vendor_info_map:
+                vendor_info_map[wid] = {
+                    "is_at_vendor": True,
+                    "vendor_name": vd.vendor_name,
+                    "vendor_dc": vd.dc_number,
+                    "vendor_qty": pend,
+                    "vendor_dispatch_stage": vd.dispatch_stage,
+                    "vendor_target_return_stage": vd.target_return_stage,
+                }
+            else:
+                vendor_info_map[wid]["vendor_qty"] += pend
 
         results = []
 
@@ -502,6 +519,8 @@ class WorkOrderService:
                 else (order.po_qty if order else wo.physical_wo_qty)
             )
 
+            v_info = vendor_info_map.get(wo.id)
+
             results.append(WorkOrderListItem(
                 id=str(wo.id),
                 wo_number=wo.wo_number,
@@ -544,7 +563,12 @@ class WorkOrderService:
                 effective_commitment_date=oar_effective_commit_date,
                 commitment_date_revision_count=oar_commit_rev_count,
                 route_stages=route_stages,
-                is_at_vendor=(wo.id in active_vendor_wo_ids),
+                is_at_vendor=bool(v_info and v_info.get("is_at_vendor")),
+                vendor_name=v_info.get("vendor_name") if v_info else None,
+                vendor_dc=v_info.get("vendor_dc") if v_info else None,
+                vendor_qty=v_info.get("vendor_qty") if v_info else 0,
+                vendor_dispatch_stage=v_info.get("vendor_dispatch_stage") if v_info else None,
+                vendor_target_return_stage=v_info.get("vendor_target_return_stage") if v_info else None,
                 is_merged=is_merged_wo,
                 merged_oars=merged_oar_items,
             ))

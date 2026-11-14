@@ -67,6 +67,11 @@ class WorkOrderListItem(BaseModel):
     commitment_date_revision_count: int = 0
     route_stages: Optional[List[str]] = None
     is_at_vendor: bool = False
+    vendor_name: Optional[str] = None
+    vendor_dc: Optional[str] = None
+    vendor_qty: Optional[int] = 0
+    vendor_dispatch_stage: Optional[str] = None
+    vendor_target_return_stage: Optional[str] = None
     is_merged: bool = False
     merged_oars: List[MergedOARAllocationOut] = []
 

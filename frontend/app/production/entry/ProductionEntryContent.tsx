@@ -663,11 +663,23 @@ export function ProductionEntryContent() {
                   onChange={(e) => lookupWO(e.target.value)}
                   className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-mono font-bold focus:outline-none"
                 >
-                  {availableWOs.filter((w) => activeGate === "ALL" || w.current_stage === activeGate).map((w) => (
-                    <option key={w.wo_number} value={w.wo_number}>
-                      {w.wo_number} — {w.current_stage} ({w.customer_code})
-                    </option>
-                  ))}
+                  {availableWOs
+                    .filter(
+                      (w) =>
+                        activeGate === "ALL" ||
+                        w.current_stage === activeGate ||
+                        (w.is_at_vendor &&
+                          (w.vendor_dispatch_stage === activeGate ||
+                            w.vendor_target_return_stage === activeGate))
+                    )
+                    .map((w) => (
+                      <option key={w.wo_number} value={w.wo_number}>
+                        {w.wo_number} — {w.current_stage} ({w.customer_code})
+                        {w.is_at_vendor
+                          ? ` [VEND: ${w.vendor_name || "Vendor"}]`
+                          : ""}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>
@@ -683,6 +695,48 @@ export function ProductionEntryContent() {
 
         {woData && (
           <div className="space-y-6">
+            {/* Vendor Alert Banner if WO is currently at a vendor */}
+            {Boolean(woData.is_at_vendor || woData.active_vendor_name || woData.vendor_name) && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl border-2 border-purple-400 dark:border-purple-600 bg-purple-50 dark:bg-purple-950/40 shadow-sm">
+                <div className="flex items-start sm:items-center gap-3.5">
+                  <div className="p-2.5 rounded-xl bg-purple-600 text-white shrink-0 shadow-sm">
+                    <Building2 className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-black tracking-wider uppercase text-purple-950 dark:text-purple-200">
+                        MATERIAL CURRENTLY AT VENDOR / SUBCONTRACTOR
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-200 dark:bg-purple-900/80 text-purple-900 dark:text-purple-200 border border-purple-300 dark:border-purple-700 font-mono">
+                        DC #{woData.active_vendor_dc || woData.vendor_dc || "N/A"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-purple-800 dark:text-purple-300 mt-1">
+                      <strong className="font-extrabold text-purple-950 dark:text-purple-100">
+                        {woData.active_vendor_qty ?? woData.vendor_qty ?? 0} pcs
+                      </strong>{" "}
+                      sent to{" "}
+                      <strong className="font-extrabold text-purple-950 dark:text-purple-100">
+                        {woData.active_vendor_name || woData.vendor_name || "Outside Vendor"}
+                      </strong>{" "}
+                      from Stage{" "}
+                      <span className="font-mono font-bold">
+                        {woData.active_vendor_stage || woData.vendor_dispatch_stage || "F2"}
+                      </span>
+                      . Please receive material in Vendor Tracking before logging final stage completion.
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/production/vendor"
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition shadow-xs whitespace-nowrap flex items-center gap-1.5 shrink-0 self-end sm:self-auto cursor-pointer"
+                >
+                  <span>Open Vendor Tracking</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            )}
+
             {/* WO Context & Metadata Strip */}
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-sm">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 text-xs">

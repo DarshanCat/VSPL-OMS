@@ -377,6 +377,12 @@ export interface WorkOrderListItem {
   heat_number?: string | null;
   classification?: string | null;
   route_stages?: string[] | null;
+  is_at_vendor?: boolean;
+  vendor_name?: string | null;
+  vendor_dc?: string | null;
+  vendor_qty?: number;
+  vendor_dispatch_stage?: string | null;
+  vendor_target_return_stage?: string | null;
   is_merged?: boolean;
   merged_oars?: {
     oar_number: string;
