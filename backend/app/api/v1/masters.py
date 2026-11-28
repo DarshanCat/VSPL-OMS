@@ -8,7 +8,7 @@ from app.models.user import User
 from app.core.roles import PLANNING_ROLES, PO_MASTER_VIEW_ROLES, PO_MASTER_EDIT_ROLES, CUSTOMER_MASTER_VIEW_ROLES
 from app.schemas.master_data import (
     CustomerCreate, CustomerUpdate, CustomerOut,
-    POMasterCreate, POMasterUpdate, POMasterOut, POMergeRequest,
+    POMasterCreate, POMasterUpdate, POMasterOut, POMergeRequest, POLinePriceUpdate,
     ScheduleCreate, ScheduleUpdate, ScheduleOut,
     CustomerPartOut, ResolveCustomerPartResponse,
     PartMasterCreate, PartMasterUpdate, PartMasterOut,
@@ -106,6 +106,29 @@ def update_po(
     user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
 ):
     return POMasterService.update_po(db, po_id=po_id, req=payload, current_user=user)
+
+
+@router.put("/pos/{po_id}/lines/{line_id}/price", response_model=POMasterOut)
+def update_po_line_price(
+    po_id: str,
+    line_id: str,
+    payload: POLinePriceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    """Sales dashboards' Edit price: changes only this line's unit price (Sales, Planner, Admin, CEO)."""
+    return POMasterService.update_line_price(db, po_id=po_id, line_id=line_id, unit_price=payload.unit_price, current_user=user)
+
+
+@router.put("/orders/{order_id}/price", response_model=POMasterOut)
+def set_order_price(
+    order_id: str,
+    payload: POLinePriceUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*PO_MASTER_EDIT_ROLES)),
+):
+    """Sales dashboards' Edit price for an order that has no PO line or schedule: records the missing PO line."""
+    return POMasterService.price_order_without_po_line(db, order_id=order_id, unit_price=payload.unit_price, current_user=user)
 
 
 @router.delete("/pos/{po_id}")

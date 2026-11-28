@@ -41,7 +41,8 @@ def test_plan_edit_warns_on_holiday_but_still_saves(env):
     s, a, b = _setup_with_two(env)
     sun = _next_weekday(6)
     res = SP.update_plan(env.db, "WO-B", [{"stage": "SP", "planned_end": sun}], None, "test", 0, env.ppc)
-    assert any("weekly off" in w["message"] for w in res["warnings"])
+    # Calendar warnings were removed: a date on a weekly-off day saves without a holiday warning.
+    assert not any("weekly off" in w["message"] for w in res["warnings"])
     assert "SP" in res["changed_gates"]
 
 
@@ -54,8 +55,8 @@ def test_capacity_warning_counts_other_work_orders_only(env):
     ex.set_capacity(env.db, "FI", 15, None, env.ppc)
     env.db.commit()
     res = SP.update_plan(env.db, "WO-A", [{"stage": "FI", "planned_end": day}], None, "reason y", 0, env.ppc)
-    assert any("20 pcs planned against a capacity of 15" in w["message"] for w in res["warnings"])
-    # re-saving the same WO does not count itself twice
+    # Capacity warnings were removed: going over a stored capacity no longer warns.
+    assert not any("capacity" in w["message"] for w in res["warnings"])
     res2 = SP.update_plan(env.db, "WO-B", [{"stage": "FI", "planned_end": day + timedelta(days=1)}], None, "reason z", 1, env.ppc)
     assert not any("capacity" in w["message"] for w in res2["warnings"])
 

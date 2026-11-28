@@ -440,9 +440,8 @@ class SetupPlanningService:
                 if last_end > commitment:
                     issues.append({"stage": last.stage, "level": "WARNING",
                                    "message": f"The last gate ({last.stage}) ends {last_end.strftime('%d %b')}, after the commitment date {commitment.strftime('%d %b')}."})
-            if db is not None and wo is not None:
-                from app.services import planning_extras_service as extras
-                issues.extend(extras.plan_warnings(db, wo, merged, changed_keys))
+            # Holiday / capacity warnings were removed with the Calendar and Capacity screens: a gate date
+            # is only checked against the commitment date.
         return issues
 
     @staticmethod

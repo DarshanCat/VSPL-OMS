@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # and the planning module is hidden/refused. On = a setup number is mandatory at release.
     SETUP_PLANNING_ENABLED: bool = False
     SETUP_PLANNING_AT_RISK_DAYS: int = 2
+    # Route card (read only printable card per work order). On by default; set false to hide/refuse it.
+    ROUTE_CARD_ENABLED: bool = True
     # Lets a scheduler (for example Cloud Scheduler) call POST /api/v1/planning/digest/run with the header
     # X-Planning-Digest-Token. Empty = that trigger is disabled.
     PLANNING_DIGEST_TOKEN: str = ""

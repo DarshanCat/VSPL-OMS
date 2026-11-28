@@ -32,6 +32,7 @@ import {
   Users as UsersIcon,
   Building2,
   CalendarClock,
+  GanttChartSquare,
   CalendarRange,
   Inbox,
   GitMerge,
@@ -201,21 +202,15 @@ const NAV_GROUPS: NavGroup[] = [
         roles: ["admin", "planner"],
       },
       {
+        name: "Planning Table",
+        href: "/planning/planning-table",
+        icon: <GanttChartSquare className="h-4 w-4 text-orange-500" />,
+        roles: ["admin", "planner"],
+      },
+      {
         name: "Delay Board",
         href: "/planning/delays",
         icon: <AlertTriangle className="h-4 w-4 text-rose-500" />,
-        roles: ["admin", "planner"],
-      },
-      {
-        name: "Calendar",
-        href: "/planning/calendar",
-        icon: <CalendarRange className="h-4 w-4 text-sky-500" />,
-        roles: ["admin", "planner"],
-      },
-      {
-        name: "Capacity",
-        href: "/planning/capacity",
-        icon: <AlertTriangle className="h-4 w-4 text-amber-500" />,
         roles: ["admin", "planner"],
       },
       {

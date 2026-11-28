@@ -1082,6 +1082,14 @@ function WOReleaseSearchContent() {
                           </button>
 
                           <Link
+                            href={`/planning/route-card/${encodeURIComponent(wo.wo_number)}`}
+                            className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors whitespace-nowrap"
+                            title="Open the printable route card"
+                          >
+                            <span>Route Card</span>
+                          </Link>
+
+                          <Link
                             href={`/production/tracking?wo=${encodeURIComponent(wo.wo_number)}`}
                             className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
                             title="View Routing History & Progress"

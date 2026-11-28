@@ -58,6 +58,19 @@ def _bucket_key(d: Optional[date], buckets: List[Dict]) -> str:
     return "BEYOND"
 
 
+def _price_target(line, schedule, order=None):
+    """What a price edit on a dashboard row changes: the PO line when there is one, else the schedule, else (for an
+    order with neither) the order itself, which gets its PO line recorded. Read only: the dashboards use it to show
+    an Edit price action; the edit itself goes through the masters API."""
+    if line is not None:
+        return {"type": "PO_LINE", "po_id": str(line.po_id), "line_id": str(line.id)}
+    if schedule is not None:
+        return {"type": "SCHEDULE", "id": str(schedule.id)}
+    if order is not None:
+        return {"type": "ORDER", "order_id": str(order.id)}
+    return None
+
+
 def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict]:
     include = [s.upper() for s in (include or SOURCES)]
     items: List[Dict] = []
@@ -100,6 +113,7 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
             "po": o.customer_po, "part": o.part.part_number if o.part else "", "pending_qty": pending,
             "unit_price": price, "value": round(pending * price, 2) if price else 0.0, "has_price": bool(price),
             "date": o.delivery_date or o.commitment_date,
+            "price_target": _price_target(line, schedules.get(str(o.schedule_id)) if o.schedule_id else None, o),
         })
 
     if "PO_LINE" in include:
@@ -114,6 +128,7 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
                 "po": p.po_number, "part": l.part.part_number if l.part else "", "pending_qty": remaining,
                 "unit_price": price, "value": round(remaining * price, 2) if price else 0.0, "has_price": bool(price),
                 "date": l.required_date,
+                "price_target": _price_target(l, None),
             })
 
     if "SCHEDULE" in include:
@@ -127,6 +142,7 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
                 "po": s.customer_schedule_ref or "", "part": s.part.part_number if s.part else "",
                 "pending_qty": s.scheduled_qty or 0, "unit_price": price, "value": float(value or 0),
                 "has_price": bool(value), "date": s.required_date,
+                "price_target": _price_target(None, s),
             })
     return items
 
@@ -336,7 +352,7 @@ def build_schedule_report(db: Session, today: Optional[date] = None) -> Dict:
                       "customer_ref": s.customer_schedule_ref or "", "part": s.part.part_number if s.part else "",
                       "qty": s.scheduled_qty or 0, "unit_price": s.unit_price or None, "value": round(value, 2),
                       "has_price": bool(value), "status": s.po_status.value, "date": s.required_date,
-                      "bucket": _bucket_key(s.required_date, bks)})
+                      "bucket": _bucket_key(s.required_date, bks), "price_target": _price_target(None, s)})
     def _new(key, label):
         return {"key": key, "label": label, "count": 0, "value": 0.0, "qty": 0}
     agg = {b["key"]: _new(b["key"], b["label"]) for b in bks}

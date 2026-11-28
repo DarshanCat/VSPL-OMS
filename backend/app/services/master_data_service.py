@@ -894,6 +894,110 @@ class POMasterService:
         return POMasterService._po_out(po)
 
     @staticmethod
+    def update_line_price(db: Session, po_id: str, line_id: str, unit_price: float, current_user: Optional[User] = None) -> POMasterOut:
+        """Change ONE PO line's unit price. Quantity, dates, part, status and every other line are left alone
+        (the general update_po replaces the whole line list, so it is not used for a price edit)."""
+        po = db.query(POMaster).filter(POMaster.id == po_id).with_for_update().first()
+        if not po:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PO not found.")
+        line = db.query(POLine).filter(POLine.id == line_id, POLine.po_id == po.id).with_for_update().first()
+        if not line:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PO line not found on this PO.")
+        if po.status == POStatus.CANCELLED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The price of a cancelled PO cannot be changed.")
+
+        new_price = round(float(unit_price), 2)
+        old_price = getattr(line, "unit_price", 0.0) or 0.0
+        line.unit_price = new_price
+        line.line_total = round(float(line.po_qty * new_price), 2)
+        db.flush()
+        po.total_value = round(sum(getattr(l, "line_total", 0.0) or (l.po_qty * (getattr(l, "unit_price", 0.0) or 0.0)) for l in po.lines), 2)
+
+        part_no = line.part.part_number if line.part else "?"
+        _audit(db, current_user, "PO_LINE_PRICE_UPDATED", "POMaster", str(po.id),
+               details=f"PO {po.po_number} line[{line.id}] part {part_no} unit_price: {old_price} -> {new_price}")
+        db.commit()
+        db.refresh(po)
+        return POMasterService._po_out(po)
+
+    @staticmethod
+    def price_order_without_po_line(db: Session, order_id: str, unit_price: float, current_user: Optional[User] = None) -> POMasterOut:
+        """Give a price to an order that has no PO line and no schedule (an OAR entered straight from a customer PO).
+
+        Prices only live on PO lines, and invoicing reads them from the order's PO line, so this records the missing
+        PO line: the order's PO number is created in PO Master (or the line is added to it if the PO is already there)
+        with one line for the part at the new price, and the order (and any other unlinked order of the same PO and
+        part) is linked to it. Nothing else about the order changes."""
+        from sqlalchemy import func
+        from app.models.order import Order, OrderStatus
+
+        order = db.query(Order).filter(Order.id == order_id).with_for_update().first()
+        if not order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+        if order.status == OrderStatus.REJECT:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A rejected order cannot be priced.")
+        if order.po_line_id or order.schedule_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="This order already has a PO line or schedule. Edit the price there.")
+        new_price = round(float(unit_price), 2)
+        if new_price <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a price greater than zero.")
+        po_no = (order.customer_po or "").strip()
+        if not po_no:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This order has no customer PO number.")
+
+        # every open, unlinked order of the same customer PO and part is covered by the one new line
+        siblings = [
+            o for o in db.query(Order).filter(
+                Order.customer_id == order.customer_id, Order.part_id == order.part_id,
+                Order.po_line_id.is_(None), Order.status != OrderStatus.REJECT,
+            ).with_for_update().all()
+            if (o.customer_po or "").strip().upper() == po_no.upper()
+        ]
+        qty = sum(o.po_qty or 0 for o in siblings)
+        dates = [o.delivery_date for o in siblings if o.delivery_date]
+
+        po = db.query(POMaster).filter(
+            POMaster.customer_id == order.customer_id, func.upper(POMaster.po_number) == po_no.upper()
+        ).with_for_update().first()
+        created_po = po is None
+        if po is None:
+            po = POMaster(
+                po_number=po_no, customer_id=order.customer_id, status=POStatus.OPEN, total_value=0.0,
+                created_by_id=current_user.id if current_user else None,
+                created_by_name=current_user.full_name if current_user else "System",
+            )
+            db.add(po)
+            db.flush()
+        else:
+            if po.status == POStatus.CANCELLED:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"PO '{po.po_number}' is cancelled.")
+            if any(l.part_id == order.part_id for l in po.lines):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=f"PO '{po.po_number}' already has a line for this part. Edit that line's price.")
+
+        line = POLine(
+            po_id=po.id, part_id=order.part_id, customer_part_number=order.customer_part_number or None,
+            po_qty=qty, unit_price=new_price, line_total=round(float(qty * new_price), 2),
+            required_date=min(dates) if dates else None,
+        )
+        db.add(line)
+        db.flush()
+        for o in siblings:
+            o.po_line_id = line.id
+        db.flush()
+        db.refresh(po)
+        po.total_value = round(sum(getattr(l, "line_total", 0.0) or 0.0 for l in po.lines), 2)
+
+        part_no = order.part.part_number if order.part else "?"
+        _audit(db, current_user, "ORDER_PRICE_SET", "POMaster", str(po.id),
+               details=(f"{'created PO' if created_po else 'added line to PO'} {po.po_number}: part {part_no}, qty {qty}, "
+                        f"unit_price {new_price}; linked orders: {', '.join(o.oar_number or str(o.id) for o in siblings)}"))
+        db.commit()
+        db.refresh(po)
+        return POMasterService._po_out(po)
+
+    @staticmethod
     def merge_pos(db: Session, req: POMergeRequest, current_user: Optional[User] = None) -> POMasterOut:
         """Move all PO lines and linked OARs from source_po_id into target_po_id and delete source_po_id."""
         if req.source_po_id == req.target_po_id:

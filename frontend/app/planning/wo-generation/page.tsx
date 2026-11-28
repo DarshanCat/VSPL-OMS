@@ -2000,6 +2000,13 @@ function WOGenerationContent() {
                             <Edit2 className="h-3 w-3" />
                             <span>Edit</span>
                           </button>
+                          <Link
+                            href={`/planning/route-card/${encodeURIComponent(wo.wo_number)}`}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 transition shadow-sm"
+                            title="Open the printable route card"
+                          >
+                            Route Card
+                          </Link>
                           {!wo.is_released && !wo.release_date && (
                             <button
                               type="button"

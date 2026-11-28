@@ -1012,6 +1012,18 @@ export async function updatePOMaster(poId: string, payload: POMasterUpdatePayloa
   return data;
 }
 
+/** Changes one PO line's unit price and nothing else (Sales dashboards' Edit price). */
+export async function updatePOLinePrice(poId: string, lineId: string, unitPrice: number): Promise<POMasterOut> {
+  const { data } = await api.put(`/api/v1/masters/pos/${encodeURIComponent(poId)}/lines/${encodeURIComponent(lineId)}/price`, { unit_price: unitPrice });
+  return data;
+}
+
+/** Prices an order that has no PO line or schedule by recording its PO line in PO Master. */
+export async function setOrderPrice(orderId: string, unitPrice: number): Promise<POMasterOut> {
+  const { data } = await api.put(`/api/v1/masters/orders/${encodeURIComponent(orderId)}/price`, { unit_price: unitPrice });
+  return data;
+}
+
 export async function deletePOMaster(poId: string): Promise<{ message: string }> {
   const { data } = await api.delete(`/api/v1/masters/pos/${encodeURIComponent(poId)}`);
   return data;
@@ -2672,42 +2684,7 @@ export async function sendPlanDigest(): Promise<PlanDigest & { email_sent: boole
 }
 
 
-// --- working calendar, gate capacity and split work orders (planning information only)
-export interface PlanCalendarDay { day: string; kind: "HOLIDAY" | "WORKING"; note?: string | null }
-export async function getPlanCalendar(start: string, end: string): Promise<{ weekly_off: number[]; days: PlanCalendarDay[] }> {
-  const { data } = await api.get("/api/v1/planning/calendar", { params: { start, end } });
-  return data;
-}
-export async function setPlanCalendarDay(day: string, kind: "HOLIDAY" | "WORKING", note: string): Promise<PlanCalendarDay> {
-  const { data } = await api.put(`/api/v1/planning/calendar/${day}`, { kind, note: note || null });
-  return data;
-}
-export async function deletePlanCalendarDay(day: string): Promise<void> {
-  await api.delete(`/api/v1/planning/calendar/${day}`);
-}
-
-export interface PlanCapacityRow { stage: string; daily_qty: number; note?: string | null }
-export interface CapacityView {
-  start: string;
-  days: { day: string; non_working: string | null }[];
-  stages: { stage: string; daily_qty: number | null; cells: { day: string; load: number; over: boolean }[] }[];
-}
-export async function getPlanCapacity(): Promise<PlanCapacityRow[]> {
-  const { data } = await api.get("/api/v1/planning/capacity");
-  return data;
-}
-export async function setPlanCapacity(stage: string, daily_qty: number, note: string): Promise<PlanCapacityRow> {
-  const { data } = await api.put(`/api/v1/planning/capacity/${encodeURIComponent(stage)}`, { daily_qty, note: note || null });
-  return data;
-}
-export async function deletePlanCapacity(stage: string): Promise<void> {
-  await api.delete(`/api/v1/planning/capacity/${encodeURIComponent(stage)}`);
-}
-export async function getCapacityView(days: number): Promise<CapacityView> {
-  const { data } = await api.get("/api/v1/planning/capacity-view", { params: { days } });
-  return data;
-}
-
+// --- split work orders (planning information only)
 export interface WoSplits {
   wo_number: string;
   total_qty: number;
@@ -2734,8 +2711,15 @@ export interface SalesStatusBucket {
   qty: number;
   by_source?: Record<SalesSource, { count: number; value: number }>;
 }
+/** What a price edit on a dashboard row changes (set by the server). */
+export type PriceTarget =
+  | { type: "PO_LINE"; po_id: string; line_id: string }
+  | { type: "SCHEDULE"; id: string }
+  | { type: "ORDER"; order_id: string };     // an order with no PO line or schedule: its PO line gets recorded
+
 export interface SalesStatusItem {
   source: "OAR" | "PO_LINE" | "SCHEDULE";
+  price_target?: PriceTarget | null;
   ref: string;
   customer: string;
   po: string;
@@ -2817,6 +2801,7 @@ export async function downloadSalesOrderStatusExcel(sources?: string[]): Promise
 
 // Customer schedule status dashboard (Sales and Admin only)
 export interface ScheduleStatusItem {
+  price_target?: PriceTarget | null;
   schedule: string;
   customer: string;
   customer_ref: string;
@@ -2848,4 +2833,30 @@ export async function getScheduleStatus(): Promise<ScheduleStatus> {
 
 export async function downloadScheduleStatusExcel(): Promise<void> {
   await downloadReportFile("/api/v1/sales/schedule-status.xlsx", {}, "schedule-status.xlsx");
+}
+
+// --- Route card (docs/route-card-architecture.md): read-only printable card of a work order -----
+export interface RouteCardVendorTrip {
+  vendor_name: string; dc_number: string; process_name: string | null;
+  sent_qty: number; out_qty: number; status: string;
+}
+export interface RouteCardGate {
+  gate: string; sequence: number; process: string; start_date: string | null; end_date: string | null;
+  responsibility: string | null; part_route: "IN_HOUSE" | "VENDOR"; vendor_trips: RouteCardVendorTrip[];
+  qty_out_at_vendor: number; production_qty: number; accepted_qty: number; rejected_qty: number;
+  pending_qty: number; quantity_source: "MRB" | "FLOOR" | "NONE";
+}
+export interface RouteCard {
+  doc_number: string; doc_rev_date: string; issue_date: string; generated_at: string; revision: number;
+  is_draft: boolean; release_status: string; wo_number: string; wo_type: string; source_wo_number: string | null;
+  customer_name: string | null; customer_code: string | null; po_numbers: string[]; oar_numbers: string[];
+  internal_part_number: string | null; unique_production_code: string | null; customer_part_number: string | null;
+  tool_assembly_description: string | null; internal_grade: string | null; fg_qty: number; rc_qty: number | null;
+  wo_qty: number; heat_numbers: string[]; setup_number: string | null; casting_process: string | null;
+  die_id: string | null; machine_cost: string | null; bin_id: string | null; bath_no: string | null;
+  gates: RouteCardGate[];
+}
+export async function getRouteCard(woNumber: string): Promise<RouteCard> {
+  const { data } = await api.get(`/api/v1/work-orders/${encodeURIComponent(woNumber)}/route-card`);
+  return data;
 }

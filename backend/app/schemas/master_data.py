@@ -146,6 +146,11 @@ class POLineUpdate(BaseModel):
     required_date: Optional[date] = None
 
 
+class POLinePriceUpdate(BaseModel):
+    """Changes one PO line's unit price and nothing else (the Sales dashboards' Edit price)."""
+    unit_price: float = Field(..., ge=0, le=100_000_000)
+
+
 class POMasterUpdate(BaseModel):
     po_number: Optional[str] = Field(None, max_length=200)
     customer_code: Optional[str] = Field(None, max_length=100)

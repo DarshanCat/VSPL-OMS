@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user, require_roles
+from app.models.user import UserRole
 from app.core.roles import PLANNING_ROLES
 from app.schemas.operations import WorkOrderCreatePayload, WorkOrderCreateResponse
 from app.services.operations_service import OperationsService
@@ -217,6 +218,35 @@ def get_work_order_route(
             detail=f"Work Order '{wo_identifier}' not found."
         )
     return route_data
+
+# Who may open the route card (CEO counts as Admin). Stage managers see every stage; gate supervisors are
+# not listed because they have no planning menu.
+ROUTE_CARD_ROLES = (
+    UserRole.ADMIN, UserRole.PLANNER, UserRole.PRODUCTION_MANAGER, UserRole.QA, UserRole.QUALITY, UserRole.SCM,
+    UserRole.F1_MANAGER, UserRole.F2_MANAGER, UserRole.F3_MANAGER, UserRole.SP_MANAGER,
+    UserRole.FI_MANAGER, UserRole.PACKING_MANAGER, UserRole.DISPATCH_MANAGER,
+)
+
+
+@router.get("/{wo_identifier}/route-card")
+def get_work_order_route_card(
+    wo_identifier: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles(*ROUTE_CARD_ROLES))
+):
+    """Printable route card of a work order, drawn live from OMS data (read only, nothing stored)."""
+    from app.core.config import settings as _settings
+    if not _settings.ROUTE_CARD_ENABLED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route card is not enabled")
+    require_wo_at_gate(db, user, wo_identifier)
+    from app.services.route_card_service import build_route_card
+    card = build_route_card(db, wo_identifier)
+    if not card:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Work Order '{wo_identifier}' not found."
+        )
+    return card
 
 @router.get("/{wo_identifier}/stage/{stage_name}/state")
 def get_stage_state(

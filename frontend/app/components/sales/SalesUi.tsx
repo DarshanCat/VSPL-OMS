@@ -2,10 +2,10 @@
 // Shared building blocks for the Sales dashboards (order status, schedule status).
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Download, Loader2, Printer, RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Download, Loader2, Pencil, Printer, RefreshCw, Search, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AppShell } from "@/app/components/layout/AppShell";
-import { getCurrentUserRole, getCurrentUserRoles } from "@/lib/api";
+import { getCurrentUserRole, getCurrentUserRoles, PriceTarget, setOrderPrice, updatePOLinePrice, updateSchedule } from "@/lib/api";
 
 // ---------------------------------------------------------------- formatting
 export const inrFull = (n: number) => "₹" + Math.round(n || 0).toLocaleString("en-IN");
@@ -409,4 +409,115 @@ export function PeriodTable({ rows, activeKey, onSelect, total, valueLabel = "Va
 
 export function Loading() {
   return <div className="flex items-center justify-center py-24 text-zinc-400"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+}
+
+
+// ---------------------------------------------------------------- edit price
+export type PriceEditRow = {
+  ref: string;            // order / PO / schedule reference shown in the list
+  customer: string;
+  part: string;
+  po?: string;            // customer PO number (named in the message for an order that has no PO line yet)
+  qty: number;            // pending quantity (used only to preview the new value)
+  unitPrice: number | null;
+  target: PriceTarget;
+};
+
+/** Small "Edit price" button for a table row; renders nothing when the row has no price to edit. */
+export function EditPriceButton({ target, onClick }: { target?: PriceTarget | null; onClick: () => void }) {
+  if (!target) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Edit the unit price"
+      className="no-print inline-flex items-center gap-1 rounded-lg border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-[10px] font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+    >
+      <Pencil className="h-3 w-3" /> Edit price
+    </button>
+  );
+}
+
+/** Dialog that changes one unit price through the same Masters endpoints PO Master / Schedule Master use. */
+export function PriceEditDialog({ row, onClose, onSaved }: { row: PriceEditRow; onClose: () => void; onSaved: (message: string) => void | Promise<void> }) {
+  const [value, setValue] = useState(row.unitPrice ? String(row.unitPrice) : "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const price = Number(value);
+  const valid = value.trim() !== "" && isFinite(price) && price >= 0;
+  const changed = valid && Math.round(price * 100) !== Math.round((row.unitPrice || 0) * 100);
+  const kind = row.target.type;
+
+  const save = async () => {
+    if (!valid) { setErr("Enter a price of zero or more."); return; }
+    if (!changed) { setErr("The price is the same as before."); return; }
+    setSaving(true);
+    setErr("");
+    try {
+      if (row.target.type === "PO_LINE") await updatePOLinePrice(row.target.po_id, row.target.line_id, price);
+      else if (row.target.type === "ORDER") await setOrderPrice(row.target.order_id, price);
+      else await updateSchedule(row.target.id, { unit_price: price });
+      await onSaved(`Price of ${row.ref} (${row.part}) changed to ₹${price.toLocaleString("en-IN")}.`);
+    } catch (e: any) {
+      const d = e?.response?.data?.detail;
+      setErr(typeof d === "string" ? d : e?.message || "Could not save the price.");
+      setSaving(false);
+    }
+  };
+
+  const labelCls = "block text-[11px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 mb-1";
+  return (
+    <div className="no-print fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Edit price">
+      <div className="w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 space-y-3 shadow-xl">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">Edit price · {row.ref}</h2>
+            <p className="text-[11px] text-zinc-500">{row.customer} · {row.part} · {row.qty.toLocaleString("en-IN")} pcs</p>
+          </div>
+          <button type="button" aria-label="Close" onClick={onClose}><X className="h-4 w-4 text-zinc-500" /></button>
+        </div>
+        <p className="rounded-xl bg-zinc-100 dark:bg-zinc-800 p-2.5 text-[11px] text-zinc-600 dark:text-zinc-300">
+          {kind === "PO_LINE"
+            ? "This changes the unit price on the PO line (PO Master). Quantity, dates and other lines are not touched."
+            : kind === "ORDER"
+            ? `This order has no PO line, so there is no price record yet. Saving records PO ${row.po || "(its PO number)"} in PO Master with one line for ${row.part} at this price, and links this order to it. The order itself is not changed.`
+            : "This changes the unit price on the schedule (Schedule Master). Quantity, dates and status are not touched."}
+        </p>
+        {err && (
+          <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40 p-2.5 text-xs font-semibold text-rose-700 dark:text-rose-300" role="alert">
+            <AlertTriangle className="h-4 w-4 shrink-0" /> <span>{err}</span>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3 items-end">
+          <div>
+            <span className={labelCls}>Current price</span>
+            <div className="rounded-xl bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              {row.unitPrice ? `₹${row.unitPrice.toLocaleString("en-IN")}` : "no price"}
+            </div>
+          </div>
+          <div>
+            <label htmlFor="new-unit-price" className={labelCls}>New unit price (₹) *</label>
+            <input
+              id="new-unit-price" type="number" min={0} step="0.01" autoFocus value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+              className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm font-mono font-bold text-zinc-900 dark:text-zinc-100"
+            />
+          </div>
+        </div>
+        {valid && (
+          <p className="text-[11px] text-zinc-500">
+            New value for {row.qty.toLocaleString("en-IN")} pcs: <span className="font-bold text-zinc-800 dark:text-zinc-100">{inrFull(row.qty * price)}</span>
+          </p>
+        )}
+        <div className="flex items-center gap-2 pt-1">
+          <button type="button" onClick={save} disabled={saving || !changed}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 px-4 py-2 text-xs font-bold text-white">
+            {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save price
+          </button>
+          <button type="button" onClick={onClose} className="rounded-xl px-3 py-2 text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
 }

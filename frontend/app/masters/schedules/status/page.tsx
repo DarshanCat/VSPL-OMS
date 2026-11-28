@@ -2,8 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
-  BarList, Card, Column, DataTable, dmy, ErrorBanner, inrCompact, inrFull, Kpi, Loading, MonthChart, NoAccess, PeriodTable,
-  PRINT_CSS, ReportHeader, ShareBar, useSalesAccess,
+  BarList, Card, Column, DataTable, dmy, EditPriceButton, ErrorBanner, inrCompact, inrFull, Kpi, Loading, MonthChart, NoAccess, PeriodTable,
+  PRINT_CSS, PriceEditDialog, PriceEditRow, ReportHeader, ShareBar, useSalesAccess,
 } from "@/app/components/sales/SalesUi";
 import { downloadScheduleStatusExcel, getScheduleStatus, ScheduleStatus, ScheduleStatusItem } from "@/lib/api";
 
@@ -25,6 +25,8 @@ export default function ScheduleStatusPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [editRow, setEditRow] = useState<PriceEditRow | null>(null);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +86,15 @@ export default function ScheduleStatusPage() {
       { key: "value", label: "Value", align: "right", value: (r) => r.value, render: (r) => <span className="font-bold">{inrFull(r.value)}</span> },
       { key: "status", label: "Status", value: (r) => STATUS_LABEL[r.status] || r.status, render: (r) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${STATUS_STYLE[r.status]?.badge || ""}`}>{STATUS_LABEL[r.status] || r.status}</span> },
       { key: "date", label: "Required", align: "right", value: (r) => r.date, render: (r) => dmy(r.date) },
+      {
+        key: "edit", label: "", value: () => "", searchable: false,
+        render: (r) => (
+          <EditPriceButton
+            target={r.price_target}
+            onClick={() => r.price_target && setEditRow({ ref: r.schedule, customer: r.customer, part: r.part, qty: r.qty, unitPrice: r.unit_price, target: r.price_target })}
+          />
+        ),
+      },
     ],
     [],
   );
@@ -108,6 +119,12 @@ export default function ScheduleStatusPage() {
           onDownload={download}
         />
         <ErrorBanner message={error} onClose={() => setError("")} />
+        {notice && (
+          <div className="no-print flex items-start justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40 p-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+            <span>{notice}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setNotice("")}>×</button>
+          </div>
+        )}
 
         {!data ? (
           <Loading />
@@ -164,6 +181,13 @@ export default function ScheduleStatusPage() {
           </>
         )}
       </div>
+      {editRow && (
+        <PriceEditDialog
+          row={editRow}
+          onClose={() => setEditRow(null)}
+          onSaved={async (msg) => { setEditRow(null); setNotice(msg); await load(); }}
+        />
+      )}
     </AppShell>
   );
 }

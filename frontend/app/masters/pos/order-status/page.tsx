@@ -2,8 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/app/components/layout/AppShell";
 import {
-  BarList, Card, Column, DataTable, ErrorBanner, inrCompact, inrFull, dmy, Kpi, Loading, MonthChart, NoAccess, PeriodTable,
-  PRINT_CSS, ReportHeader, useSalesAccess,
+  BarList, Card, Column, DataTable, EditPriceButton, ErrorBanner, inrCompact, inrFull, dmy, Kpi, Loading, MonthChart, NoAccess, PeriodTable,
+  PRINT_CSS, PriceEditDialog, PriceEditRow, ReportHeader, useSalesAccess,
 } from "@/app/components/sales/SalesUi";
 import { downloadSalesOrderStatusExcel, getSalesOrderStatus, SalesOrderStatus, SalesSource, SalesStatusItem } from "@/lib/api";
 
@@ -28,6 +28,8 @@ export default function SalesOrderStatusPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [editRow, setEditRow] = useState<PriceEditRow | null>(null);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +101,15 @@ export default function SalesOrderStatusPage() {
       { key: "price", label: "Unit price", align: "right", value: (r) => r.unit_price, render: (r) => (r.unit_price ? r.unit_price.toLocaleString("en-IN") : <span className="text-amber-600 font-semibold">no price</span>) },
       { key: "value", label: "Value", align: "right", value: (r) => r.value, render: (r) => <span className="font-bold">{inrFull(r.value)}</span> },
       { key: "date", label: "Delivery", align: "right", value: (r) => r.date, render: (r) => dmy(r.date) },
+      {
+        key: "edit", label: "", value: () => "", searchable: false,
+        render: (r) => (
+          <EditPriceButton
+            target={r.price_target}
+            onClick={() => r.price_target && setEditRow({ ref: r.ref, customer: r.customer, part: r.part, po: r.po, qty: r.pending_qty, unitPrice: r.unit_price, target: r.price_target })}
+          />
+        ),
+      },
     ],
     [],
   );
@@ -123,6 +134,12 @@ export default function SalesOrderStatusPage() {
           onDownload={download}
         />
         <ErrorBanner message={error} onClose={() => setError("")} />
+        {notice && (
+          <div className="no-print flex items-start justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40 p-3 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+            <span>{notice}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setNotice("")}>×</button>
+          </div>
+        )}
 
         {!data ? (
           <Loading />
@@ -179,6 +196,13 @@ export default function SalesOrderStatusPage() {
           </>
         )}
       </div>
+      {editRow && (
+        <PriceEditDialog
+          row={editRow}
+          onClose={() => setEditRow(null)}
+          onSaved={async (msg) => { setEditRow(null); setNotice(msg); await load(); }}
+        />
+      )}
     </AppShell>
   );
 }
