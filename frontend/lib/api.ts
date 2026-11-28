@@ -2717,8 +2717,19 @@ export type PriceTarget =
   | { type: "SCHEDULE"; id: string }
   | { type: "ORDER"; order_id: string };     // an order with no PO line or schedule: its PO line gets recorded
 
+export interface OarQty { count: number; qty: number; value: number }
+/** Pending pieces split by whether an OAR has been generated for them. */
+export interface OarSplit {
+  done: OarQty;                                   // accepted orders (OARs) still to dispatch
+  not_done: OarQty;                               // no OAR yet: PO lines not covered by an OAR + schedules with no OAR/PO
+  not_done_split?: { PO_LINE: OarQty; SCHEDULE: OarQty };
+}
+
 export interface SalesStatusItem {
   source: "OAR" | "PO_LINE" | "SCHEDULE";
+  total_qty?: number;                             // PO line / schedule quantity
+  oar_done_qty?: number;                          // pieces of it already in OARs
+  oar_status?: string;                            // "Done" | "Partly (x of y pcs)" | "Not done"
   price_target?: PriceTarget | null;
   ref: string;
   customer: string;
@@ -2735,7 +2746,8 @@ export interface SalesOrderStatus {
   as_of: string;
   buckets: SalesStatusBucket[];
   total: { count: number; value: number; qty: number };
-  by_source: Record<"OAR" | "PO_LINE" | "SCHEDULE", { count: number; value: number }>;
+  by_source: Record<"OAR" | "PO_LINE" | "SCHEDULE", { count: number; value: number; qty?: number }>;
+  oar: OarSplit;
   top_customers: { customer: string; count: number; value: number }[];
   overdue: { count: number; value: number };
   no_price_count: number;
@@ -2802,6 +2814,8 @@ export async function downloadSalesOrderStatusExcel(sources?: string[]): Promise
 // Customer schedule status dashboard (Sales and Admin only)
 export interface ScheduleStatusItem {
   price_target?: PriceTarget | null;
+  oar_qty: number;                                // scheduled pieces already in OARs
+  not_oar_qty: number;                            // scheduled pieces with no OAR yet
   schedule: string;
   customer: string;
   customer_ref: string;
@@ -2820,6 +2834,7 @@ export interface ScheduleStatus {
   total: { count: number; value: number; qty: number };
   overdue: { count: number; value: number };
   awaiting_po: { count: number; value: number };
+  oar: { done: OarQty; not_done: OarQty };
   status_split: { status: string; label: string; count: number; value: number }[];
   top_customers: { customer: string; count: number; value: number }[];
   no_price_count: number;

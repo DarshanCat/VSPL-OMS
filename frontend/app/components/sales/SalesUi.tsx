@@ -67,6 +67,7 @@ export function ReportHeader(props: {
   asOf?: string;
   backHref: string;
   backLabel: string;
+  hideBack?: boolean;             // when the page already shows a back link (the tabbed PO Master dashboard)
   loading: boolean;
   downloading: boolean;
   canDownload: boolean;
@@ -76,9 +77,11 @@ export function ReportHeader(props: {
   const btn = "inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60";
   return (
     <div className="space-y-3">
-      <Link href={props.backHref} className="no-print inline-flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
-        <ArrowLeft className="h-3.5 w-3.5" /> {props.backLabel}
-      </Link>
+      {!props.hideBack && (
+        <Link href={props.backHref} className="no-print inline-flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+          <ArrowLeft className="h-3.5 w-3.5" /> {props.backLabel}
+        </Link>
+      )}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <span className="rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">{props.eyebrow}</span>

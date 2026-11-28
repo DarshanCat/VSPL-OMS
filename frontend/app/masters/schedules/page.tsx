@@ -369,10 +369,10 @@ export default function ScheduleMasterPage() {
               {reportsOpen && (
                 <div className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1 shadow-lg">
                   <Link
-                    href="/masters/schedules/status"
+                    href="/masters/pos/order-status?tab=schedules"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    Customer Schedule Status Dashboard
+                    PO Master Dashboard (schedules)
                   </Link>
                 </div>
               )}

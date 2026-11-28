@@ -632,7 +632,7 @@ export default function POMasterPage() {
                     href="/masters/pos/order-status"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    Sales Order Status Dashboard
+                    PO Master Dashboard (orders &amp; schedules)
                   </Link>
                 </div>
               )}

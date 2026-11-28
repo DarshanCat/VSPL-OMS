@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.dispatch import Dispatch
@@ -113,6 +114,7 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
             "po": o.customer_po, "part": o.part.part_number if o.part else "", "pending_qty": pending,
             "unit_price": price, "value": round(pending * price, 2) if price else 0.0, "has_price": bool(price),
             "date": o.delivery_date or o.commitment_date,
+            "total_qty": o.po_qty or 0, "oar_done_qty": o.po_qty or 0,          # an accepted order is an OAR that is done
             "price_target": _price_target(line, schedules.get(str(o.schedule_id)) if o.schedule_id else None, o),
         })
 
@@ -128,6 +130,7 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
                 "po": p.po_number, "part": l.part.part_number if l.part else "", "pending_qty": remaining,
                 "unit_price": price, "value": round(remaining * price, 2) if price else 0.0, "has_price": bool(price),
                 "date": l.required_date,
+                "total_qty": l.po_qty or 0, "oar_done_qty": covered.get(str(l.id), 0),   # pieces of the line already in OARs
                 "price_target": _price_target(l, None),
             })
 
@@ -142,9 +145,21 @@ def collect_items(db: Session, include: Optional[List[str]] = None) -> List[Dict
                 "po": s.customer_schedule_ref or "", "part": s.part.part_number if s.part else "",
                 "pending_qty": s.scheduled_qty or 0, "unit_price": price, "value": float(value or 0),
                 "has_price": bool(value), "date": s.required_date,
+                "total_qty": s.scheduled_qty or 0, "oar_done_qty": 0,
                 "price_target": _price_target(None, s),
             })
     return items
+
+
+def _oar_summary(by_source: Dict) -> Dict:
+    """Pending pieces split by whether an OAR has been generated for them.
+    done      accepted orders (OARs) still to dispatch
+    not_done  pieces with no OAR yet: PO lines not covered by an OAR, plus schedules with no OAR and no PO"""
+    def pack(*srcs):
+        return {"count": sum(by_source[x]["count"] for x in srcs), "qty": sum(by_source[x]["qty"] for x in srcs),
+                "value": round(sum(by_source[x]["value"] for x in srcs), 2)}
+    return {"done": pack("OAR"), "not_done": pack("PO_LINE", "SCHEDULE"),
+            "not_done_split": {"PO_LINE": pack("PO_LINE"), "SCHEDULE": pack("SCHEDULE")}}
 
 
 def build_report(db: Session, include: Optional[List[str]] = None, today: Optional[date] = None) -> Dict:
@@ -170,11 +185,12 @@ def build_report(db: Session, include: Optional[List[str]] = None, today: Option
         r["value"] = round(r["value"], 2)
         for v in r["by_source"].values():
             v["value"] = round(v["value"], 2)
-    by_source = {s: {"count": 0, "value": 0.0} for s in SOURCES}
+    by_source = {s: {"count": 0, "value": 0.0, "qty": 0} for s in SOURCES}
     by_customer: Dict[str, Dict] = {}
     for it in items:
         by_source[it["source"]]["count"] += 1
         by_source[it["source"]]["value"] += it["value"]
+        by_source[it["source"]]["qty"] += it["pending_qty"]
         c = by_customer.setdefault(it["customer"], {"customer": it["customer"], "count": 0, "value": 0.0})
         c["count"] += 1
         c["value"] += it["value"]
@@ -184,11 +200,13 @@ def build_report(db: Session, include: Optional[List[str]] = None, today: Option
         "as_of": today.isoformat(),
         "buckets": rows,
         "total": {"count": len(items), "value": round(sum(r["value"] for r in rows), 2), "qty": sum(r["qty"] for r in rows)},
-        "by_source": {k: {"count": v["count"], "value": round(v["value"], 2)} for k, v in by_source.items()},
+        "by_source": {k: {"count": v["count"], "value": round(v["value"], 2), "qty": v["qty"]} for k, v in by_source.items()},
+        "oar": _oar_summary(by_source),
         "top_customers": [{**c, "value": round(c["value"], 2)} for c in top],
         "overdue": {"count": len(overdue), "value": round(sum(i["value"] for i in overdue), 2)},
         "no_price_count": sum(1 for i in items if not i["has_price"]),
-        "items": [{**i, "date": i["date"].isoformat() if i["date"] else None} for i in sorted(items, key=lambda x: (x["date"] or date.max, x["ref"]))],
+        "items": [{**i, "date": i["date"].isoformat() if i["date"] else None, "oar_status": _oar_label(i)}
+                  for i in sorted(items, key=lambda x: (x["date"] or date.max, x["ref"]))],
     }
 
 
@@ -310,6 +328,14 @@ def _build_workbook(title: str, subtitle: str, kpis: List[tuple], period_rows: L
     return buf.getvalue()
 
 
+def _oar_label(it: Dict) -> str:
+    """Whether an OAR has been generated for a pending row: Done / Not done / Partly (x of y pcs)."""
+    if it["source"] == "OAR":
+        return "Done"
+    done, total = it.get("oar_done_qty") or 0, it.get("total_qty") or 0
+    return f"Partly ({done:,} of {total:,} pcs)" if done > 0 else "Not done"
+
+
 def export_report(db: Session, include: Optional[List[str]] = None, today: Optional[date] = None) -> bytes:
     rep = build_report(db, include, today)
     d = date.fromisoformat(rep["as_of"])
@@ -319,12 +345,12 @@ def export_report(db: Session, include: Optional[List[str]] = None, today: Optio
     kpis = [("OPEN ORDERS", rep["total"]["count"], None), ("PENDING VALUE", rep["total"]["value"], INR_FORMAT),
             ("OVERDUE ORDERS", rep["overdue"]["count"], None), ("OVERDUE VALUE", rep["overdue"]["value"], INR_FORMAT)]
     periods = [{"cells": [b["label"], b["count"], b["value"], b["qty"]], "money": (3,)} for b in rep["buckets"]]
-    heads = ["Period", "Source", "Reference", "Customer", "PO / Schedule ref", "Part", "Pending Qty", "Unit Price", "Pending Value", "Delivery Date"]
+    heads = ["Period", "Source", "Reference", "Customer", "PO / Schedule ref", "Part", "Pending Qty", "Unit Price", "Pending Value", "Delivery Date", "OAR"]
     rows = [[label.get(it["bucket"], ""), src_name[it["source"]], it["ref"], it["customer"], it["po"], it["part"], it["pending_qty"],
-             it["unit_price"], it["value"], date.fromisoformat(it["date"]) if it["date"] else None] for it in rep["items"]]
+             it["unit_price"], it["value"], date.fromisoformat(it["date"]) if it["date"] else None, _oar_label(it)] for it in rep["items"]]
     return _build_workbook("Sales Order Status", f"As of {d.strftime('%d %b %Y')}  |  open pending orders by delivery month",
                            kpis, periods, ["Period", "Open Orders", "Pending Value", "Pending Qty"], heads, rows,
-                           [22, 20, 16, 30, 20, 18, 12, 14, 16, 14], {8: INR_FORMAT, 9: INR_FORMAT, 10: "DD-MMM-YYYY"},
+                           [22, 20, 16, 30, 20, 18, 12, 14, 16, 14, 22], {8: INR_FORMAT, 9: INR_FORMAT, 10: "DD-MMM-YYYY"},
                            "Pending value by delivery month")
 
 
@@ -339,6 +365,8 @@ def build_schedule_report(db: Session, today: Optional[date] = None) -> Dict:
     today = today or date.today()
     bks = buckets_for(today)
     all_s = db.query(ScheduleMaster).all()
+    oar_by = {str(r[0]): int(r[1] or 0) for r in db.query(Order.schedule_id, func.sum(Order.po_qty)).filter(
+        Order.schedule_id.isnot(None), Order.status != OrderStatus.REJECT).group_by(Order.schedule_id).all()}
     status_split = {k: {"label": v, "count": 0, "value": 0.0} for k, v in SCHEDULE_NAMES.items()}
     items = []
     for s in all_s:
@@ -348,9 +376,12 @@ def build_schedule_report(db: Session, today: Optional[date] = None) -> Dict:
         st["value"] += value
         if s.po_status not in SCHEDULE_OPEN:
             continue
+        qty = s.scheduled_qty or 0
+        oar_qty = min(oar_by.get(str(s.id), 0), qty)
         items.append({"schedule": s.schedule_number, "customer": s.customer.name if s.customer else "",
                       "customer_ref": s.customer_schedule_ref or "", "part": s.part.part_number if s.part else "",
-                      "qty": s.scheduled_qty or 0, "unit_price": s.unit_price or None, "value": round(value, 2),
+                      "qty": qty, "oar_qty": oar_qty, "not_oar_qty": qty - oar_qty,
+                      "unit_price": s.unit_price or None, "value": round(value, 2),
                       "has_price": bool(value), "status": s.po_status.value, "date": s.required_date,
                       "bucket": _bucket_key(s.required_date, bks), "price_target": _price_target(None, s)})
     def _new(key, label):
@@ -375,6 +406,12 @@ def build_schedule_report(db: Session, today: Optional[date] = None) -> Dict:
         "as_of": today.isoformat(),
         "buckets": rows,
         "total": {"count": len(items), "value": round(sum(i["value"] for i in items), 2), "qty": sum(i["qty"] for i in items)},
+        "oar": {
+            "done": {"count": sum(1 for i in items if i["oar_qty"] > 0), "qty": sum(i["oar_qty"] for i in items),
+                     "value": round(sum(i["oar_qty"] * (i["unit_price"] or 0) for i in items), 2)},
+            "not_done": {"count": sum(1 for i in items if i["not_oar_qty"] > 0), "qty": sum(i["not_oar_qty"] for i in items),
+                         "value": round(sum(i["not_oar_qty"] * (i["unit_price"] or 0) for i in items), 2)},
+        },
         "overdue": {"count": len(overdue), "value": round(sum(i["value"] for i in overdue), 2)},
         "awaiting_po": {"count": len(awaiting), "value": round(sum(i["value"] for i in awaiting), 2)},
         "status_split": [{"status": k, **{**v, "value": round(v["value"], 2)}} for k, v in status_split.items()],
@@ -391,11 +428,11 @@ def export_schedule_report(db: Session, today: Optional[date] = None) -> bytes:
     kpis = [("OPEN SCHEDULES", rep["total"]["count"], None), ("SCHEDULE VALUE", rep["total"]["value"], INR_FORMAT),
             ("AWAITING PO", rep["awaiting_po"]["count"], None), ("OVERDUE SCHEDULES", rep["overdue"]["count"], None)]
     periods = [{"cells": [b["label"], b["count"], b["value"], b["qty"]], "money": (3,)} for b in rep["buckets"]]
-    heads = ["Period", "Schedule", "Customer", "Customer Ref", "Part", "Qty", "Unit Price", "Value", "Status", "Required Date"]
+    heads = ["Period", "Schedule", "Customer", "Customer Ref", "Part", "Qty", "Unit Price", "Value", "Status", "Required Date", "OAR Done Qty", "Not OAR'd Qty"]
     rows = [[label.get(it["bucket"], "No required date"), it["schedule"], it["customer"], it["customer_ref"], it["part"], it["qty"],
              it["unit_price"], it["value"], SCHEDULE_NAMES.get(it["status"], it["status"]),
-             date.fromisoformat(it["date"]) if it["date"] else None] for it in rep["items"]]
+             date.fromisoformat(it["date"]) if it["date"] else None, it["oar_qty"], it["not_oar_qty"]] for it in rep["items"]]
     return _build_workbook("Customer Schedule Status", f"As of {d.strftime('%d %b %Y')}  |  schedules not yet converted to an order",
                            kpis, periods, ["Period", "Open Schedules", "Schedule Value", "Qty"], heads, rows,
-                           [22, 18, 30, 18, 18, 10, 14, 16, 18, 14], {7: INR_FORMAT, 8: INR_FORMAT, 10: "DD-MMM-YYYY"},
+                           [22, 18, 30, 18, 18, 10, 14, 16, 18, 14, 14, 14], {7: INR_FORMAT, 8: INR_FORMAT, 10: "DD-MMM-YYYY"},
                            "Schedule value by required month")
